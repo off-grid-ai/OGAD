@@ -1,25 +1,33 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({
-  appendComputerUseStepDetail: vi.fn(),
-  getTaskExecutionDevice: vi.fn(() => ({ id: 'mac-1', name: 'My Mac' })),
-  recordTaskRun: vi.fn()
-}))
-
-vi.mock('../../tasks/task-history', () => ({
-  appendComputerUseStepDetail: mocks.appendComputerUseStepDetail,
-  getTaskExecutionDevice: mocks.getTaskExecutionDevice,
-  recordTaskRun: mocks.recordTaskRun
+// Electron is the boundary: a temp profile, and no OS keychain, so the database opens unencrypted.
+const electronProfile = vi.hoisted(() => ({ dir: '' }))
+vi.mock('electron', () => ({
+  app: { getPath: () => electronProfile.dir, isPackaged: false, getAppPath: () => process.cwd() },
+  safeStorage: { isEncryptionAvailable: () => false },
+  BrowserWindow: { getAllWindows: () => [] }
 }))
 
 import { persistAxFrame, persistAxObservation } from '../ax-observation'
+import { configureTaskExecutionDevice, getTaskRun } from '../../tasks/task-history'
+import { configureRuntime } from '../../runtime-env'
+import { getDB } from '../../database'
+
+// The real task history, in a temp profile, on this device.
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-ax-observation-'))
+electronProfile.dir = profile
+configureRuntime({ dataDir: profile })
+configureTaskExecutionDevice({ id: 'mac-1', name: 'My Mac' })
+afterAll(() => {
+  getDB().close()
+  configureRuntime({ dataDir: undefined })
+  fs.rmSync(profile, { recursive: true, force: true })
+})
 
 describe('persistAxObservation', () => {
-  beforeEach(() => {
-    mocks.appendComputerUseStepDetail.mockReset()
-    mocks.recordTaskRun.mockReset()
-  })
-
   it('makes a captured frame durable before later task progress can prune it', () => {
     persistAxFrame({
       taskId: 'task-6',
@@ -36,7 +44,7 @@ describe('persistAxObservation', () => {
       }
     })
 
-    expect(mocks.recordTaskRun).toHaveBeenCalledWith({
+    expect(getTaskRun('task-6')).toMatchObject({
       taskId: 'task-6',
       journeyId: 'chat-6',
       kind: 'computer_use',
@@ -59,24 +67,24 @@ describe('persistAxObservation', () => {
       result: 'actuated'
     })
 
-    expect(mocks.appendComputerUseStepDetail).toHaveBeenCalledOnce()
-    expect(mocks.appendComputerUseStepDetail).toHaveBeenCalledWith(
-      'task-7',
-      'Send the message',
+    const task = getTaskRun('task-7')
+    expect(task).toMatchObject({ kind: 'computer_use', title: 'Send the message' })
+    expect(task?.stepDetails).toHaveLength(1)
+    expect(task?.stepDetails?.[0]).toEqual(
       expect.objectContaining({
         stepId: '2',
         retrievedFacts: ['Earlier task opened Slack'],
-        rawResponse: '{"action":"press","index":4}',
+        // Stored as the model's output, the same text the model returned.
+        modelOutput: '{"action":"press","index":4}',
         mappedAction: '{"action":"press","index":4}',
         execution: {
           status: 'complete',
           durationMs: 31,
-          result: 'actuated',
-          error: undefined
+          result: 'actuated'
         }
       })
     )
-    expect(mocks.appendComputerUseStepDetail.mock.calls[0]?.[2]).not.toHaveProperty('screenshot')
+    expect(task?.stepDetails?.[0]).not.toHaveProperty('screenshot')
   })
 
   it('marks execution errors as failed', () => {
@@ -91,7 +99,7 @@ describe('persistAxObservation', () => {
       error: 'input driver stopped'
     })
 
-    expect(mocks.appendComputerUseStepDetail.mock.calls[0]?.[2].execution).toEqual({
+    expect(getTaskRun('task-8')?.stepDetails?.[0]?.execution).toEqual({
       status: 'failed',
       durationMs: 12,
       result: 'error',
