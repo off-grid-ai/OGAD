@@ -2,7 +2,33 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import {
+  installFakeLlamaEngine,
+  processAlive,
+  unusedPort,
+  useModelBrain,
+  writeGguf,
+  type FakeLlamaEngine,
+  type ModelBrain
+} from '../../__tests__/harness/fake-llama-engine'
+
+// The grounding specialist runs on the shared chat engine: a llama-server executable whose
+// replies come from this test. The engine owner and the strategy are real.
+const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-hybrid-vision-'))
+const previous = { data: process.env.OFFGRID_DATA_DIR, bin: process.env.OFFGRID_BIN_DIR }
+process.env.OFFGRID_DATA_DIR = PROFILE
+process.env.OFFGRID_BIN_DIR = path.join(PROFILE, 'bin')
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => process.env.OFFGRID_DATA_DIR,
+    isPackaged: false,
+    getAppPath: () => process.cwd()
+  },
+  safeStorage: { isEncryptionAvailable: () => false },
+  BrowserWindow: { getAllWindows: () => [] }
+}))
+
 import { llm } from '../../llm'
 import type { TaskExecutionPlan } from '../../../shared/task-execution-plan'
 import type { VisionPolicyRequest, VisionPolicyResponse } from '../model-adapters/types'
@@ -29,8 +55,49 @@ const modelLifecycleDependencies = {
   })
 }
 
+/** What the specialist answers, and every screen it was shown. */
+let specialistReply = ''
+let engine: FakeLlamaEngine
+let brain: ModelBrain
+const specialistImages = (): string[] =>
+  brain.requests.flatMap((request) => {
+    const messages = (request.body.messages ?? []) as Array<{ role: string; content: unknown }>
+    const parts = messages.find((message) => message.role === 'user')?.content
+    const image = Array.isArray(parts)
+      ? (parts as Array<{ type: string; image_url?: { url: string } }>).find(
+          (part) => part.type === 'image_url'
+        )
+      : undefined
+    return image?.image_url ? [image.image_url.url] : []
+  })
+
+beforeAll(async () => {
+  engine = installFakeLlamaEngine(path.join(PROFILE, 'bin'))
+  brain = await useModelBrain(engine, () => specialistReply)
+  // A vision specialist, loaded the way Computer Use loads one.
+  for (const file of ['specialist.gguf', 'specialist-mmproj.gguf'])
+    writeGguf(llm.getModelsDir(), file)
+  llm.useRuntimeModel({
+    id: 'specialist/ui-tars',
+    primary: 'specialist.gguf',
+    mmproj: 'specialist-mmproj.gguf'
+  })
+  ;(llm as unknown as { port: number }).port = await unusedPort()
+  await llm.init()
+})
+
+afterAll(async () => {
+  llm.stop()
+  await brain.close()
+  for (const { pid } of engine.launches()) if (processAlive(pid)) process.kill(pid, 'SIGKILL')
+  fs.rmSync(PROFILE, { recursive: true, force: true })
+  if (previous.data === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previous.data
+  if (previous.bin === undefined) delete process.env.OFFGRID_BIN_DIR
+  else process.env.OFFGRID_BIN_DIR = previous.bin
+})
+
 afterEach(() => {
-  vi.restoreAllMocks()
   for (const directory of tempDirs.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true })
   }
@@ -475,7 +542,7 @@ describe('Text + Specialist visual task journey', () => {
     })
       .png()
       .toFile(framePath)
-    vi.spyOn(llm, 'chatMessages').mockResolvedValue("click(point='<point>160 100</point>')")
+    specialistReply = "click(point='<point>160 100</point>')"
     let reasoningRecoveries = 0
     let specialistCalls = 0
     const ground = createHybridVisionGrounder('desktop', {
@@ -582,7 +649,6 @@ describe('Text + Specialist visual task journey', () => {
       }
       let activeModel = chatModel
       const reasonerScreens: string[] = []
-      const specialistScreens: string[] = []
       const swapEvents: string[] = []
       const reasonerResponses = [
         toolResponse('ground_pointer_target', {
@@ -597,13 +663,8 @@ describe('Text + Specialist visual task journey', () => {
           visible_evidence: 'The requested destination is visible.'
         })
       ]
-      vi.spyOn(llm, 'chatMessages').mockImplementation(async (messages) => {
-        const user = messages.find((message) => message.role === 'user')
-        const parts = Array.isArray(user?.content) ? user.content : []
-        const image = parts.find((part) => part.type === 'image_url')
-        if (image?.type === 'image_url') specialistScreens.push(image.image_url.url)
-        return "click(point='<point>160 100</point>')"
-      })
+      specialistReply = "click(point='<point>160 100</point>')"
+      const shownBefore = specialistImages().length
 
       const plan: TaskExecutionPlan = {
         version: 1,
@@ -664,6 +725,7 @@ describe('Text + Specialist visual task journey', () => {
       expect(result).toMatchObject({ ok: true, summary: 'The next screen is open.' })
       expect(actions).toEqual([{ type: 'click', point: { x: 160, y: 100 } }])
       expect(swapEvents).toEqual(['load-specialist', 'restore-chat'])
+      const specialistScreens = specialistImages().slice(shownBefore)
       expect(reasonerScreens[0]).toBe(specialistScreens[0])
       expect(reasonerScreens).toHaveLength(2)
       expect(specialistScreens).toHaveLength(1)
