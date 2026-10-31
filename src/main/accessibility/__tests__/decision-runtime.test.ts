@@ -16,6 +16,12 @@ import {
   writeGguf,
   type FakeLlamaEngine
 } from '../../__tests__/harness/fake-llama-engine'
+import {
+  installFakeKevRuntime,
+  installKevModel,
+  type FakeKevRuntime,
+  type KevStart
+} from '../../__tests__/harness/fake-kev-runtime'
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-decision-runtime-'))
 const previous = { data: process.env.OFFGRID_DATA_DIR, bin: process.env.OFFGRID_BIN_DIR }
@@ -27,30 +33,12 @@ vi.mock('electron', () => ({
 }))
 
 import { DecisionRuntime, DecisionRuntimeError } from '../decision-runtime'
-import { DECIDER_2B, KEV_4B_ID, KEV_9B_ID, KEV_MODELS } from '../../models-manager'
+import { DECIDER_2B, KEV_4B_ID, KEV_9B_ID } from '../../models-manager'
 import { llm } from '../../llm'
-
-// Kev's server: answers /v1/models once loaded and /v1/systemone with kev-reply.json, and logs
-// how it was started so a test can see which checkpoint and base it was given.
-const KEV_SERVER = `#!/usr/bin/env node
-const fs = require('node:fs')
-const http = require('node:http')
-const path = require('node:path')
-const root = path.resolve(__dirname, '../../..')
-const args = process.argv.slice(2)
-fs.appendFileSync(path.join(root, 'kev.log'), JSON.stringify({ pid: process.pid, args, cwd: process.cwd(), base: process.env.KEV_LOCAL_BASE }) + '\\n')
-process.stderr.write('[Kev] loaded: device=cpu\\n')
-http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'application/json' })
-  if (req.url === '/v1/models') return res.end('{"data":[{"id":"kev-latest"}]}')
-  req.resume()
-  req.on('end', () => res.end(fs.readFileSync(path.join(root, 'kev-reply.json'))))
-}).listen(Number(args[args.indexOf('--port') + 1]), '127.0.0.1')
-process.on('SIGTERM', () => process.exit(0))
-`
 
 let bin: string
 let engine: FakeLlamaEngine
+let kev: FakeKevRuntime
 const runtimes: DecisionRuntime[] = []
 
 function runtime(): DecisionRuntime {
@@ -68,42 +56,10 @@ function installDecider(): void {
   writeGguf(modelsDir(), DECIDER_2B.files[0]!.name)
 }
 
-/** A Kev model's checkpoint and base files, where its download puts them. */
-function installKev(modelId: string): { checkpoint: string; base: string } {
-  const folder = KEV_MODELS.find((model) => model.id === modelId)!.files[0]!.name.split('/')[0]!
-  const checkpoint = path.join(modelsDir(), folder, 'checkpoint-v1.0')
-  const base = path.join(modelsDir(), folder, 'base')
-  const write = (file: string, body = 'weights'): void => {
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, body)
-  }
-  write(path.join(checkpoint, 'head.pt'))
-  write(path.join(checkpoint, 'adapter_model.safetensors'))
-  write(path.join(base, 'config.json'), '{}')
-  write(
-    path.join(base, 'model.safetensors.index.json'),
-    JSON.stringify({ weight_map: { a: 'model-1.safetensors' } })
-  )
-  write(path.join(base, 'model-1.safetensors'))
-  write(path.join(base, 'tokenizer.json'), '{}')
-  write(path.join(base, 'tokenizer_config.json'), '{}')
-  return { checkpoint: checkpoint + path.sep, base }
-}
-
-function kevStarts(): { pid: number; args: string[]; cwd: string; base: string }[] {
-  try {
-    return fs
-      .readFileSync(path.join(bin, 'kev.log'), 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line))
-  } catch {
-    return []
-  }
-}
-
-const kevReply = (body: unknown): void =>
-  fs.writeFileSync(path.join(bin, 'kev-reply.json'), JSON.stringify(body))
+const installKev = (modelId: string): { checkpoint: string; base: string } =>
+  installKevModel(modelsDir(), modelId)
+const kevStarts = (): KevStart[] => kev.starts()
+const kevReply = (body: unknown): void => kev.reply(body)
 
 /** llama-server's /completion body for one forced token with these option probabilities. */
 const tokenProbabilities = (probs: Record<string, number>): Record<string, unknown> => ({
@@ -118,10 +74,7 @@ beforeEach(() => {
   bin = fs.mkdtempSync(path.join(ROOT, 'bin-'))
   process.env.OFFGRID_BIN_DIR = bin
   engine = installFakeLlamaEngine(bin, ['llama'])
-  const python = path.join(bin, 'kev-runtime', 'python', 'bin', 'python3')
-  fs.mkdirSync(path.dirname(python), { recursive: true })
-  fs.writeFileSync(python, KEV_SERVER, { mode: 0o755 })
-  fs.writeFileSync(path.join(bin, 'kev-local-server.py'), '# Kev server\n')
+  kev = installFakeKevRuntime(bin)
 })
 
 afterEach(async () => {
