@@ -19,7 +19,8 @@ import {
 } from '@offgrid/operator-ui/operator/coss/progress'
 import { AnimatedNumber } from '@offgrid/operator-ui/operator/motion/animated-number'
 import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
-import { PageHeader, Section } from '@offgrid/operator-ui/operator/experience'
+import { Section } from '@offgrid/operator-ui/operator/experience'
+import { PageShell } from './PageShell'
 import { Badge } from '@offgrid/operator-ui/operator/coss/badge'
 import {
   Empty,
@@ -1702,7 +1703,7 @@ export function ModelsScreen({
     )
   }
 
-  const GRID = 'grid grid-cols-2 gap-2 px-6 py-3 lg:grid-cols-3 2xl:grid-cols-4'
+  const GRID = 'grid grid-cols-2 gap-2 py-3 lg:grid-cols-3 2xl:grid-cols-4'
   // Inside a Section the section carries the side padding.
   const SECTION_GRID = 'grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-4'
 
@@ -1749,52 +1750,48 @@ export function ModelsScreen({
   }
 
   return (
-    <div className="flex h-full flex-col font-mono">
-      {/* Header */}
-      <PageHeader
-        className="shrink-0 px-6 pb-4 pt-5"
-        title="Models"
-        description={`Download, switch, and manage the models that run on this ${deviceNoun()}.`}
-        actions={
-          <>
-            <IconTip label={checkingCatalog ? 'Checking…' : 'Check for new models'}>
-              <Button
-                size="icon-sm"
-                variant="outline"
-                aria-label={checkingCatalog ? 'Checking…' : 'Check for new models'}
-                aria-busy={checkingCatalog || undefined}
-                onClick={() => void checkForNewModels()}
-                disabled={checkingCatalog}
-                className="text-neutral-400 hover:border-green-500/60 hover:text-emerald-500 disabled:opacity-50"
-              >
-                <IconRefresh className={`h-3.5 w-3.5${checkingCatalog ? ' animate-spin' : ''}`} />
-              </Button>
-            </IconTip>
-            <IconTip label={importing ? 'Importing…' : 'Import .gguf'}>
-              <Button
-                size="icon-sm"
-                variant="outline"
-                aria-label={importing ? 'Importing…' : 'Import .gguf'}
-                aria-busy={importing || undefined}
-                onClick={importModel}
-                disabled={importing}
-                className="text-neutral-400 hover:border-green-500/60 hover:text-emerald-500 disabled:opacity-50"
-              >
-                <GlyphSwap glyphKey={importing ? 'busy' : 'idle'}>
-                  {importing ? (
-                    <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <IconUpload className="h-3.5 w-3.5" />
-                  )}
-                </GlyphSwap>
-              </Button>
-            </IconTip>
-          </>
-        }
-      />
-
-      {/* Tabs */}
-      <div className="flex shrink-0 items-center gap-3 border-b border-neutral-800 px-6 py-2">
+    <PageShell
+      fill
+      className="font-mono"
+      title="Models"
+      description={`Download, switch, and manage the models that run on this ${deviceNoun()}.`}
+      actions={
+        <>
+          <IconTip label={checkingCatalog ? 'Checking…' : 'Check for new models'}>
+            <Button
+              size="icon-sm"
+              variant="outline"
+              aria-label={checkingCatalog ? 'Checking…' : 'Check for new models'}
+              aria-busy={checkingCatalog || undefined}
+              onClick={() => void checkForNewModels()}
+              disabled={checkingCatalog}
+              className="text-neutral-400 hover:border-green-500/60 hover:text-emerald-500 disabled:opacity-50"
+            >
+              <IconRefresh className={`h-3.5 w-3.5${checkingCatalog ? ' animate-spin' : ''}`} />
+            </Button>
+          </IconTip>
+          <IconTip label={importing ? 'Importing…' : 'Import .gguf'}>
+            <Button
+              size="icon-sm"
+              variant="outline"
+              aria-label={importing ? 'Importing…' : 'Import .gguf'}
+              aria-busy={importing || undefined}
+              onClick={importModel}
+              disabled={importing}
+              className="text-neutral-400 hover:border-green-500/60 hover:text-emerald-500 disabled:opacity-50"
+            >
+              <GlyphSwap glyphKey={importing ? 'busy' : 'idle'}>
+                {importing ? (
+                  <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <IconUpload className="h-3.5 w-3.5" />
+                )}
+              </GlyphSwap>
+            </Button>
+          </IconTip>
+        </>
+      }
+      toolbar={
         <Segmented
           label="Model types"
           size="sm"
@@ -1832,17 +1829,17 @@ export function ModelsScreen({
               )
           }))}
         />
-      </div>
-
+      }
+    >
       {/* Storage tab */}
       {activeKind === 'storage' && (
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="flex-1 overflow-y-auto py-4">
           <StoragePanel />
         </div>
       )}
 
       {activeKind === 'embedding' && (
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="flex-1 overflow-y-auto py-4">
           <p className="mb-4 text-xs text-neutral-500">
             The embedding model powers semantic search and project knowledge. Changing it rebuilds saved indexes now. This can take time.
           </p>
@@ -1934,7 +1931,7 @@ export function ModelsScreen({
       )}
 
       {activeKind === 'video' && !isPro && (
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="flex-1 overflow-y-auto py-4">
           <div className="max-w-xl rounded-md border border-neutral-800 bg-neutral-900/40 p-4">
             <VideoProUpsell />
           </div>
@@ -1945,7 +1942,7 @@ export function ModelsScreen({
       {activeKind !== 'storage' && activeKind !== 'embedding' && (activeKind !== 'video' || isPro) && (
         <div className="flex min-h-0 flex-1 flex-col">
           {/* Filter bar */}
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-neutral-800/60 px-6 py-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-neutral-800/60 py-2">
             {searchEnabled && (
               <InputGroup data-focus-surface="models-search" className="w-auto rounded">
                 <InputGroupAddon>
@@ -2024,7 +2021,7 @@ export function ModelsScreen({
 
           {/* Use-case chips (text only, browse mode) */}
           {activeKind === 'text' && !searchingMode && (
-            <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-neutral-800/40 px-6 py-1.5">
+            <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-neutral-800/40 py-1.5">
               <Segmented
                 label="Use case"
                 size="sm"
@@ -2052,7 +2049,7 @@ export function ModelsScreen({
           {/* Capability-tag chips (all tabs, browse mode) — Light / Photoreal / Fast /
               Anime … A chip narrows the list to models carrying every selected tag. */}
           {!searchingMode && availableTags.length > 0 && (
-            <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-neutral-800/40 px-6 py-1.5">
+            <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-neutral-800/40 py-1.5">
               {/* One hover light glides from chip to chip (the collections chapter's rows). */}
               <AnimatedBackground
                 enableHover={hoverMotion}
@@ -2097,7 +2094,7 @@ export function ModelsScreen({
                 key="ready"
                 {...RISE}
                 role="status"
-                className="flex shrink-0 items-center gap-2 border-b border-green-500/20 bg-green-500/10 px-6 py-1.5 text-[10px] text-green-300"
+                className="flex shrink-0 items-center gap-2 border-b border-green-500/20 bg-green-500/10 px-3 py-1.5 text-[10px] text-green-300"
               >
                 <IconCircleCheck className="h-3.5 w-3.5 shrink-0" />
                 <span className="min-w-0 flex-1 truncate">{ready.name} is ready.</span>
@@ -2121,7 +2118,7 @@ export function ModelsScreen({
             )}
           </AnimatePresence>
           {switchError && (
-            <div className="shrink-0 border-b border-red-500/20 bg-red-500/10 px-6 py-1.5 text-[10px] text-red-300">
+            <div className="shrink-0 border-b border-red-500/20 bg-red-500/10 px-3 py-1.5 text-[10px] text-red-300">
               {switchError}
             </div>
           )}
@@ -2133,7 +2130,7 @@ export function ModelsScreen({
                 <AnimatePresence initial={false}>
                   {displayed.length === 0 && !searching && (
                     <motion.div key="no-results" {...RISE}>
-                      <Empty className="px-6 py-10 md:py-10">
+                      <Empty className="py-10 md:py-10">
                         <EmptyHeader>
                           <EmptyMedia variant="icon">
                             <IconSearch />
@@ -2158,10 +2155,10 @@ export function ModelsScreen({
                     .filter((r) => list.some((model) => model.id === r.id))
                     .map((r) => renderCard(list.find((model) => model.id === r.id)!)),
                   GRID,
-                  'px-6 py-3'
+                  'py-3'
                 )}
                 {displayed.some((r) => !list.some((model) => model.id === r.id)) && (
-                  <Section label="More from Hugging Face" className="px-6 pt-4">
+                  <Section label="More from Hugging Face" className="pt-4">
                     {renderCollection(
                       'More from Hugging Face',
                       displayed
@@ -2197,7 +2194,7 @@ export function ModelsScreen({
                     <div
                       aria-busy="true"
                       aria-label="Loading models"
-                      className="grid grid-cols-2 gap-2 px-6 pt-6 lg:grid-cols-3 2xl:grid-cols-4"
+                      className="grid grid-cols-2 gap-2 pt-6 lg:grid-cols-3 2xl:grid-cols-4"
                     >
                       {[0, 1, 2, 3, 4, 5].map((card) => (
                         <div key={card} className="space-y-3 rounded-2xl p-3">
@@ -2215,7 +2212,7 @@ export function ModelsScreen({
                 if (displayedCatalog.length === 0) {
                   return (
                     <motion.div key="no-match" {...RISE}>
-                      <Empty className="px-6 py-10 md:py-10">
+                      <Empty className="py-10 md:py-10">
                         <EmptyHeader>
                           <EmptyMedia variant="icon">
                             <IconSearch />
@@ -2292,14 +2289,14 @@ export function ModelsScreen({
                     )
                     // A heading over a single model is noise; the list keeps its name for readers.
                     return list.length === 1 ? (
-                      <div key={label} className="px-6 pt-6 first:pt-4">
+                      <div key={label} className="pt-6 first:pt-4">
                         {collection}
                       </div>
                     ) : (
                       <Section
                         key={label}
                         label={group ? label : heading}
-                        className="px-6 pt-6 first:pt-4"
+                        className="pt-6 first:pt-4"
                       >
                         {collection}
                       </Section>
@@ -2309,7 +2306,7 @@ export function ModelsScreen({
                     <>
                       {sections}
                       {tooBig.length > 0 && (
-                        <div className="px-6 pt-4">
+                        <div className="pt-4">
                           <Button
                             size="xs"
                             variant="ghost"
@@ -2331,7 +2328,7 @@ export function ModelsScreen({
                       {showPicks && (
                         <Section
                           label={`For this ${deviceNoun()}`}
-                          className="px-6 pt-4"
+                          className="pt-4"
                         >
                           {renderCollection(
                             `Picks for this ${deviceNoun()}`,
@@ -2768,6 +2765,6 @@ export function ModelsScreen({
             )
           })()}
       </AnimatePresence>
-    </div>
+    </PageShell>
   )
 }

@@ -18,13 +18,12 @@ import {
 } from '@tabler/icons-react'
 import { Card } from '@offgrid/operator-ui/operator/coss/card'
 import { Segmented } from '@offgrid/operator-ui/operator/segmented'
-import { TextEffect } from '@offgrid/operator-ui/operator/text-effect'
 import {
   Progress,
   ProgressIndicator,
   ProgressTrack
 } from '@offgrid/operator-ui/operator/coss/progress'
-import { PageHeader } from '@offgrid/operator-ui/operator/experience'
+import { PageShell } from './PageShell'
 import {
   Empty,
   EmptyContent,
@@ -127,7 +126,7 @@ function ProjectArtifacts({ projectId }: { projectId: string }): React.ReactElem
     }
   }, [projectId])
   return (
-    <div className="w-full px-8 py-6">
+    <div className="w-full pb-6">
       <div className="mb-5 text-[11px] uppercase tracking-widest text-neutral-600">
         {items.length} {items.length === 1 ? 'artifact' : 'artifacts'}
       </div>
@@ -286,18 +285,50 @@ export function ProjectsScreen({
   }
 
   return (
-    <div className="flex h-full font-mono">
-      {/* Projects column */}
-      <div className="flex w-60 shrink-0 flex-col border-r border-neutral-900">
-        <div className="mb-2 flex items-center justify-between border-b border-neutral-900 px-4 py-4">
-          <TextEffect
-            as="h1"
-            preset="fade-in-blur"
-            per="char"
-            className="text-lg font-light tracking-tight text-white"
-          >
-            Projects
-          </TextEffect>
+    <PageShell
+      fill
+      className="font-mono"
+      eyebrow={active ? 'Project' : undefined}
+      title={active ? active.name : 'Projects'}
+      actions={
+        <>
+          {active ? (
+            <Segmented
+              label="Project view"
+              size="sm"
+              value={view}
+              onValueChange={setView}
+              options={[
+                {
+                  id: 'chat',
+                  label: 'Chats',
+                  icon: (
+                    <>
+                      <IconMessage className="h-3.5 w-3.5" /> Chats
+                    </>
+                  )
+                },
+                {
+                  id: 'artifacts',
+                  label: 'Artifacts',
+                  icon: (
+                    <>
+                      <IconLayoutGrid className="h-3.5 w-3.5" /> Artifacts
+                    </>
+                  )
+                },
+                {
+                  id: 'config',
+                  label: 'Knowledge & settings',
+                  icon: (
+                    <>
+                      <IconSettings className="h-3.5 w-3.5" /> Knowledge & settings
+                    </>
+                  )
+                }
+              ]}
+            />
+          ) : null}
           <button
             onClick={() => setCreating(true)}
             title="New project"
@@ -305,149 +336,110 @@ export function ProjectsScreen({
           >
             <IconPlus className="h-4 w-4" />
           </button>
-        </div>
-        {deleteFailure ? (
-          <p role="alert" className="mx-4 mb-2 text-[11px] text-red-400">
-            {deleteFailure}
-          </p>
-        ) : null}
-        {/* Outside the scrolling list, so finding a project never means scrolling back up. */}
-        <div className="px-3 pb-2">
-          <input
-            value={projectQuery}
-            onChange={(e) => setProjectQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setProjectQuery('')
-            }}
-            aria-label="Find a project"
-            placeholder="Find a project"
-            className="w-full rounded-md border border-neutral-800 bg-neutral-900/60 px-2.5 py-1.5 text-xs text-white placeholder-neutral-600 outline-none transition-colors focus:border-green-500"
-          />
-        </div>
-        <div className="flex-1 overflow-y-auto px-2">
-          {creating && (
-            <input
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submitNewProject()
-                if (e.key === 'Escape') {
-                  setCreating(false)
-                  setNewName('')
-                }
-              }}
-              onBlur={submitNewProject}
-              placeholder="Project name…"
-              className="mb-2 w-full rounded-md border border-green-500 bg-neutral-900 px-2 py-1.5 text-sm text-white placeholder-neutral-600 outline-none"
-            />
-          )}
-          {projects.length === 0 && !creating && (
-            <p className="px-2 py-4 text-xs text-neutral-600">
-              No projects yet. Create one to configure a knowledge base.
+        </>
+      }
+    >
+      <div className="flex min-h-0 flex-1">
+        {/* Projects column */}
+        <div className="flex w-60 shrink-0 flex-col border-r border-neutral-900 pr-3">
+          {deleteFailure ? (
+            <p role="alert" className="mb-2 text-[11px] text-red-400">
+              {deleteFailure}
             </p>
-          )}
-          <AnimatePresence initial={false}>
-            {shownProjects.map((p) => (
-              <motion.button
-                key={p.id}
-                layout
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                onClick={() => selectProject(p.id)}
-                className={`group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors ${
-                  p.id === activeId
-                    ? 'bg-neutral-900 text-white'
-                    : 'text-neutral-400 hover:bg-neutral-900/50'
-                }`}
-              >
-                <IconFolder className="h-4 w-4 shrink-0 text-neutral-500" />
-                <span className="truncate">{p.name}</span>
-              </motion.button>
-            ))}
-          </AnimatePresence>
-        </div>
-      </div>
-
-      {/* Active project */}
-      {active ? (
-        <div className="flex min-w-0 flex-1 flex-col">
-          {/* Restart the title reveal when its text changes; new segments otherwise stay hidden. */}
-          <PageHeader
-            key={active.name}
-            className="px-8 pt-8 pb-6"
-            eyebrow="Project"
-            title={active.name}
-            actions={
-              <Segmented
-                label="Project view"
-                size="sm"
-                value={view}
-                onValueChange={setView}
-                options={[
-                  {
-                    id: 'chat',
-                    label: 'Chats',
-                    icon: (
-                      <>
-                        <IconMessage className="h-3.5 w-3.5" /> Chats
-                      </>
-                    )
-                  },
-                  {
-                    id: 'artifacts',
-                    label: 'Artifacts',
-                    icon: (
-                      <>
-                        <IconLayoutGrid className="h-3.5 w-3.5" /> Artifacts
-                      </>
-                    )
-                  },
-                  {
-                    id: 'config',
-                    label: 'Knowledge & settings',
-                    icon: (
-                      <>
-                        <IconSettings className="h-3.5 w-3.5" /> Knowledge & settings
-                      </>
-                    )
-                  }
-                ]}
-              />
-            }
-          />
-
-          {view === 'chat' ? (
-            <ProjectChats key={active.id} project={active} onOpenChat={onOpenChat} />
-          ) : view === 'artifacts' ? (
-            <ProjectArtifacts key={active.id} projectId={active.id} />
-          ) : (
-            <ProjectConfig
-              key={active.id}
-              project={active}
-              onSaved={refreshProjects}
-              onDelete={() => removeProject(active.id)}
+          ) : null}
+          {/* Outside the scrolling list, so finding a project never means scrolling back up. */}
+          <div className="pb-2">
+            <input
+              value={projectQuery}
+              onChange={(e) => setProjectQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setProjectQuery('')
+              }}
+              aria-label="Find a project"
+              placeholder="Find a project"
+              className="w-full rounded-md border border-neutral-800 bg-neutral-900/60 px-2.5 py-1.5 text-xs text-white placeholder-neutral-600 outline-none transition-colors focus:border-green-500"
             />
-          )}
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {creating && (
+              <input
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') submitNewProject()
+                  if (e.key === 'Escape') {
+                    setCreating(false)
+                    setNewName('')
+                  }
+                }}
+                onBlur={submitNewProject}
+                placeholder="Project name…"
+                className="mb-2 w-full rounded-md border border-green-500 bg-neutral-900 px-2 py-1.5 text-sm text-white placeholder-neutral-600 outline-none"
+              />
+            )}
+            {projects.length === 0 && !creating && (
+              <p className="px-2 py-4 text-xs text-neutral-600">
+                No projects yet. Create one to configure a knowledge base.
+              </p>
+            )}
+            <AnimatePresence initial={false}>
+              {shownProjects.map((p) => (
+                <motion.button
+                  key={p.id}
+                  layout
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                  onClick={() => selectProject(p.id)}
+                  className={`group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors ${
+                    p.id === activeId
+                      ? 'bg-neutral-900 text-white'
+                      : 'text-neutral-400 hover:bg-neutral-900/50'
+                  }`}
+                >
+                  <IconFolder className="h-4 w-4 shrink-0 text-neutral-500" />
+                  <span className="truncate">{p.name}</span>
+                </motion.button>
+              ))}
+            </AnimatePresence>
+          </div>
         </div>
-      ) : (
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <IconFolder />
-            </EmptyMedia>
-            <EmptyDescription>Select or create a project to get started.</EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Button size="sm" onClick={() => setCreating(true)}>
-              <IconPlus className="h-4 w-4" /> New project
-            </Button>
-          </EmptyContent>
-        </Empty>
-      )}
-    </div>
+
+        {/* Active project */}
+        {active ? (
+          <div className="flex min-w-0 flex-1 flex-col overflow-y-auto pl-8">
+            {view === 'chat' ? (
+              <ProjectChats key={active.id} project={active} onOpenChat={onOpenChat} />
+            ) : view === 'artifacts' ? (
+              <ProjectArtifacts key={active.id} projectId={active.id} />
+            ) : (
+              <ProjectConfig
+                key={active.id}
+                project={active}
+                onSaved={refreshProjects}
+                onDelete={() => removeProject(active.id)}
+              />
+            )}
+          </div>
+        ) : (
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <IconFolder />
+              </EmptyMedia>
+              <EmptyDescription>Select or create a project to get started.</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button size="sm" onClick={() => setCreating(true)}>
+                <IconPlus className="h-4 w-4" /> New project
+              </Button>
+            </EmptyContent>
+          </Empty>
+        )}
+      </div>
+    </PageShell>
   )
 }
 
@@ -485,7 +477,7 @@ function ProjectChats({
   }, [project.id])
 
   return (
-    <div className="w-full px-8 py-6">
+    <div className="w-full pb-6">
       <div className="mb-5 flex items-center justify-between">
         <span className="text-[11px] uppercase tracking-widest text-neutral-600">
           {chats.length} {chats.length === 1 ? 'chat' : 'chats'}
@@ -577,7 +569,7 @@ function ProjectConfig({
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       {/* Landscape: what the project is on the left, what it knows on the right. Save and delete
           sit beside the name instead of on a toolbar row of their own. */}
-      <div className="grid w-full gap-x-10 gap-y-8 px-6 py-6 xl:grid-cols-2">
+      <div className="grid w-full gap-x-10 gap-y-8 pb-6 xl:grid-cols-2">
         <div className="min-w-0 space-y-5">
           <div className="flex items-end gap-2">
             <div className="min-w-0 flex-1">

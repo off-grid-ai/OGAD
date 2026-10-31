@@ -27,7 +27,7 @@ import { QuickConnections } from './QuickConnections'
 import { QUICK_CONNECTION_IDS } from './quickConnectionCatalog'
 import { CONNECTIONS_CHANGED_EVENT } from './useQuickConnection'
 import { Segmented } from '@offgrid/operator-ui/operator/segmented'
-import { PageHeader } from '@offgrid/operator-ui/operator/experience'
+import { PageShell } from './PageShell'
 import { Button } from './ui/button'
 import { GlyphSwap, IconTip } from './IconTip'
 import { Skeleton } from '@offgrid/operator-ui/operator/coss/skeleton'
@@ -629,49 +629,47 @@ export function ConnectorsScreen(): ReactElement {
   }
 
   return (
-    <div className="flex h-full flex-col bg-neutral-950 font-mono">
-      <PageHeader
-        className="px-8 pt-8 pb-6"
-        title="Integrations"
-        description="Connect a tool. Actions it takes run only after you approve them."
-        actions={
-          <div className="flex items-center gap-3">
-            {detailId == null && (
-              <Segmented
-                label="Filter connectors"
-                size="sm"
-                value={tab}
-                onValueChange={setTab}
-                options={(['all', 'connected', 'disconnected'] as const).map((t) => ({
-                  id: t,
-                  label: t === 'connected' && items.length > 0 ? `${t} ${items.length}` : t,
-                  icon: (
-                    <span className="capitalize">
-                      {t}
-                      {t === 'connected' && items.length > 0 && (
-                        <span className="ml-1 text-neutral-500">{items.length}</span>
-                      )}
-                    </span>
-                  )
-                }))}
-              />
-            )}
-            <IconTip label="Custom">
-              <Button
-                variant="outline"
-                size="icon-sm"
-                aria-label="Custom"
-                aria-expanded={adding}
-                onClick={() => setAdding((v) => !v)}
-              >
-                <IconPlus className="h-4 w-4" />
-              </Button>
-            </IconTip>
-          </div>
-        }
-      />
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-10">
+    <PageShell
+      className="bg-neutral-950 font-mono"
+      title="Integrations"
+      description="Connect a tool. Actions it takes run only after you approve them."
+      actions={
+        <div className="flex items-center gap-3">
+          {detailId == null && (
+            <Segmented
+              label="Filter connectors"
+              size="sm"
+              value={tab}
+              onValueChange={setTab}
+              options={(['all', 'connected', 'disconnected'] as const).map((t) => ({
+                id: t,
+                label: t === 'connected' && items.length > 0 ? `${t} ${items.length}` : t,
+                icon: (
+                  <span className="capitalize">
+                    {t}
+                    {t === 'connected' && items.length > 0 && (
+                      <span className="ml-1 text-neutral-500">{items.length}</span>
+                    )}
+                  </span>
+                )
+              }))}
+            />
+          )}
+          <IconTip label="Custom">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Custom"
+              aria-expanded={adding}
+              onClick={() => setAdding((v) => !v)}
+            >
+              <IconPlus className="h-4 w-4" />
+            </Button>
+          </IconTip>
+        </div>
+      }
+    >
+      <div className="pb-2">
         {detailId == null && tab !== 'connected' && (
           <div className="mb-10">
             <QuickConnections hideConnected={tab === 'disconnected'} />
@@ -689,7 +687,7 @@ export function ConnectorsScreen(): ReactElement {
               ? (JSON.parse(detail.tools) as { name: string; description?: string }[])
               : []
             return (
-              <div className="mx-auto max-w-[1500px] space-y-5">
+              <div className="space-y-5">
                 <IconTip label="All integrations">
                   <Button
                     variant="ghost"
@@ -1003,7 +1001,7 @@ export function ConnectorsScreen(): ReactElement {
             )
           }
           return (
-            <div className="mx-auto max-w-[1600px] space-y-6">
+            <div className="space-y-6">
               {/* Custom (advanced) form */}
               {adding && (
                 <div className="space-y-3 rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
@@ -1228,6 +1226,6 @@ export function ConnectorsScreen(): ReactElement {
           )
         })()}
       </div>
-    </div>
+    </PageShell>
   )
 }
