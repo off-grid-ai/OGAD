@@ -316,7 +316,9 @@ button:disabled,
    box around it (DESIGN_PHILOSOPHY bans glows). The OGAD skin and the pinned alive-semantic.css
    both still draw them; these rules come later and are unlayered, so they win in every build.
    Beamed field slots ([data-slot]) keep the beam above. A box holding a focused field goes back to
-   its own layered shadow (Tailwind's, alive's), as if the skin had never lit it. */
+   its own layered shadow (Tailwind's, alive's), as if the skin had never lit it.
+   TODO: delete these two rules once the @offgrid/operator-ui pin includes ui-library's skin.css and
+   alive-semantic.css focus fix (0dfd8fc and the skin.css fix); the library is the one source. */
 :where(input, textarea, select):where([class*='border']):not(
     [type='checkbox'],
     [type='radio'],
