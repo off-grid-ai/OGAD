@@ -6,7 +6,9 @@
 // The test steers it through files beside the binary, the way a real engine is steered by its
 // model: `hold` keeps /health at 503 "Loading model" (a slow load), `<folder>.oom` makes that engine
 // fail its load the way llama.cpp does when memory runs out, `reply.json` is the body of every
-// POST, and `launches.log` records every start as `<engine folder> <pid> <args>`.
+// POST, and `launches.log` records every start as `<engine folder> <pid> <args>`. With `brain`
+// (a URL), every generation request is answered by the test's in-process model (useModelBrain):
+// the process stays real, the tokens come from the test, and a client that hangs up aborts it.
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
@@ -39,6 +41,16 @@ const server = http.createServer((req, res) => {
   if (held()) return json(res, 503, { error: { message: 'Loading model' } })
   if (req.url === '/props') return json(res, 200, { modalities: { vision: false }, chat_template_caps: { supports_tools: true } })
   if (req.url === '/v1/models') return json(res, 200, { data: [{ id: model }] })
+  const brain = path.join(root, 'brain')
+  if (fs.existsSync(brain)) {
+    const upstream = http.request(fs.readFileSync(brain, 'utf8') + req.url, { method: req.method, headers: req.headers }, (answer) => {
+      res.writeHead(answer.statusCode || 500, answer.headers)
+      answer.pipe(res)
+    })
+    upstream.on('error', () => res.destroy())
+    res.on('close', () => { if (!res.writableEnded) upstream.destroy() })
+    return req.pipe(upstream)
+  }
   let body = ''
   req.on('data', (chunk) => (body += chunk))
   req.on('end', () => {
@@ -105,6 +117,97 @@ export function installFakeLlamaEngine(
         return { folder, pid: Number(pid), args }
       }),
     requests: () => read('requests.log')
+  }
+}
+
+/** One generation request as the model sees it. `signal` aborts when the client hangs up. */
+export interface BrainRequest {
+  path: string
+  body: Record<string, unknown>
+  /** The text of every message, joined: what the prompt asks. */
+  prompt: string
+  signal: AbortSignal
+}
+
+export interface ModelBrain {
+  /** Every request answered so far, oldest first. */
+  requests: BrainRequest[]
+  close(): Promise<void>
+}
+
+const messageText = (content: unknown): string =>
+  typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content.map((part) => (part as { text?: string }).text ?? '').join('\n')
+      : ''
+
+/**
+ * Answer the engine's generation requests from the test: `answer` returns the reply text (or
+ * throws to fail it with a 500). Chat requests get an OpenAI-shaped reply, streamed when asked.
+ */
+export async function useModelBrain(
+  engine: FakeLlamaEngine,
+  answer: (request: BrainRequest) => string | Promise<string>
+): Promise<ModelBrain> {
+  const requests: BrainRequest[] = []
+  const server = http.createServer((req, res) => {
+    let raw = ''
+    req.on('data', (chunk) => (raw += chunk))
+    req.on('end', async () => {
+      const controller = new AbortController()
+      res.on('close', () => {
+        if (!res.writableEnded) controller.abort(new Error('client hung up'))
+      })
+      const body = (raw ? JSON.parse(raw) : {}) as Record<string, unknown>
+      const messages = (body.messages as Array<{ content?: unknown }> | undefined) ?? []
+      const request: BrainRequest = {
+        path: req.url ?? '',
+        body,
+        prompt: [
+          ...messages.map((message) => messageText(message.content)),
+          messageText(body.prompt)
+        ].join('\n'),
+        signal: controller.signal
+      }
+      requests.push(request)
+      let content: string
+      try {
+        content = await answer(request)
+      } catch (error) {
+        if (!res.writableEnded && !controller.signal.aborted) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: { message: (error as Error).message } }))
+        }
+        return
+      }
+      if (controller.signal.aborted) return
+      if (body.stream === true) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`)
+        res.end('data: [DONE]\n\n')
+        return
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          content,
+          choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }]
+        })
+      )
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  fs.writeFileSync(
+    path.join(engine.binDir, 'brain'),
+    `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  )
+  return {
+    requests,
+    close: () => {
+      fs.rmSync(path.join(engine.binDir, 'brain'), { force: true })
+      return new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   }
 }
 
