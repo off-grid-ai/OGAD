@@ -621,6 +621,10 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      # stage-native.mjs builds Pro's Scribe overlay (scribe-overlay-win.exe) with dotnet publish.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
       # node-gyp (better-sqlite3-multiple-ciphers) fails on Python 3.13+; pin 3.12.
       - uses: actions/setup-python@v5
         with:

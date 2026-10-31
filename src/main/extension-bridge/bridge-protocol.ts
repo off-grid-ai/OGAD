@@ -35,6 +35,8 @@ export interface BridgeFeatures {
   readonly browserChat?: number
   /** `settings.watch` is answered. Absent on older desktops, which refuse unknown methods. */
   readonly settingsWatch?: boolean
+  /** `writing` (Scribe) is answered. Absent on older desktops and without Pro. */
+  readonly writing?: boolean
 }
 
 export const BRIDGE_VERSION = 1
@@ -213,6 +215,7 @@ export const RPC_METHODS = [
   'audio.transcribe',
   'audio.speak',
   'vault',
+  'writing',
   'settings.get',
   'settings.set',
   'settings.watch',

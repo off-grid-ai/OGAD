@@ -40,7 +40,8 @@ export async function dispatchGatewayRoute(context: GatewayRouteContext): Promis
 const PRO_GATEWAY_FEATURES: Record<string, string> = {
   '/v1/videos': 'Video',
   '/v1/stories': 'Video',
-  '/v1/search': 'Search'
+  '/v1/search': 'Search',
+  '/v1/writing': 'Scribe'
 }
 
 /** The Pro feature a path belongs to, or null when the path is not Pro-only. */

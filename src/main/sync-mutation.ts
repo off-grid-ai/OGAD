@@ -2,6 +2,7 @@ import { callHook, HOOKS } from './bootstrap/hookRegistry'
 import {
   ACTION_APPROVAL_ENTITY,
   KNOWLEDGE_DOCUMENT_ENTITY,
+  NOTE_FILE_ENTITY,
   SHARED_FILE_ENTITY,
   TASK_CONTROL_ENTITY,
   TASK_LAUNCH_ENTITY,
@@ -19,6 +20,8 @@ export const CORE_SYNC_ENTITIES = {
   project: 'project',
   knowledgeDocument: KNOWLEDGE_DOCUMENT_ENTITY,
   sharedFile: SHARED_FILE_ENTITY,
+  /** A Notes vault file (Pro). */
+  noteFile: NOTE_FILE_ENTITY,
   modelSetting: 'model_setting',
   actionApproval: ACTION_APPROVAL_ENTITY,
   taskLaunch: TASK_LAUNCH_ENTITY,

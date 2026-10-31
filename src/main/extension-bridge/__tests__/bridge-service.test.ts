@@ -139,7 +139,11 @@ async function setup(
         : { success: false, error: 'That model cannot fill this role.' },
     readSettings: async (section) => settings.read(section),
     writeSettings: async (section, patch) => settings.write(section, patch),
-    vault: async () => ({ type: 'status', state: 'unlocked' })
+    vault: async () => ({ type: 'status', state: 'unlocked' }),
+    writing: async (request, browser) => {
+      calls.push(`writing:${browser.name}:${JSON.stringify(request)}`)
+      return { issues: [] }
+    }
   }
   const bridge = createBridgeService({
     keys: desk,
@@ -480,6 +484,34 @@ describe('sealed rpc', () => {
       ok: false,
       error: 'invalid'
     })
+  })
+
+  it('answers Scribe writing requests only with Pro and a registered Scribe', async () => {
+    const request = { op: 'grammar', text: 'Their going home.' }
+    const free = await setup({ features: FREE })
+    await free.pair()
+    expect((await free.call('device000001', 'writing', { request })).body).toMatchObject({
+      ok: false,
+      error: 'pro_required'
+    })
+    expect(free.calls).toEqual([])
+
+    // Pro, but Scribe has not registered: never "upgrade".
+    const stale = await setup({ features: PRO })
+    await stale.pair()
+    expect((await stale.call('device000001', 'writing', { request })).body).toMatchObject({
+      ok: false,
+      error: 'writing_unavailable'
+    })
+    expect(stale.calls).toEqual([])
+
+    const pro = await setup({ features: { ...PRO, writing: true } })
+    await pro.pair()
+    expect((await pro.call('device000001', 'writing', { request })).body).toMatchObject({
+      ok: true,
+      result: { issues: [] }
+    })
+    expect(pro.calls).toEqual([`writing:Chrome on this Mac:${JSON.stringify(request)}`])
   })
 
   it('respects Free vs Pro: no vault or native tools without Pro', async () => {
