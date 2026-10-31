@@ -9,7 +9,6 @@
   "src/main/browser/__tests__/web-use-lifecycle.integration.test.ts": 2,
   "src/main/extension-bridge/__tests__/bridge-media.test.ts": 3,
   "src/main/extension-bridge/__tests__/bridge-tools.test.ts": 6,
-  "src/main/models/__tests__/reconcile-projector.integration.test.ts": 3,
   "src/main/tasks/__tests__/task-retry-context.test.ts": 9,
   "src/main/tools/__tests__/mcpConnectorToolExtension.test.ts": 3,
   "src/main/vision/__tests__/general-vision-operator-adapter.test.ts": 3,
