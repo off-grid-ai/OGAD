@@ -5,7 +5,6 @@
   "src/main/__tests__/files-audio-upload.test.ts": 1,
   "src/main/__tests__/mcp-remote-task.integration.test.ts": 4,
   "src/main/__tests__/model-storage-move.test.ts": 7,
-  "src/main/__tests__/sd-server-fallback.test.ts": 5,
   "src/main/__tests__/supervisor-window.integration.test.ts": 1,
   "src/main/__tests__/system-status-ipc.test.ts": 3,
   "src/main/__tests__/task-history-ipc.dbtest.ts": 10,
