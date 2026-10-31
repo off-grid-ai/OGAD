@@ -20,6 +20,5 @@
   "src/main/tools/__tests__/mcpConnectorToolExtension.test.ts": 3,
   "src/main/vision/__tests__/general-vision-operator-adapter.test.ts": 3,
   "src/main/vision/__tests__/hybrid-vision-strategy.integration.test.ts": 2,
-  "src/renderer/src/bootstrap/__tests__/loadProFeaturesRenderer.test.ts": 3,
-  "src/renderer/src/components/__tests__/ConnectorsScreen.oauth-cancel.integration.test.tsx": 1
+  "src/renderer/src/bootstrap/__tests__/loadProFeaturesRenderer.test.ts": 3
 }
