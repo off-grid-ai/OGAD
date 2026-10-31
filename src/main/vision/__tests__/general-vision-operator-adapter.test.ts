@@ -2,8 +2,35 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { TaskExecutionPlan } from '../../../shared/task-execution-plan'
+import {
+  installFakeLlamaEngine,
+  processAlive,
+  unusedPort,
+  useModelBrain,
+  writeGguf,
+  type BrainReply,
+  type FakeLlamaEngine,
+  type ModelBrain
+} from '../../__tests__/harness/fake-llama-engine'
+
+// The vision model is a llama-server executable whose replies come from this test; the chat
+// engine owner, policy runner and task graph are real.
+const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-general-vision-'))
+const previous = { data: process.env.OFFGRID_DATA_DIR, bin: process.env.OFFGRID_BIN_DIR }
+process.env.OFFGRID_DATA_DIR = PROFILE
+process.env.OFFGRID_BIN_DIR = path.join(PROFILE, 'bin')
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => process.env.OFFGRID_DATA_DIR,
+    isPackaged: false,
+    getAppPath: () => process.cwd()
+  },
+  safeStorage: { isEncryptionAvailable: () => false },
+  BrowserWindow: { getAllWindows: () => [] }
+}))
+
 import { llm } from '../../llm'
 import {
   bonsaiVisionOperatorAdapter,
@@ -79,8 +106,56 @@ async function writeFrame(name: string): Promise<string> {
   return imagePath
 }
 
+/** The model's next replies, one per request; and every chat request it received. */
+const replies: BrainReply[] = []
+let engine: FakeLlamaEngine
+let brain: ModelBrain
+const chatRequests = (): ModelBrain['requests'] =>
+  brain.requests.filter((request) => request.path.includes('chat/completions'))
+
+beforeAll(async () => {
+  engine = installFakeLlamaEngine(path.join(PROFILE, 'bin'))
+  brain = await useModelBrain(engine, () => {
+    const reply = replies.shift()
+    if (reply === undefined) throw new Error('The model boundary has no queued reply.')
+    return reply
+  })
+  // The vision model, loaded the way a Computer Use specialist is.
+  for (const file of model.availableFiles) writeGguf(llm.getModelsDir(), file)
+  llm.useRuntimeModel({ id: model.id, primary: model.primaryFile, mmproj: model.projectorFile })
+  ;(llm as unknown as { port: number }).port = await unusedPort()
+  await llm.init()
+})
+
+afterAll(async () => {
+  llm.stop()
+  await brain.close()
+  for (const { pid } of engine.launches()) if (processAlive(pid)) process.kill(pid, 'SIGKILL')
+  fs.rmSync(PROFILE, { recursive: true, force: true })
+  if (previous.data === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previous.data
+  if (previous.bin === undefined) delete process.env.OFFGRID_BIN_DIR
+  else process.env.OFFGRID_BIN_DIR = previous.bin
+})
+
+/** A native tool-call reply from a policy response. */
+const toolReply = (
+  value: VisionPolicyResponse,
+  extra: Partial<Exclude<BrainReply, string | { json: unknown }>> = {}
+): BrainReply => ({
+  toolCalls: (value.toolCalls ?? []).map((call) => ({
+    id: call.id,
+    name: call.name,
+    arguments: call.arguments
+  })),
+  finishReason: 'tool_calls',
+  ...extra
+})
+
 describe('general vision native tool policy', () => {
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    replies.length = 0
+  })
 
   it('builds one required native-tool request with no JSON final-answer grammar', () => {
     const adapter = resolveVisionModelAdapter(model)
@@ -290,20 +365,13 @@ describe('general vision native tool policy', () => {
     const imagePath = await writeFrame('native-tools')
     const actuated: unknown[] = []
     const reasoning: string[] = []
-    vi.spyOn(llm, 'streamChat')
-      .mockImplementationOnce(async (_messages, onDelta) => {
-        onDelta('The control is visible.', 'reasoning')
-        return {
-          content: '{"command":{"name":"complete_milestone"}}',
-          toolCalls: [...perform().toolCalls],
-          finishReason: 'tool_calls'
-        }
-      })
-      .mockResolvedValueOnce({
-        content: '',
-        toolCalls: [...complete().toolCalls],
-        finishReason: 'tool_calls'
-      })
+    replies.push(
+      toolReply(perform(), {
+        reasoning: 'The control is visible.',
+        content: '{"command":{"name":"complete_milestone"}}'
+      }),
+      toolReply(complete())
+    )
 
     try {
       const result = await runVisionTaskGraph('Open the visible result.', {
@@ -335,20 +403,13 @@ describe('general vision native tool policy', () => {
   it('re-observes after the bounded native-tool retry returns no transition', async () => {
     const imagePath = await writeFrame('native-tool-retry')
     const invalid = { content: 'I think the milestone is complete.', toolCalls: [] }
-    const stream = vi
-      .spyOn(llm, 'streamChat')
-      .mockResolvedValueOnce({ ...invalid, finishReason: 'stop' })
-      .mockResolvedValueOnce({ ...invalid, finishReason: 'stop' })
-      .mockResolvedValueOnce({
-        content: '',
-        toolCalls: [...perform().toolCalls],
-        finishReason: 'tool_calls'
-      })
-      .mockResolvedValueOnce({
-        content: '',
-        toolCalls: [...complete().toolCalls],
-        finishReason: 'tool_calls'
-      })
+    const before = chatRequests().length
+    replies.push(
+      { content: invalid.content, finishReason: 'stop' },
+      { content: invalid.content, finishReason: 'stop' },
+      toolReply(perform()),
+      toolReply(complete())
+    )
     let captures = 0
     const actuated: unknown[] = []
 
@@ -372,7 +433,7 @@ describe('general vision native tool policy', () => {
 
       expect(result).toMatchObject({ ok: true, summary: 'The requested result is visible.' })
       expect(captures).toBe(3)
-      expect(stream).toHaveBeenCalledTimes(4)
+      expect(chatRequests().length - before).toBe(4)
       expect(actuated).toEqual([{ type: 'click', point: { x: 287, y: 227 } }])
       expect(result.steps).toContain(
         'the model returned 0 tool calls; exactly one is required; re-observing'
@@ -384,10 +445,11 @@ describe('general vision native tool policy', () => {
 
   it('returns the final invalid native response after the bounded retry', async () => {
     const invalid = { content: 'text is not a transition', toolCalls: [] }
-    const stream = vi.spyOn(llm, 'streamChat').mockResolvedValue({
-      ...invalid,
-      finishReason: 'stop'
-    })
+    const before = chatRequests().length
+    replies.push(
+      { content: invalid.content, finishReason: 'stop' },
+      { content: invalid.content, finishReason: 'stop' }
+    )
     const request = generalVisionOperatorAdapter.buildRequest({
       goal: 'Open the control.',
       currentScreenshotDataUrl: 'data:image/png;base64,current',
@@ -398,7 +460,7 @@ describe('general vision native tool policy', () => {
     })
 
     await expect(runVisionPolicyRequest(request)).resolves.toEqual(invalid)
-    expect(stream).toHaveBeenCalledTimes(2)
+    expect(chatRequests().length - before).toBe(2)
   })
 
   it('uses the application launcher instead of guessing an unidentified Dock icon', () => {
@@ -537,20 +599,17 @@ describe('general vision native tool policy', () => {
         .png()
         .toBuffer()
     )
-    let modelImageUrl = ''
-    vi.spyOn(llm, 'streamChat').mockImplementationOnce(async (messages) => {
-      const policyMessages = messages as VisionPolicyMessage[]
-      const userContent = policyMessages.find((message) => message.role === 'user')?.content
-      if (Array.isArray(userContent)) {
-        const image = userContent.find((part) => part.type === 'image_url')
-        if (image?.type === 'image_url') modelImageUrl = image.image_url.url
-      }
-      return {
-        content: '',
-        toolCalls: [...complete().toolCalls],
-        finishReason: 'tool_calls'
-      }
-    })
+    replies.push(toolReply(complete()))
+    const before = chatRequests().length
+    /** The screenshot the model received, as it arrived at the engine. */
+    const modelImage = (): string => {
+      const messages = (chatRequests()[before]?.body.messages ?? []) as VisionPolicyMessage[]
+      const userContent = messages.find((message) => message.role === 'user')?.content
+      const image = Array.isArray(userContent)
+        ? userContent.find((part) => part.type === 'image_url')
+        : undefined
+      return image?.type === 'image_url' ? image.image_url.url : ''
+    }
 
     try {
       const grounding = await createVisionGrounder(generalVisionOperatorAdapter)({
@@ -564,7 +623,7 @@ describe('general vision native tool policy', () => {
       })
       const persistedDataUrl = `data:image/png;base64,${fs.readFileSync(file).toString('base64')}`
 
-      expect(modelImageUrl).toBe(persistedDataUrl)
+      expect(modelImage()).toBe(persistedDataUrl)
       expect(grounding.screenshotDataUrl).toBe(persistedDataUrl)
     } finally {
       fs.rmSync(file, { force: true })
