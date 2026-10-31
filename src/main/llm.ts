@@ -14,7 +14,13 @@ import { recordAIRequest, currentAIRequest } from './ai-request-log'
 import { reportLlamaServerCrash, reportModelLoadStart } from './analytics'
 import * as fs from 'fs'
 import { modelMetadataFile, resolveModelReference } from './model-paths'
-import { modelsDir as getModelsDir, binRoots, isPackaged, requireModelStorage } from './runtime-env'
+import {
+  modelsDir as getModelsDir,
+  binRoots,
+  isPackaged,
+  isPackagedHost,
+  requireModelStorage
+} from './runtime-env'
 import { reapOrphanProcessesOnPort, type PortReapResult } from './kill-orphan-port'
 import { loadAttempts, type KvCacheType, type PerformanceMode } from './model-sizing'
 import { resolveMaxTokens, maxTokensForWire, MAX_TOKENS_AUTO } from './llm/gen-params'
@@ -68,7 +74,7 @@ import {
   readGgufMtpSupport
 } from './models/gguf-metadata'
 import { dflashFileName, primaryFileName, type CatalogEntry } from './models/catalog-logic'
-import { pickFreePort, isPortFree } from './free-port'
+import { pickFreePort, isPortFree, preferredPort } from './free-port'
 import { ModelServerError, postCompletionOnce } from './llm/http-post'
 import { modalityQueue } from './modality-queue/queue'
 import { engineSpawnEnv } from './llm/spawn-env'
@@ -268,8 +274,10 @@ export class LLMService {
   private readonly healthInvalidationListeners = new Set<() => void>()
   private server: ChildProcess | null = null
   // Off the contested 8080 (collides with other local dev servers) onto a
-  // less-trafficked port so the model server reliably binds.
-  private port = LLAMA_SERVER_PORT
+  // less-trafficked port so the model server reliably binds. OFFGRID_LLAMA_PORT gives a dev or test
+  // instance its own preferred port, so it never reaps or races the installed app's engine on 8439;
+  // a packaged app keeps 8439.
+  private port = preferredPort(LLAMA_SERVER_PORT, process.env.OFFGRID_LLAMA_PORT, isPackagedHost())
   // Single-flight init guard: concurrent chat() calls (e.g. the capture
   // extractor firing rapidly) must share ONE spawn, not each launch a server.
   private initPromise: Promise<void> | null = null
@@ -1133,7 +1141,8 @@ export class LLMService {
       this.kvCacheType = compatibleSettings.kvCacheType
     if (typeof compatibleSettings.flashAttn === 'boolean')
       this.flashAttn = compatibleSettings.flashAttn
-    if (typeof compatibleSettings.gpuLayers === 'number') this.gpuLayers = compatibleSettings.gpuLayers
+    if (typeof compatibleSettings.gpuLayers === 'number')
+      this.gpuLayers = compatibleSettings.gpuLayers
     if (compatibleSettings.gpuPlacement === 'auto' || compatibleSettings.gpuPlacement === 'manual')
       this.gpuPlacement = compatibleSettings.gpuPlacement
     if (typeof compatibleSettings.threads === 'number') this.threads = compatibleSettings.threads
