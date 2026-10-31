@@ -28,31 +28,116 @@ import {
   MAX_TRANSCRIBE_AUDIO_BYTES
 } from '../bridge-limits'
 
-const engine = vi.hoisted(() => ({
-  speak: vi.fn(async (_text: string, _voice?: string) => ({
-    dataUrl: 'data:audio/wav;base64,UklGRg=='
-  })),
-  transcribe: vi.fn(async (_input: { path: string }, _options: unknown) => ({ text: ' hello ' }))
+// The boundaries: the speech library (kokoro-js) under the real voice worker, the native
+// executables (ffmpeg and whisper-cli for transcription, llama-server for chat), Electron's
+// helper-process launcher, and the disk where a built app keeps the worker beside tts-onnx.
+const speech = vi.hoisted(() => ({
+  bytesPerChar: 8,
+  spoken: [] as Array<{ text: string; voice: string }>
 }))
-vi.mock('../../tts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../tts')>()),
-  synthesize: engine.speak
+vi.mock('kokoro-js', () => ({
+  KokoroTTS: {
+    from_pretrained: async () => ({
+      generate: async (text: string, options: { voice: string }) => {
+        speech.spoken.push({ text, voice: options.voice })
+        // An audible tone: the worker refuses silent audio, as it should.
+        const samples = Math.ceil((text.length * speech.bytesPerChar) / 2)
+        return {
+          data: Float32Array.from({ length: samples }, (_, i) => Math.sin(i / 8) * 0.3),
+          sampling_rate: 24000
+        }
+      }
+    })
+  }
 }))
-vi.mock('../../transcription/select', () => ({
-  getActiveTranscription: () => ({ transcribe: engine.transcribe }),
-  readTranscriptionInfo: () => ({ engine: 'whisper', modelId: null, language: 'auto' })
-}))
+vi.mock('node:fs', async (original) => {
+  const actual = await original<typeof import('node:fs')>()
+  const existsSync = (file: import('node:fs').PathLike): boolean =>
+    String(file).endsWith('tts-onnx-worker.js') || actual.existsSync(file)
+  return { ...actual, existsSync, default: { ...actual, existsSync } }
+})
+// Electron's utility process, running the real voice worker in this process: messages cross the
+// same parentPort contract the helper process uses.
+vi.mock('electron', async () => {
+  const { EventEmitter } = await import('node:events')
+  return {
+    app: {
+      getPath: () => process.env.OFFGRID_DATA_DIR,
+      isPackaged: false,
+      getAppPath: () => process.cwd()
+    },
+    safeStorage: { isEncryptionAvailable: () => false },
+    BrowserWindow: { getAllWindows: () => [] },
+    utilityProcess: {
+      fork: () => {
+        const child = new EventEmitter() as InstanceType<typeof EventEmitter> & {
+          postMessage(message: unknown): void
+          kill(): boolean
+        }
+        const listeners: Array<(event: { data: unknown }) => void> = []
+        Object.defineProperty(process, 'parentPort', {
+          configurable: true,
+          value: {
+            on: (_event: string, listener: (event: { data: unknown }) => void) =>
+              listeners.push(listener),
+            postMessage: (message: unknown) => child.emit('message', message)
+          }
+        })
+        const ready = import('../../tts-onnx-worker')
+        child.postMessage = (message) =>
+          void ready.then(() => listeners.forEach((listener) => listener({ data: message })))
+        child.kill = () => {
+          child.emit('exit', 0)
+          return true
+        }
+        return child
+      }
+    }
+  }
+})
 
 const originalDataDir = process.env.OFFGRID_DATA_DIR
+const originalBinDir = process.env.OFFGRID_BIN_DIR
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-media-test-'))
 process.env.OFFGRID_DATA_DIR = profile
+const bin = path.join(profile, 'bin')
+process.env.OFFGRID_BIN_DIR = bin
 const manager = await import('../../models-manager')
 const { llm } = await import('../../llm')
 const tts = await import('../../tts')
-const init = vi.spyOn(llm, 'init').mockResolvedValue(undefined)
+const { installFakeLlamaEngine, unusedPort, processAlive } =
+  await import('../../__tests__/harness/fake-llama-engine')
 const family = CATALOG.find((model) => model.id === 'unsloth/Qwen3.5-0.8B-GGUF')!
+const chatEngine = installFakeLlamaEngine(bin)
 
-beforeAll(() => {
+// ffmpeg logs each recording it decodes (path and bytes) and copies it out; whisper-cli hears
+// " hello ", or fails while `whisper-fail` exists.
+const FFMPEG = `#!/usr/bin/env node
+const fs = require('node:fs')
+const path = require('node:path')
+const input = process.argv[process.argv.indexOf('-i') + 1]
+fs.appendFileSync(path.join(__dirname, 'decoded.log'), JSON.stringify({ input, bytes: fs.readFileSync(input).toString('base64') }) + '\\n')
+fs.copyFileSync(input, process.argv.at(-1))
+`
+const WHISPER = `#!/usr/bin/env node
+const fs = require('node:fs')
+const path = require('node:path')
+if (fs.existsSync(path.join(path.dirname(__dirname), 'whisper-fail'))) { process.stderr.write('engine failed'); process.exit(1) }
+process.stdout.write(' hello ')
+`
+const decoded = (): Array<{ input: string; bytes: string }> => {
+  try {
+    return fs
+      .readFileSync(path.join(bin, 'decoded.log'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+  } catch {
+    return []
+  }
+}
+
+beforeAll(async () => {
   const dir = path.join(profile, 'models')
   fs.mkdirSync(dir, { recursive: true })
   for (const file of family.files) {
@@ -61,16 +146,25 @@ beforeAll(() => {
       Buffer.concat([Buffer.from('GGUF'), Buffer.alloc(2048)])
     )
   }
+  fs.writeFileSync(path.join(dir, 'ggml-base.bin'), Buffer.alloc(1024, 1))
+  fs.writeFileSync(path.join(bin, 'ffmpeg'), FFMPEG, { mode: 0o755 })
+  fs.mkdirSync(path.join(bin, 'whisper'), { recursive: true })
+  fs.writeFileSync(path.join(bin, 'whisper', 'whisper-cli'), WHISPER, { mode: 0o755 })
+  ;(llm as unknown as { port: number }).port = await unusedPort()
 })
 beforeEach(() => {
-  engine.speak.mockReset().mockResolvedValue({ dataUrl: 'data:audio/wav;base64,UklGRg==' })
-  engine.transcribe.mockReset().mockResolvedValue({ text: ' hello ' })
-  init.mockClear()
+  speech.bytesPerChar = 8
+  speech.spoken.length = 0
+  fs.rmSync(path.join(bin, 'decoded.log'), { force: true })
+  fs.rmSync(path.join(bin, 'whisper-fail'), { force: true })
 })
 afterAll(() => {
-  vi.restoreAllMocks()
+  llm.stop()
+  for (const { pid } of chatEngine.launches()) if (processAlive(pid)) process.kill(pid, 'SIGKILL')
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir
+  if (originalBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
+  else process.env.OFFGRID_BIN_DIR = originalBinDir
   fs.rmSync(profile, { recursive: true, force: true })
 })
 
@@ -167,9 +261,9 @@ describe('sealed models and audio', () => {
         error: 'pro_required'
       })
     }
-    expect(init).not.toHaveBeenCalled()
-    expect(engine.speak).not.toHaveBeenCalled()
-    expect(engine.transcribe).not.toHaveBeenCalled()
+    expect(chatEngine.launches()).toHaveLength(0)
+    expect(speech.spoken).toEqual([])
+    expect(decoded()).toEqual([])
   })
 
   it('activates through the real manager and reads the same core inventory', async () => {
@@ -180,7 +274,8 @@ describe('sealed models and audio', () => {
       result: { success: true }
     })
     expect(manager.getActiveModalities().text).toBe(family.id)
-    expect(init).toHaveBeenCalledOnce()
+    // The chat engine loads the activated model.
+    await vi.waitFor(() => expect(chatEngine.launches()).toHaveLength(1))
     const inventory = await s.call('models.inventory')
     expect(inventory.body).toMatchObject({
       ok: true,
@@ -205,9 +300,10 @@ describe('sealed models and audio', () => {
   it('returns the core activation refusal without starting the engine', async () => {
     const s = await setup()
     await s.pair()
+    const launched = chatEngine.launches().length
     const result = await s.call('models.activate', { id: 'local:missing-model', kind: 'text' })
     expect(result.body).toMatchObject({ ok: false, error: expect.any(String) })
-    expect(init).not.toHaveBeenCalled()
+    expect(chatEngine.launches()).toHaveLength(launched)
   })
 
   it('lists voices, passes recordings to the core engine, and returns base64 speech', async () => {
@@ -216,38 +312,39 @@ describe('sealed models and audio', () => {
     expect((await s.call('audio.voices')).body).toMatchObject({
       result: { voices: await tts.listVoices() }
     })
-    engine.transcribe.mockImplementationOnce(async (input, options) => {
-      expect(fs.readFileSync(input.path)).toEqual(Buffer.from('RIFF'))
-      expect(input.path).toMatch(/\.webm$/)
-      expect(options).toEqual({})
-      return { text: ' hello ' }
-    })
     expect((await s.call('audio.transcribe', requests[3][1])).body).toMatchObject({
       result: { text: 'hello' }
     })
-    const file = engine.transcribe.mock.calls[0]![0].path
-    expect(fs.existsSync(path.dirname(file))).toBe(false)
-    expect(
-      (await s.call('audio.speak', { text: ' Hello ', voice: 'af_heart' })).body
-    ).toMatchObject({ result: { audio: 'UklGRg==', mimeType: 'audio/wav' } })
-    expect(engine.speak).toHaveBeenCalledWith('Hello', 'af_heart')
+    // The recording reached the engine as a private .webm file with its bytes, then was removed.
+    const [recording] = decoded()
+    expect(Buffer.from(recording!.bytes, 'base64')).toEqual(Buffer.from('RIFF'))
+    expect(recording!.input).toMatch(/\.webm$/)
+    expect(fs.existsSync(path.dirname(recording!.input))).toBe(false)
+    const spoken = (await s.call('audio.speak', { text: ' Hello ', voice: 'af_heart' })).body as {
+      result: { audio: string; mimeType: string }
+    }
+    expect(spoken.result.mimeType).toBe('audio/wav')
+    expect(Buffer.from(spoken.result.audio, 'base64').subarray(0, 4).toString()).toBe('RIFF')
+    expect(speech.spoken).toEqual([{ text: 'Hello', voice: 'af_heart' }])
     expect((await s.call('audio.speak', { text: 'Hi' })).body).toMatchObject({ ok: true })
-    expect(engine.speak).toHaveBeenLastCalledWith('Hi', undefined)
+    // No voice asked for: the default voice speaks.
+    expect(speech.spoken.at(-1)).toEqual({ text: 'Hi', voice: 'af_heart' })
   })
 
   it('cleans up the private recording file on engine failure', async () => {
     const s = await setup()
     await s.pair()
-    engine.transcribe.mockRejectedValueOnce(new Error('engine failed'))
+    fs.writeFileSync(path.join(bin, 'whisper-fail'), '')
     expect((await s.call('audio.transcribe', requests[3][1])).body).toMatchObject({
-      error: 'engine failed'
+      error: expect.stringContaining('engine failed')
     })
-    expect(fs.existsSync(path.dirname(engine.transcribe.mock.calls[0]![0].path))).toBe(false)
+    expect(fs.existsSync(path.dirname(decoded()[0]!.input))).toBe(false)
   })
 
   it('refuses invalid fields and unknown model kinds before engine calls', async () => {
     const s = await setup()
     await s.pair()
+    const launched = chatEngine.launches().length
     const cases: [RpcMethod, Record<string, unknown>][] = [
       ['models.inventory', { extra: true }],
       ['audio.voices', { extra: true }],
@@ -289,9 +386,9 @@ describe('sealed models and audio', () => {
         `${method} ${JSON.stringify(params)}`
       ).toMatchObject({ ok: false })
     }
-    expect(engine.speak).not.toHaveBeenCalled()
-    expect(engine.transcribe).not.toHaveBeenCalled()
-    expect(init).not.toHaveBeenCalled()
+    expect(speech.spoken).toEqual([])
+    expect(decoded()).toEqual([])
+    expect(chatEngine.launches()).toHaveLength(launched)
   })
 
   it('refuses oversized audio and text, without truncation', async () => {
@@ -304,8 +401,8 @@ describe('sealed models and audio', () => {
     expect((await s.call('audio.transcribe', { audio, mimeType: 'audio/wav' })).body).toMatchObject(
       { ok: false, error: expect.stringContaining('Audio too large') }
     )
-    expect(engine.speak).not.toHaveBeenCalled()
-    expect(engine.transcribe).not.toHaveBeenCalled()
+    expect(speech.spoken).toEqual([])
+    expect(decoded()).toEqual([])
   })
 
   it('accepts the exact audio/text caps and keeps the sealed envelopes within limits', async () => {
@@ -317,13 +414,18 @@ describe('sealed models and audio', () => {
     expect(Buffer.byteLength(JSON.stringify(reply.envelope))).toBeLessThanOrEqual(
       MAX_SEALED_REQUEST_BYTES
     )
-    engine.speak.mockResolvedValueOnce({
-      dataUrl: `data:audio/wav;base64,${Buffer.alloc(MAX_TRANSCRIBE_AUDIO_BYTES - 128).toString('base64')}`
-    })
-    const speech = await s.call('audio.speak', { text: 'x'.repeat(MAX_SPEAK_TEXT_CHARS) })
-    expect(speech.body).toMatchObject({ ok: true })
-    expect(engine.speak.mock.calls[0]![0]).toHaveLength(MAX_SPEAK_TEXT_CHARS)
-    expect(Buffer.byteLength(JSON.stringify(speech.raw))).toBeLessThanOrEqual(
+    // Speech just under the audio cap (a WAV header plus 16-bit samples).
+    speech.bytesPerChar = Math.floor((MAX_TRANSCRIBE_AUDIO_BYTES - 128 - 44) / MAX_SPEAK_TEXT_CHARS)
+    const reply2 = await s.call('audio.speak', { text: 'x'.repeat(MAX_SPEAK_TEXT_CHARS) })
+    expect(reply2.body).toMatchObject({ ok: true })
+    // Every character was spoken: none was cut off.
+    expect(
+      speech.spoken
+        .map(({ text }) => text)
+        .join('')
+        .replace(/\s/g, '')
+    ).toHaveLength(MAX_SPEAK_TEXT_CHARS)
+    expect(Buffer.byteLength(JSON.stringify(reply2.raw))).toBeLessThanOrEqual(
       MAX_SEALED_RESPONSE_BYTES
     )
   })
@@ -331,9 +433,8 @@ describe('sealed models and audio', () => {
   it('refuses speech that cannot fit in a sealed response', async () => {
     const s = await setup()
     await s.pair()
-    engine.speak.mockResolvedValueOnce({
-      dataUrl: `data:audio/wav;base64,${Buffer.alloc(MAX_TRANSCRIBE_AUDIO_BYTES + 4096).toString('base64')}`
-    })
+    // Five characters of speech that come back larger than a sealed response can carry.
+    speech.bytesPerChar = Math.ceil((MAX_TRANSCRIBE_AUDIO_BYTES + 4096) / 5)
     expect((await s.call('audio.speak', { text: 'Hello' })).body).toMatchObject({
       ok: false,
       error: 'Speech audio too large for the sealed response.'
