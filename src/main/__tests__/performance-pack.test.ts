@@ -82,16 +82,18 @@ function manifest(bytes: Buffer, digest = createHash('sha256').update(bytes).dig
   )
 }
 
+/** The status once the pack reaches `phase`, as the app hears it (onPerformancePackChanged). */
 async function settled(
   phase: 'installed' | 'failed'
 ): Promise<Awaited<ReturnType<(typeof import('../performance-pack'))['performancePackStatus']>>> {
-  const { performancePackStatus } = await import('../performance-pack')
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const status = performancePackStatus()
-    if (status.phase === phase) return status
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
-  throw new Error(`Performance pack did not reach ${phase}`)
+  const { onPerformancePackChanged, performancePackStatus } = await import('../performance-pack')
+  return new Promise((resolve) => {
+    const check = (status: ReturnType<typeof performancePackStatus>): void => {
+      if (status.phase === phase) resolve(status)
+    }
+    onPerformancePackChanged(check)
+    check(performancePackStatus())
+  })
 }
 
 beforeEach(async () => {
