@@ -4,7 +4,7 @@
 // loaded with context.toolCalls renders each call as an inline disclosure; expanding it keeps
 // the full result in the conversation instead of opening a separate viewer.
 // Real MemoryChat through the chat-boundary harness; only the window.api seam is faked.
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChatBoundary, installBoundary, renderChat, send } from './harness/chat-boundary'
@@ -18,7 +18,15 @@ import {
 const LONG_RESULT =
   'GitHub — off-grid-ai/OGAD: Off Grid AI Desktop, a local-first on-device AI runtime.'
 
+/**
+ * "Work done" is drawn from the saved turn, so it exists only after the chat has read the
+ * conversation's messages. Wait for that read to be made and to finish (under load the first
+ * render is slow), then for the button it produces.
+ */
 async function openCompletedWork(): Promise<void> {
+  const { getRagMessages } = (window as unknown as { api: { getRagMessages: Mock } }).api
+  await waitFor(() => expect(getRagMessages).toHaveBeenCalled())
+  await Promise.all(getRagMessages.mock.results.map((result) => result.value as Promise<unknown>))
   await userEvent.click(await screen.findByRole('button', { name: 'Work done' }))
 }
 
@@ -248,7 +256,9 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     cleanup()
     renderChat({ conversationId: 'conversation-b' })
     await openCompletedWork()
-    expect((await screen.findByRole('list', { name: 'Thinking and tool calls' })).children).toHaveLength(4)
+    expect(
+      (await screen.findByRole('list', { name: 'Thinking and tool calls' })).children
+    ).toHaveLength(4)
   })
 
   it('explains a persisted proposal run as one ordered customer timeline', async () => {
