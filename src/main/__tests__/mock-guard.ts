@@ -38,6 +38,10 @@ export const BOUNDARY_ALLOW: Readonly<
     tables: ['ai_request_logs'],
     why: 'Retention limits need rows the write path cannot produce in a test (thousands of rows, rows days old, 100 MB entries); the rows are the input of the pruning algorithm, compared with a reference.'
   },
+  'e2e/upgrade-0054-profile.spec.ts': {
+    tables: ['app_settings'],
+    why: 'A profile as release 0.0.54 left it; the spec proves the current app upgrades it.'
+  },
   'src/main/__tests__/use-storage.integration.dbtest.ts': {
     tables: ['app_settings'],
     why: "The action engine's own fresh database, holding a table the engine must coexist with; no app write path owns that database."
