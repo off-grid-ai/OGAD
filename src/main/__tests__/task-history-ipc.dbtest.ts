@@ -171,6 +171,12 @@ const settled = async (taskId: string): Promise<void> =>
   vi.waitFor(() => expect(getTaskRun(taskId)?.status).not.toBe('running'), { timeout: 10_000 })
 
 beforeAll(async () => {
+  // Load the Web Use host while the platform is still this machine's: its native libraries
+  // (onnxruntime under transformers.js) pick their binary by platform, as they do in the app.
+  // Only the fake Mac desktop below needs darwin. The host loads transformers.js only when a run
+  // starts, so it loads here too, before the platform reads darwin.
+  await import('../browser/web-use-host')
+  await import('@huggingface/transformers')
   Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
   configureTaskExecutionDevice({ id: 'mac-1', name: 'My Mac' })
   desktop = await installFakeMacDesktop(bin)
