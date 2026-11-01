@@ -14,8 +14,38 @@
 export interface CaptureDb {
   prepare(sql: string): {
     run(...values: unknown[]): { lastInsertRowid: number | bigint }
+    all(...values: unknown[]): unknown[]
   }
 }
+
+/**
+ * Insert Pro's values for `table`, keeping only the columns this database has: a core-only profile
+ * carries the older capture schema, and Pro's migrations add the rest. `CURRENT_TIMESTAMP` values
+ * are written as SQL, as Pro's COALESCE does.
+ */
+function insertRow(
+  db: CaptureDb,
+  table: string,
+  row: Record<string, unknown>,
+  verb = 'INSERT'
+): number {
+  const present = new Set(
+    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+      (column) => column.name
+    )
+  )
+  const entries = Object.entries(row).filter(([column]) => present.has(column))
+  const values = entries.map(([, value]) => (value === NOW ? 'CURRENT_TIMESTAMP' : '?'))
+  const info = db
+    .prepare(
+      `${verb} INTO ${table} (${entries.map(([column]) => column).join(', ')}) VALUES (${values.join(', ')})`
+    )
+    .run(...entries.filter(([, value]) => value !== NOW).map(([, value]) => value))
+  return Number(info.lastInsertRowid)
+}
+
+/** A column Pro fills with the insert time (COALESCE(?, CURRENT_TIMESTAMP)). */
+const NOW = Symbol('CURRENT_TIMESTAMP')
 
 export const OBSERVATION_COLUMNS = [
   'summary',
@@ -57,24 +87,18 @@ export interface ObservationFixture {
 
 /** One observation, as recordObservation inserts a new one. Returns its id. */
 export function writeObservation(db: CaptureDb, input: ObservationFixture): number {
-  const info = db
-    .prepare(
-      `INSERT INTO observations (summary, surface, surface_app, url, category, source_session_id, source_key, engagement, salience, ts)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`
-    )
-    .run(
-      input.summary,
-      input.surface ?? null,
-      input.surfaceApp ?? null,
-      input.url ?? null,
-      input.category ?? 'work',
-      input.sourceSessionId ?? null,
-      input.sourceKey ?? null,
-      input.engagement ?? 0,
-      input.salience ?? 0,
-      input.ts ?? null
-    )
-  return Number(info.lastInsertRowid)
+  return insertRow(db, 'observations', {
+    summary: input.summary,
+    surface: input.surface ?? null,
+    surface_app: input.surfaceApp ?? null,
+    url: input.url ?? null,
+    category: input.category ?? 'work',
+    source_session_id: input.sourceSessionId ?? null,
+    source_key: input.sourceKey ?? null,
+    engagement: input.engagement ?? 0,
+    salience: input.salience ?? 0,
+    ts: input.ts ?? NOW
+  })
 }
 
 export interface FrameFixture {
@@ -90,22 +114,16 @@ export interface FrameFixture {
 
 /** One captured frame, as recordObservation attaches its evidence frames. Returns its id. */
 export function writeFrame(db: CaptureDb, input: FrameFixture): number {
-  const info = db
-    .prepare(
-      `INSERT INTO frames (ts, surface, app, window_title, url, image_path, text, source)
-       VALUES (COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      input.ts ?? null,
-      input.surface ?? null,
-      input.app ?? null,
-      input.windowTitle ?? null,
-      input.url ?? null,
-      input.imagePath ?? null,
-      input.text ?? null,
-      input.source ?? 'vision'
-    )
-  return Number(info.lastInsertRowid)
+  return insertRow(db, 'frames', {
+    ts: input.ts ?? NOW,
+    surface: input.surface ?? null,
+    app: input.app ?? null,
+    window_title: input.windowTitle ?? null,
+    url: input.url ?? null,
+    image_path: input.imagePath ?? null,
+    text: input.text ?? null,
+    source: input.source ?? 'vision'
+  })
 }
 
 /** The keyword index row Pro's schema trigger keeps for an observation, for test schemas that
@@ -129,9 +147,12 @@ export function linkObservationEntity(
   entityId: number,
   role: string | null = null
 ): void {
-  db.prepare(
-    'INSERT OR IGNORE INTO observation_entities (observation_id, entity_id, role) VALUES (?, ?, ?)'
-  ).run(observationId, entityId, role)
+  insertRow(
+    db,
+    'observation_entities',
+    { observation_id: observationId, entity_id: entityId, role },
+    'INSERT OR IGNORE'
+  )
 }
 
 export interface MeetingFixture {
@@ -147,22 +168,16 @@ export interface MeetingFixture {
 
 /** One recorded meeting. Returns its id. */
 export function writeMeeting(db: CaptureDb, input: MeetingFixture): number {
-  const info = db
-    .prepare(
-      `INSERT INTO meetings (title, transcript, summary, audio_path, started_at, ended_at, duration_sec, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      input.title,
-      input.transcript ?? null,
-      input.summary ?? null,
-      input.audioPath ?? null,
-      input.startedAt,
-      input.endedAt ?? null,
-      input.durationSec ?? null,
-      input.startedAt
-    )
-  return Number(info.lastInsertRowid)
+  return insertRow(db, 'meetings', {
+    title: input.title,
+    transcript: input.transcript ?? null,
+    summary: input.summary ?? null,
+    audio_path: input.audioPath ?? null,
+    started_at: input.startedAt,
+    ended_at: input.endedAt ?? null,
+    duration_sec: input.durationSec ?? null,
+    created_at: input.startedAt
+  })
 }
 
 export interface ActionItemFixture {
@@ -182,28 +197,20 @@ export interface ActionItemFixture {
 
 /** One action item, as the action repository inserts it. Returns its id. */
 export function writeActionItem(db: CaptureDb, input: ActionItemFixture): number {
-  const info = db
-    .prepare(
-      `INSERT INTO action_items
-         (text, raw_text, due, due_at, entity_name, entity_id, source_app, source_summary,
-          source_ts, confidence, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      input.text,
-      input.rawText ?? input.text,
-      input.due ?? null,
-      input.dueAt ?? null,
-      input.entityName ?? null,
-      input.entityId ?? null,
-      input.sourceApp ?? null,
-      input.sourceSummary ?? null,
-      input.sourceTs ?? null,
-      input.confidence ?? 0.8,
-      input.status ?? 'open',
-      input.createdAt ?? Date.now()
-    )
-  return Number(info.lastInsertRowid)
+  return insertRow(db, 'action_items', {
+    text: input.text,
+    raw_text: input.rawText ?? input.text,
+    due: input.due ?? null,
+    due_at: input.dueAt ?? null,
+    entity_name: input.entityName ?? null,
+    entity_id: input.entityId ?? null,
+    source_app: input.sourceApp ?? null,
+    source_summary: input.sourceSummary ?? null,
+    source_ts: input.sourceTs ?? null,
+    confidence: input.confidence ?? 0.8,
+    status: input.status ?? 'open',
+    created_at: input.createdAt ?? Date.now()
+  })
 }
 
 /** A relationship between two entities, as the relationship projection writes one. */
@@ -228,9 +235,9 @@ export function writeEntityFact(
   db: CaptureDb,
   input: { entityId: number; fact: string; sourceSessionId?: string | null }
 ): void {
-  db.prepare('INSERT INTO entity_facts (entity_id, fact, source_session_id) VALUES (?, ?, ?)').run(
-    input.entityId,
-    input.fact,
-    input.sourceSessionId ?? null
-  )
+  insertRow(db, 'entity_facts', {
+    entity_id: input.entityId,
+    fact: input.fact,
+    source_session_id: input.sourceSessionId ?? null
+  })
 }

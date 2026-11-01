@@ -3,15 +3,11 @@
   "e2e/entities-evidence.spec.ts": 2,
   "e2e/entities-merge-restore-delete.spec.ts": 2,
   "e2e/tidy-up-0054.spec.ts": 2,
-  "src/main/__tests__/embedding-model-switch.dbtest.ts": 1,
   "src/main/__tests__/entity-domain.dbtest.ts": 3,
-  "src/main/__tests__/frame-text-index.dbtest.ts": 1,
   "src/main/__tests__/fts-rebuild-upgrade.dbtest.ts": 4,
   "src/main/__tests__/memory-rag-chat-lifecycle.integration.dbtest.ts": 3,
   "src/main/__tests__/rag-empty-memory.dbtest.ts": 2,
   "src/main/__tests__/record-sources.dbtest.ts": 3,
-  "src/main/__tests__/record-vectors.dbtest.ts": 2,
-  "src/main/__tests__/search-backfill-short-frames.dbtest.ts": 1,
   "src/main/__tests__/search-missing-capture.dbtest.ts": 3,
   "src/main/__tests__/tools-search.dbtest.ts": 2
 }

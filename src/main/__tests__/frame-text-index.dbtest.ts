@@ -22,6 +22,7 @@ import {
   frameTextIndexBackfilling,
   indexFrameTextBatch
 } from '../frame-text-index'
+import { writeFrame } from './harness/capture-fixtures'
 
 afterAll(() => {
   getDB().close()
@@ -29,11 +30,7 @@ afterAll(() => {
 })
 
 function frame(text: string | null, source = 'ax'): number {
-  return Number(
-    getDB()
-      .prepare('INSERT INTO frames (text, source, surface) VALUES (?, ?, ?)')
-      .run(text, source, 'Preview').lastInsertRowid
-  )
+  return writeFrame(getDB(), { text, source, surface: 'Preview' })
 }
 
 function found(words: string): number[] {
