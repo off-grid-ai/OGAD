@@ -11,10 +11,9 @@ import {
   FTS_TOKENIZE,
   FTS_TRIGRAM_TOKENIZE,
   ftsQuery,
-  ftsTypeahead,
-  needsTrigram,
-  normaliseForIndex
+  ftsTypeahead
 } from '@offgrid/rag/records'
+import { registerFtsFunctions } from './fts-functions'
 import { dataDir } from './runtime-env'
 import fs from 'fs'
 import crypto from 'crypto'
@@ -96,19 +95,7 @@ function loadOrCreateKey(dbPath: string): string | null {
 // `${name}_tri`, on FTS5's trigram tokenizer (any substring of three characters or more), holding
 // only the rows whose text has such a script (offgrid_needs_trigram). See ensureTrigramIndex.
 
-/** The SQLite functions the FTS triggers call. Every connection that writes indexed tables needs them. */
-export function registerFtsFunctions(database: Database.Database): void {
-  database.function('offgrid_fts_text', { deterministic: true }, (value: unknown) =>
-    typeof value === 'string' ? normaliseForIndex(value) : (value as null)
-  )
-  // 1 when any argument is text in a script written without spaces (the trigram twins' filter).
-  database.function(
-    'offgrid_needs_trigram',
-    { deterministic: true, varargs: true },
-    (...values: unknown[]) =>
-      values.some((value) => typeof value === 'string' && needsTrigram(value)) ? 1 : 0
-  )
-}
+export { registerFtsFunctions } from './fts-functions'
 
 /** An external-content FTS5 index over one table's text columns, kept in step by triggers. */
 export interface FtsIndexSpec {
