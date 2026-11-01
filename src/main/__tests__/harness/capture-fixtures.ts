@@ -109,20 +109,27 @@ export interface FrameFixture {
   url?: string | null
   imagePath?: string | null
   text?: string | null
-  source?: string
+  source?: string | null
 }
 
-/** One captured frame, as recordObservation attaches its evidence frames. Returns its id. */
-export function writeFrame(db: CaptureDb, input: FrameFixture): number {
+/**
+ * One captured frame, as recordObservation attaches its evidence frames: a frame without its own
+ * time, surface, app or url carries its observation's. Returns its id.
+ */
+export function writeFrame(
+  db: CaptureDb,
+  input: FrameFixture,
+  observation: Pick<ObservationFixture, 'ts' | 'surface' | 'surfaceApp' | 'url'> = {}
+): number {
   return insertRow(db, 'frames', {
-    ts: input.ts ?? NOW,
-    surface: input.surface ?? null,
-    app: input.app ?? null,
+    ts: input.ts ?? observation.ts ?? NOW,
+    surface: input.surface ?? observation.surface ?? null,
+    app: input.app ?? observation.surfaceApp ?? null,
     window_title: input.windowTitle ?? null,
-    url: input.url ?? null,
+    url: input.url ?? observation.url ?? null,
     image_path: input.imagePath ?? null,
     text: input.text ?? null,
-    source: input.source ?? 'vision'
+    source: input.source ?? null
   })
 }
 
