@@ -82,6 +82,9 @@ beforeAll(async () => {
   }
   addBrowserLink(link)
   registerTaskHistoryIpc()
+  // Retry loads the Web Use host on first use. The app ships it bundled; here vitest compiles its
+  // module graph on that first import (about a second), so load it now, as the app has it.
+  await import('../../browser/web-use-host')
 })
 
 afterAll(() => {
