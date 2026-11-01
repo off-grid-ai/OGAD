@@ -29,7 +29,6 @@
   "src/main/__tests__/search-missing-capture.dbtest.ts": 3,
   "src/main/__tests__/settings-consumers.dbtest.ts": 1,
   "src/main/__tests__/settings-store.test.ts": 1,
-  "src/main/__tests__/task-history-ipc.dbtest.ts": 10,
   "src/main/__tests__/task-history.integration.dbtest.ts": 3,
   "src/main/__tests__/tools-search.dbtest.ts": 5,
   "src/main/__tests__/use-storage.integration.dbtest.ts": 2,
