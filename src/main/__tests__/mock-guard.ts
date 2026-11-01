@@ -34,6 +34,10 @@ export const BOUNDARY_ALLOW: Readonly<
     modules: ['@offgrid/pro/renderer'],
     why: 'The open-core plugin boundary. To the core loader, the private Pro package is an optional, separately built module that may be absent, broken or partial; this test proves the loader survives each.'
   },
+  'src/main/__tests__/ai-request-log-retention.dbtest.ts': {
+    tables: ['ai_request_logs'],
+    why: 'Retention limits need rows the write path cannot produce in a test (thousands of rows, rows days old, 100 MB entries); the rows are the input of the pruning algorithm, compared with a reference.'
+  },
   'src/main/__tests__/use-storage.integration.dbtest.ts': {
     tables: ['app_settings'],
     why: "The action engine's own fresh database, holding a table the engine must coexist with; no app write path owns that database."
