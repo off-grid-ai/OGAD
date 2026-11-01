@@ -58,9 +58,16 @@ E=$(node -p 'require("electron")'); OFFGRID_DATA_DIR=$(mktemp -d) ELECTRON_RUN_A
 - `fake-input-device.ts`: nut.js through Node's module cache. It checks it is in place before anything acts, so no test moves this Mac's mouse or keyboard.
 - `fake-llama-engine.ts` with `useModelBrain`, `fake-kev-runtime.ts`, `fake-actions-helper.ts`, `fake-download-host.ts`, `decision-port-lock.ts`.
 
+**Rows Pro's capture pipeline owns** (observations, frames, meetings, action items, entity facts and edges) go through one shared builder: `harness/capture-fixtures.ts`.
+- It mirrors Pro's production inserts: the same columns, defaults and statements.
+- The guard allows those `INSERT`s only in that file.
+- A Pro contract test (desktop lane) runs the real pipeline and the builder on the same input and compares the rows, so a schema change in Pro fails that test rather than leaving core's seeds stale.
+- 15 core tests and e2e specs moved onto it.
+
 **The guard is now wider.** It scans every file in a test folder (harnesses, setup files) and the e2e specs. It also counts hand-written `INSERT INTO` rows, the same rule as pro.
 - No harness or setup file mocks our code.
-- **34 files (77 `INSERT`s) are on the baseline.** That is the next burn-down: seed through the product's write paths, or a restore for dated rows. Old-version upgrade fixtures may need a documented boundary entry instead.
+- **The baseline is empty.** Every hand-written row went through the app's write paths, a real request or task in the e2e specs, or the capture builder.
+- The rest are named in `BOUNDARY_ALLOW`, each with a reason: data in the shape an older release wrote it, the action engine's own database, synthetic rows as the input of the AI activity pruning test, and the open-core Pro boundary.
 
 **Findings fixed:**
 - The RAG tables were missed on a reopened profile.
