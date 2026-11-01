@@ -11,6 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { startFakeLlamaServer, type FakeLlamaServer } from './harness/fake-llama-server'
+import { indexObservation, unindexObservation, writeObservation } from './harness/capture-fixtures'
 
 interface IpcEvent {
   sender: { send: (channel: string, payload: unknown) => void }
@@ -120,20 +121,15 @@ const createCaptureTables = createCaptureTablesNow
 /** A captured screen moment, as Pro's capture pipeline stores it. */
 async function captureMoment(summary: string): Promise<number> {
   const { getDB } = await import('../database')
-  const id = Number(
-    getDB().prepare("INSERT INTO observations (summary, surface) VALUES (?, 'Notes')").run(summary)
-      .lastInsertRowid
-  )
-  getDB().prepare('INSERT INTO observation_fts(rowid, summary) VALUES (?, ?)').run(id, summary)
+  const id = writeObservation(getDB(), { summary, surface: 'Notes' })
+  indexObservation(getDB(), id, summary)
   return id
 }
 
 /** The user deletes a captured moment (Pro's capture deletion removes the row and its text). */
 async function deleteMoment(id: number, summary: string): Promise<void> {
   const { getDB } = await import('../database')
-  getDB()
-    .prepare("INSERT INTO observation_fts(observation_fts, rowid, summary) VALUES ('delete', ?, ?)")
-    .run(id, summary)
+  unindexObservation(getDB(), id, summary)
   getDB().prepare('DELETE FROM observations WHERE id = ?').run(id)
 }
 

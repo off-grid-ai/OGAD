@@ -135,6 +135,13 @@ export function indexObservation(db: CaptureDb, observationId: number, summary: 
   )
 }
 
+/** Remove an observation's keyword index row, as Pro's delete trigger does. */
+export function unindexObservation(db: CaptureDb, observationId: number, summary: string): void {
+  db.prepare(
+    "INSERT INTO observation_fts(observation_fts, rowid, summary) VALUES ('delete', ?, ?)"
+  ).run(observationId, summary)
+}
+
 export function linkObservationFrame(db: CaptureDb, observationId: number, frameId: number): void {
   db.prepare(
     'INSERT OR IGNORE INTO observation_frames (observation_id, frame_id) VALUES (?, ?)'

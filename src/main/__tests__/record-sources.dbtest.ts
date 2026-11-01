@@ -34,6 +34,7 @@ vi.mock('@huggingface/transformers', () => ({
 import { getDB } from '../database'
 import { ensureRagStoreSchema } from '../rag/store'
 import { ensureRecordSchema, recordSearch } from '../records'
+import { writeActionItem, writeMeeting, writeObservation } from './harness/capture-fixtures'
 
 /** Noon, local time, on 2026-10-14; "yesterday" is the 13th. */
 const NOW = new Date(2026, 9, 14, 12, 0, 0).getTime()
@@ -46,11 +47,7 @@ const sqliteTime = (ms: number): string => new Date(ms).toISOString().slice(0, 1
 const ids = { moment: 0, oldMoment: 0, todo: 0, done: 0, dismissed: 0, meeting: 0, chinese: 0 }
 
 function moment(summary: string, ms: number): number {
-  return Number(
-    getDB()
-      .prepare("INSERT INTO observations (summary, surface, ts) VALUES (?, 'Notes', ?)")
-      .run(summary, sqliteTime(ms)).lastInsertRowid
-  )
+  return writeObservation(getDB(), { summary, surface: 'Notes', ts: sqliteTime(ms) })
 }
 
 function todo(
@@ -59,15 +56,15 @@ function todo(
   ms: number,
   extra: { due?: string; dueAt?: number; entity?: string } = {}
 ): number {
-  return Number(
-    getDB()
-      .prepare(
-        `INSERT INTO action_items (text, raw_text, status, created_at, due, due_at, entity_name, confidence)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 0.9)`
-      )
-      .run(text, text, status, ms, extra.due ?? null, extra.dueAt ?? null, extra.entity ?? null)
-      .lastInsertRowid
-  )
+  return writeActionItem(getDB(), {
+    text,
+    status,
+    createdAt: ms,
+    due: extra.due ?? null,
+    dueAt: extra.dueAt ?? null,
+    entityName: extra.entity ?? null,
+    confidence: 0.9
+  })
 }
 
 beforeAll(() => {
@@ -106,11 +103,11 @@ beforeAll(() => {
   })
   ids.done = todo('Book the venue', 'done', YESTERDAY_NOON, { due: 'by Friday' })
   ids.dismissed = todo('Order more staples', 'dismissed', YESTERDAY_NOON)
-  ids.meeting = Number(
-    getDB()
-      .prepare('INSERT INTO meetings (title, summary, started_at) VALUES (?, ?, ?)')
-      .run('Vendor sync', 'Agreed the renewal price', YESTERDAY_NOON).lastInsertRowid
-  )
+  ids.meeting = writeMeeting(getDB(), {
+    title: 'Vendor sync',
+    summary: 'Agreed the renewal price',
+    startedAt: YESTERDAY_NOON
+  })
 })
 
 afterAll(() => {
