@@ -1,5 +1,4 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -8,8 +7,6 @@ import type { AddressInfo } from 'node:net'
 import { completeOnboarding } from './helpers/onboarding'
 import { launchOffGrid } from './helpers/launch'
 
-const TASK_ID = 'cu004-web-controls'
-const JOURNEY_ID = 'cu004-web-controls-journey'
 const MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
 let app: ElectronApplication | null = null
@@ -20,10 +17,6 @@ let localPageUrl = ''
 let modelPort = 0
 
 test.describe.configure({ timeout: 180_000 })
-
-function sql(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`
-}
 
 function stageModelBoundary(): void {
   const modelDir = path.join(profileDir, 'models')
@@ -51,29 +44,6 @@ function stageModelBoundary(): void {
     executable
   )
   fs.chmodSync(executable, 0o755)
-}
-
-function seedRetryableTask(): void {
-  const now = Date.now()
-  const schema = `
-    CREATE TABLE task_run_history (
-      task_id TEXT PRIMARY KEY, journey_id TEXT, kind TEXT NOT NULL, title TEXT NOT NULL,
-      status TEXT NOT NULL, summary TEXT, steps_json TEXT NOT NULL DEFAULT '[]',
-      started_at INTEGER NOT NULL, finished_at INTEGER, updated_at INTEGER NOT NULL,
-      execution_device_id TEXT, execution_device_name TEXT, phase TEXT, current_step INTEGER,
-      current_action TEXT, last_url TEXT, last_title TEXT, screenshot_path TEXT,
-      screenshot_device_id TEXT, step_details_json TEXT NOT NULL DEFAULT '[]'
-    );
-    INSERT INTO task_run_history VALUES (
-      ${sql(TASK_ID)}, ${sql(JOURNEY_ID)}, 'web_use', 'Complete the protected web form',
-      'failed', 'The prior browser run stopped before the protected step.',
-      ${sql(JSON.stringify(['Opened the protected form']))},
-      ${now - 60_000}, ${now - 30_000}, ${now - 30_000},
-      NULL, NULL, 'failed', 1, 'Retry the browser task',
-      ${sql(localPageUrl)}, 'CU-004 Pointer Lab', NULL, NULL, '[]'
-    );
-  `
-  execFileSync('sqlite3', [path.join(profileDir, 'memories.db'), schema])
 }
 
 async function startLocalPage(): Promise<void> {
@@ -116,10 +86,11 @@ async function taskSnapshot(): Promise<{
   summary?: string
   steps: string[]
 } | null> {
-  return page.evaluate(async (taskId) => {
-    const task = (await window.api.tasks.list(50)).find((candidate) => candidate.taskId === taskId)
+  // The web task this journey started from chat.
+  return page.evaluate(async () => {
+    const task = (await window.api.tasks.list(50)).find((candidate) => candidate.kind === 'web_use')
     return task ? { status: task.status, summary: task.summary, steps: task.steps } : null
-  }, TASK_ID)
+  })
 }
 
 async function waitForTaskStatus(status: string): Promise<void> {
@@ -177,7 +148,6 @@ test.beforeAll(async () => {
   profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-cu004-web-controls-'))
   await startLocalPage()
   stageModelBoundary()
-  seedRetryableTask()
 
   app = await launchOffGrid({
     cwd: profileDir,
@@ -228,14 +198,12 @@ test('runs Web Use through Pause, Take Over, HITL, Resume, and terminal Stop', a
     .getByRole('button', { name: /^Tasks(?:,|$)/ })
     .click()
   await expect(page.getByTestId('task-side-panel')).toBeVisible()
-  await page.getByTestId(`task-tab-${TASK_ID}`).click()
-
   await page.evaluate((url) => window.api.browser.openUrl(url), localPageUrl)
   await page.getByRole('tab', { name: 'CU-004 Pointer Lab', exact: true }).last().click()
-  await page
-    .getByRole('complementary', { name: 'Task details' })
-    .getByRole('button', { name: 'Retry', exact: true })
-    .click()
+  // Asked in chat: the model starts the web task (web_use) on the open page.
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
+  await composer.fill('Complete the protected web form on this page.')
+  await composer.press('Enter')
   await waitForTaskStatus('running')
   await waitForModelPort()
   await waitForPendingDecision()
