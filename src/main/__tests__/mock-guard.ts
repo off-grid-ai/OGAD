@@ -27,13 +27,44 @@ import path from 'node:path'
  * The boundary allow-list: modules of ours that are a real boundary for ONE test file, and why.
  * Keep it short; every entry is reviewed like code.
  */
-export const BOUNDARY_ALLOW: Readonly<Record<string, { modules: readonly string[]; why: string }>> =
-  {
-    'src/renderer/src/bootstrap/__tests__/loadProFeaturesRenderer.test.ts': {
-      modules: ['@offgrid/pro/renderer'],
-      why: 'The open-core plugin boundary. To the core loader, the private Pro package is an optional, separately built module that may be absent, broken or partial; this test proves the loader survives each.'
-    }
+export const BOUNDARY_ALLOW: Readonly<
+  Record<string, { modules?: readonly string[]; tables?: readonly string[]; why: string }>
+> = {
+  'src/renderer/src/bootstrap/__tests__/loadProFeaturesRenderer.test.ts': {
+    modules: ['@offgrid/pro/renderer'],
+    why: 'The open-core plugin boundary. To the core loader, the private Pro package is an optional, separately built module that may be absent, broken or partial; this test proves the loader survives each.'
+  },
+  'src/renderer/src/lib/__tests__/chat-selected-version.test.ts': {
+    tables: ['rag_messages'],
+    why: 'A message in the format older releases wrote (versions as a list inside the row), which no current write path produces; the test proves the upgrade reads it.'
   }
+}
+
+/**
+ * Tables core has no write path for, so a core test may seed them, and why. Every other table is
+ * written through the app's own code in tests. Tables a test creates itself (`test_*`) are not
+ * product data.
+ */
+export const BOUNDARY_TABLES: Readonly<Record<string, string>> = Object.fromEntries([
+  ...[
+    'observations',
+    'observation_fts',
+    'observation_frames',
+    'observation_entities',
+    'frames',
+    'meetings',
+    'action_items',
+    'entity_edges',
+    'entity_facts'
+  ].map((table) => [
+    table,
+    "Written by Pro's capture and analysis pipeline, which open-core tests cannot import."
+  ]),
+  ...['conversations', 'messages', 'memories'].map((table) => [
+    table,
+    'Written only by older releases; the current app reads, migrates and purges them.'
+  ])
+])
 
 /** A module specifier that names our own code (see the header). */
 export function isOurs(specifier: string): boolean {
@@ -47,7 +78,11 @@ export function isOurs(specifier: string): boolean {
 }
 
 /** Each mock or spy of our code in one test file's source, as `mock <specifier>` / `spyOn <target>`. */
-export function mocksOfOurs(source: string, allowed: readonly string[] = []): string[] {
+export function mocksOfOurs(
+  source: string,
+  allowed: readonly string[] = [],
+  allowedTables: readonly string[] = []
+): string[] {
   const found: string[] = []
   for (const match of source.matchAll(
     /vi\.(?:mock|doMock)\(\s*(?:import\(\s*)?(['"`])([^'"`]+)\1\)?(\s*,\s*(?:async\s*)?\(\)\s*=>\s*import\()?/g
@@ -78,7 +113,10 @@ export function mocksOfOurs(source: string, allowed: readonly string[] = []): st
   // A row written straight into a table tests a guess of the schema, not the product: data
   // enters through the app's own write paths.
   for (const match of source.matchAll(/\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+([A-Za-z_]\w*)/g)) {
-    found.push(`insert ${match[1]}`)
+    const table = match[1]!
+    if (table.startsWith('test_') || table in BOUNDARY_TABLES || allowedTables.includes(table))
+      continue
+    found.push(`insert ${table}`)
   }
   return found
 }
@@ -112,8 +150,12 @@ export function scanMocks(
   for (const file of [...new Set(files)]) {
     const relative = path.relative(root, file)
     if (skip.includes(relative)) continue
-    const allowed = BOUNDARY_ALLOW[relative]?.modules ?? []
-    const count = mocksOfOurs(fs.readFileSync(file, 'utf8'), allowed).length
+    const allow = BOUNDARY_ALLOW[relative]
+    const count = mocksOfOurs(
+      fs.readFileSync(file, 'utf8'),
+      allow?.modules ?? [],
+      allow?.tables ?? []
+    ).length
     if (count) counts[relative] = count
   }
   return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)))

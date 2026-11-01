@@ -14,7 +14,9 @@ beforeEach(() => {
 describe('createSettingsStore', () => {
   it('returns the supplied default for missing and corrupt values', () => {
     expect(store.get('missing', { enabled: false })).toEqual({ enabled: false })
-    database.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)').run('broken', '{no')
+    store.set('broken', { saved: true })
+    // A damaged file: the stored value is cut short (a disk fault, not a write path).
+    database.prepare('UPDATE app_settings SET value = ? WHERE key = ?').run('{no', 'broken')
     expect(store.get('broken', 'fallback')).toBe('fallback')
   })
 
