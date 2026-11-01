@@ -120,8 +120,12 @@ import type { AxElement } from '../accessibility/ax-elements'
 let desktop: FakeMacDesktop
 let input: FakeInputDevice
 let engine: FakeLlamaEngine
-let releasePorts: () => void = () => {}
 let brain: ModelBrain
+
+// Other test files that start Decision servers take turns with this one, file by file. Taken while
+// the file loads, so a wait for another file's turn is never a test's or hook's time.
+const releasePorts = await holdDecisionPorts()
+afterAll(releasePorts)
 /** The reasoning model's answer to each request; the default is set per test. */
 let reason: (request: BrainRequest) => string = () => ''
 
@@ -195,14 +199,12 @@ beforeAll(async () => {
 })
 
 beforeEach(async () => {
-  releasePorts = await holdDecisionPorts()
   input.events.length = 0
   ui.sent.length = 0
 })
 
 afterEach(async () => {
   await decisionRuntime.shutdown()
-  releasePorts()
 })
 
 afterAll(async () => {

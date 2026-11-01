@@ -24,6 +24,11 @@ import {
 } from '../../__tests__/harness/fake-kev-runtime'
 import { holdDecisionPorts } from '../../__tests__/harness/decision-port-lock'
 
+// Other test files that start Decision servers take turns with this one, file by file. Taken while
+// the file loads, so a wait for another file's turn is never a test's or hook's time.
+const releasePorts = await holdDecisionPorts()
+afterAll(releasePorts)
+
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-decision-runtime-'))
 const previous = { data: process.env.OFFGRID_DATA_DIR, bin: process.env.OFFGRID_BIN_DIR }
 process.env.OFFGRID_DATA_DIR = ROOT
@@ -70,9 +75,7 @@ const tokenProbabilities = (probs: Record<string, number>): Record<string, unkno
   ]
 })
 
-let releasePorts: () => void = () => {}
 beforeEach(async () => {
-  releasePorts = await holdDecisionPorts()
   fs.rmSync(path.join(ROOT, 'models'), { recursive: true, force: true })
   bin = fs.mkdtempSync(path.join(ROOT, 'bin-'))
   process.env.OFFGRID_BIN_DIR = bin
@@ -84,7 +87,6 @@ afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((created) => created.shutdown()))
   for (const { pid } of [...engine.launches(), ...kevStarts()])
     if (processAlive(pid)) process.kill(pid, 'SIGKILL')
-  releasePorts()
 })
 
 afterAll(() => {

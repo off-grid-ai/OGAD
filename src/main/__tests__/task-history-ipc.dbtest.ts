@@ -120,6 +120,11 @@ import { addBrowserLink, getBridgeService } from '../extension-bridge/bridge-ele
 import { exportPublicKey, generateKeyPair } from '../extension-bridge/bridge-protocol'
 import type { BrowserLink } from '../extension-bridge/bridge-socket'
 
+// Other test files that start Decision servers take turns with this one, file by file. Taken while
+// the file loads, so a wait for another file's turn is never a test's or hook's time.
+const releasePorts = await holdDecisionPorts()
+afterAll(releasePorts)
+
 let desktop: FakeMacDesktop
 let input: FakeInputDevice
 let engine: FakeLlamaEngine
@@ -266,13 +271,11 @@ describe('task history IPC composition', () => {
     })
     failedTask('cu-ax', 'computer_use', 'Write hello in Notes')
 
-    const releasePorts = await holdDecisionPorts()
     try {
       await ui.handlers.get('tasks:retry')!({}, 'cu-ax')
       await settled('cu-ax')
     } finally {
       await decisionRuntime.shutdown()
-      releasePorts()
     }
 
     expect(desktop.read().log).toContain('--elements Notes')

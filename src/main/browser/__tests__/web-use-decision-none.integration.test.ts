@@ -92,7 +92,11 @@ const DONE = {
 
 let engine: FakeLlamaEngine
 let brain: ModelBrain
-let releasePorts: () => void = () => {}
+
+// Other test files that start Decision servers take turns with this one, file by file. Taken while
+// the file loads, so a wait for another file's turn is never a test's or hook's time.
+const releasePorts = await holdDecisionPorts()
+afterAll(releasePorts)
 
 beforeAll(async () => {
   const chat = await importLocalModel(writeGguf(path.join(PROFILE, 'fixtures'), 'chat.gguf'))
@@ -139,14 +143,12 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
-  releasePorts = await holdDecisionPorts()
   policy.replies.length = 0
   policy.notes.length = 0
 })
 
 afterEach(async () => {
   await decisionRuntime.shutdown()
-  releasePorts()
 })
 
 describe('Web Use when the Decision model rejects every proposal', () => {

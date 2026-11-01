@@ -1,7 +1,8 @@
 // The Decision runtime always starts at port 8459 and takes the first free one after it. Two test
 // files that start Decision servers at once can pick the same port; one file's server then answers
-// the other's requests. Files that start them take this machine-wide lock for each test, so they
-// take turns. The lock is a listening socket: the OS frees it when its holder exits, so a crashed
+// the other's requests. Files that start them take this machine-wide lock while they load and hold
+// it until their last test ends, so they take turns, file by file, and no test or hook spends its
+// time waiting for another file's turn. The lock is a listening socket: the OS frees it when its holder exits, so a crashed
 // worker never leaves it behind and a reused pid never keeps it held.
 import net from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
