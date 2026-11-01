@@ -68,25 +68,39 @@ if (!/^[0-9a-f]{64}$/.test(expected ?? '')) {
   process.exit(1)
 }
 
-// GitHub's release downloads can drop a connection mid-body; a bare fetch then never settles
-// and the release job sits until it is cancelled. Each attempt gets two minutes, three in all.
+// GitHub's release downloads can stall mid-body; a bare fetch then never settles and the release
+// job sits until it is cancelled. An attempt that receives nothing for a minute is dropped and
+// retried, three in all; a slow download that keeps arriving runs to the end.
 async function download(url) {
   let lastError
   for (let attempt = 1; attempt <= 3; attempt++) {
+    const controller = new AbortController()
+    let idle = setTimeout(() => controller.abort(new Error('no data for 60 s')), 60_000)
+    const progress = () => {
+      clearTimeout(idle)
+      idle = setTimeout(() => controller.abort(new Error('no data for 60 s')), 60_000)
+    }
     try {
       const response = await fetch(url, {
         headers: process.env.GITHUB_TOKEN
           ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
           : {},
-        signal: AbortSignal.timeout(120_000)
+        signal: controller.signal
       })
       if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`)
-      return Buffer.from(await response.arrayBuffer())
+      const chunks = []
+      for await (const chunk of response.body) {
+        chunks.push(chunk)
+        progress()
+      }
+      return Buffer.concat(chunks)
     } catch (error) {
       lastError = error
       console.warn(
         `[sherpa] download attempt ${attempt} failed: ${error instanceof Error ? error.message : error}`
       )
+    } finally {
+      clearTimeout(idle)
     }
   }
   throw lastError
@@ -105,15 +119,31 @@ try {
   const tarball = path.join(work, target.asset)
   fs.writeFileSync(tarball, archive)
 
-  // Windows: the system bsdtar reads bzip2 itself; Git Bash's tar may not.
-  const tar =
+  // Windows tries its own bsdtar first, then Git's tar (which ships bzip2). Each call has stdin
+  // closed and two minutes: a blocked tar otherwise stalls the release job with no output.
+  const tars =
     process.platform === 'win32'
-      ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
-      : 'tar'
-  const listing = spawnSync(tar, ['-tf', tarball], {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024
-  })
+      ? [path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), 'tar']
+      : ['tar']
+  const runTar = (args) => {
+    let last
+    for (const tar of tars) {
+      console.log(`[sherpa] ${tar} ${args[0]}`)
+      // GNU tar reads `C:\\…` as host:path unless told the archive is local.
+      const local = process.platform === 'win32' && tar === 'tar' ? ['--force-local'] : []
+      last = spawnSync(tar, [...local, ...args], {
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        timeout: 120_000
+      })
+      if (last.status === 0) return last
+      console.warn(`[sherpa] ${tar} ${args[0]} failed: ${last.error?.message ?? last.stderr}`)
+    }
+    return last
+  }
+  const listing = runTar(['-tf', tarball])
   if (listing.status !== 0) throw new Error(`could not list ${target.asset}: ${listing.stderr}`)
   // A tampered archive must not write outside the temp folder.
   if (
@@ -124,7 +154,7 @@ try {
     throw new Error(`${target.asset} holds absolute or parent paths`)
   const top = target.asset.replace(/\.tar\.bz2$/, '')
   const members = Object.keys(target.files).map((file) => `${top}/${file}`)
-  const extract = spawnSync(tar, ['-xf', tarball, '-C', work, ...members], { encoding: 'utf8' })
+  const extract = runTar(['-xf', tarball, '-C', work, ...members])
   if (extract.status !== 0) throw new Error(`could not extract ${target.asset}: ${extract.stderr}`)
 
   fs.rmSync(dest, { recursive: true, force: true })
@@ -143,7 +173,14 @@ try {
   if (values.check) {
     const cli = path.join(dest, 'bin', path.basename(Object.keys(target.files)[0]))
     // With no arguments the CLI prints its usage. It only gets that far once ONNX Runtime loads.
-    const run = spawnSync(cli, [], { encoding: 'utf8', cwd: path.dirname(cli) })
+    console.log(`[sherpa] starting ${cli}`)
+    const run = spawnSync(cli, [], {
+      encoding: 'utf8',
+      cwd: path.dirname(cli),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      timeout: 120_000
+    })
     const output = `${run.stdout ?? ''}${run.stderr ?? ''}`
     if (!/Usage:/.test(output)) {
       throw new Error(
