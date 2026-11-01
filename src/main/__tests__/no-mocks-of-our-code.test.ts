@@ -35,20 +35,23 @@ it('names our code and leaves the device boundary alone', () => {
     "vi.spyOn(os, 'totalmem')",
     "vi.spyOn(console, 'warn')",
     "const store = await import('../store')",
-    "vi.spyOn(store, 'save')"
+    "vi.spyOn(store, 'save')",
+    'db.prepare(`INSERT OR REPLACE INTO task_runs (id) VALUES (?)`)'
   ].join('\n')
   expect(mocksOfOurs(sample)).toEqual([
     'mock ../backend-preferences',
     'mock ../runtime-env',
     'spyOn llm',
-    'spyOn store'
+    'spyOn store',
+    'insert task_runs'
   ])
 })
 
 it('no core test mocks our code beyond the baseline, and the baseline only shrinks', () => {
   const now = scanMocks(
     ROOT,
-    ['src', 'integration-tests'],
+    // Test files, every file in a test folder (harnesses, setup files) and the e2e specs.
+    ['src', 'integration-tests', 'e2e'],
     [path.relative(ROOT, __filename), path.relative(ROOT, path.join(__dirname, 'mock-guard.ts'))]
   )
   expect(checkMockBaseline(BASELINE, now)).toEqual([])

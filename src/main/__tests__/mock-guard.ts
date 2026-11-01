@@ -11,6 +11,10 @@
  * One form is wiring, not a fake, and is allowed: `vi.mock('<ours>', () => import('<real path>'))`,
  * which points an alias the test config stubs (the free build's `@offgrid/pro/*`) at the real code.
  *
+ * The same rule holds for data: a test may not write rows straight into the app's tables
+ * (`INSERT INTO`); data enters through the product's own write paths. Every file inside a test
+ * folder (harnesses, fixtures, setup files) is held to both rules, not only `*.test.*` files.
+ *
  * Files written before the rule are listed in a baseline JSON with how many mocks of ours they
  * still hold. A file outside the list may hold none; a listed file may never gain one; a file down
  * to zero must leave the list. So the list only shrinks. Core and pro each keep their own baseline
@@ -71,15 +75,25 @@ export function mocksOfOurs(source: string, allowed: readonly string[] = []): st
     const root = target.replace(/^\(+/, '').split(/[.([\s]/)[0]!
     if ((inline && isOurs(inline[2]!)) || bound.has(root)) found.push(`spyOn ${target}`)
   }
+  // A row written straight into a table tests a guess of the schema, not the product: data
+  // enters through the app's own write paths.
+  for (const match of source.matchAll(/\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+([A-Za-z_]\w*)/g)) {
+    found.push(`insert ${match[1]}`)
+  }
   return found
 }
 
-function testFiles(dir: string): string[] {
+/** Test files anywhere, and every source file inside a test folder (harnesses, fixtures, setup). */
+function testFiles(dir: string, inTestFolder = false): string[] {
   if (!fs.existsSync(dir)) return []
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) return entry.name === 'node_modules' ? [] : testFiles(full)
-    return /\.(test|dbtest)\.(ts|tsx)$/.test(entry.name) ? [full] : []
+    if (entry.isDirectory())
+      return entry.name === 'node_modules'
+        ? []
+        : testFiles(full, inTestFolder || entry.name === '__tests__')
+    if (!/\.(ts|tsx|js|mjs)$/.test(entry.name)) return []
+    return inTestFolder || /\.(test|dbtest|spec)\.(ts|tsx)$/.test(entry.name) ? [full] : []
   })
 }
 
@@ -87,10 +101,15 @@ function testFiles(dir: string): string[] {
 export function scanMocks(
   root: string,
   dirs: string[],
-  skip: string[] = []
+  skip: string[] = [],
+  extraFiles: string[] = []
 ): Record<string, number> {
   const counts: Record<string, number> = {}
-  for (const file of dirs.flatMap((dir) => testFiles(path.join(root, dir)))) {
+  const files = [
+    ...dirs.flatMap((dir) => testFiles(path.join(root, dir))),
+    ...extraFiles.map((file) => path.join(root, file)).filter((file) => fs.existsSync(file))
+  ]
+  for (const file of [...new Set(files)]) {
     const relative = path.relative(root, file)
     if (skip.includes(relative)) continue
     const allowed = BOUNDARY_ALLOW[relative]?.modules ?? []
