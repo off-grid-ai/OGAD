@@ -51,6 +51,7 @@ import { createProject, ensureRagStoreSchema } from '../rag/store'
 import { knowledgeBase } from '../rag'
 import { documentStore } from '../documents'
 import { parseSearchBlock } from '@offgrid/rag/documents'
+import { writeObservation } from './harness/capture-fixtures'
 
 let fake: FakeLlamaServer
 
@@ -108,12 +109,7 @@ afterAll(async () => {
 // Seed a real observation; its AFTER INSERT trigger populates observation_fts, so
 // universalSearch's real keyword branch finds it. Returns the `obs:<id>` key it surfaces.
 function seedObservation(summary: string, surface: string): string {
-  const id = Number(
-    getDB()
-      .prepare('INSERT INTO observations (summary, surface, category) VALUES (?, ?, ?)')
-      .run(summary, surface, 'work').lastInsertRowid
-  )
-  return `obs:${id}`
+  return `obs:${writeObservation(getDB(), { summary, surface })}`
 }
 
 function seedChat(id: string, title: string, content: string): string {
@@ -200,11 +196,7 @@ describe('search_memory citations — real universalSearch over the real full sc
     const { universalSearch } = await import('../search')
     const db = getDB()
     const at = (summary: string, surface: string, ts: string): string =>
-      `obs:${Number(
-        db
-          .prepare('INSERT INTO observations (summary, surface, category, ts) VALUES (?, ?, ?, ?)')
-          .run(summary, surface, 'work', ts).lastInsertRowid
-      )}`
+      `obs:${writeObservation(db, { summary, surface, ts })}`
     const older = at('Reviewed the quarterly plan', 'Figma', '2026-10-01 09:00:00')
     const newer = at('Answered the release thread', 'Slack', '2026-10-14 09:00:00')
 

@@ -21,6 +21,7 @@ import {
   resolveEntityCandidate,
   type EntityDomain
 } from '../entity-domain'
+import { writeEntityEdge, writeEntityFact } from './harness/capture-fixtures'
 
 function resolve(name: string, type = 'Unknown'): number {
   const result = resolveEntityCandidate({ name, type })
@@ -114,15 +115,13 @@ describe('EntityDomain SQLite lifecycle', () => {
       )
       const doomed = resolve('Delete With Dependants', 'Person')
       const survivor = resolve('Lifecycle Survivor', 'Person')
-      db.prepare(
-        'INSERT INTO entity_facts (entity_id, fact, source_session_id) VALUES (?, ?, ?)'
-      ).run(doomed, 'Fact that must not become orphaned', 'entity-delete-session')
+      writeEntityFact(db, {
+        entityId: doomed,
+        fact: 'Fact that must not become orphaned',
+        sourceSessionId: 'entity-delete-session'
+      })
       upsertEntitySession(doomed, 'entity-delete-session')
-      db.prepare(
-        `INSERT INTO entity_edges
-           (source_entity_id, target_entity_id, type, weight, evidence_count)
-         VALUES (?, ?, 'cooccurrence', 1, 1)`
-      ).run(doomed, survivor)
+      writeEntityEdge(db, { source: doomed, target: survivor })
 
       expect(deleteEntityById(doomed)).toBe(true)
       for (const [table, predicate] of [
@@ -151,9 +150,11 @@ describe('EntityDomain SQLite lifecycle', () => {
       'Notes'
     )
     const doomed = resolve('Rollback Entity', 'Person')
-    db.prepare(
-      'INSERT INTO entity_facts (entity_id, fact, source_session_id) VALUES (?, ?, ?)'
-    ).run(doomed, 'This fact must survive rollback', 'entity-rollback-session')
+    writeEntityFact(db, {
+      entityId: doomed,
+      fact: 'This fact must survive rollback',
+      sourceSessionId: 'entity-rollback-session'
+    })
     upsertEntitySession(doomed, 'entity-rollback-session')
     db.exec(`CREATE TRIGGER reject_entity_delete
       BEFORE DELETE ON entities WHEN old.id = ${doomed}

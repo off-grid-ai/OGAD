@@ -2,8 +2,5 @@
   "e2e/day-timeline-blocks.spec.ts": 1,
   "e2e/entities-evidence.spec.ts": 2,
   "e2e/entities-merge-restore-delete.spec.ts": 2,
-  "e2e/tidy-up-0054.spec.ts": 2,
-  "src/main/__tests__/entity-domain.dbtest.ts": 3,
-  "src/main/__tests__/fts-rebuild-upgrade.dbtest.ts": 4,
-  "src/main/__tests__/tools-search.dbtest.ts": 2
+  "e2e/tidy-up-0054.spec.ts": 2
 }
