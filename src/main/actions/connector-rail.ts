@@ -61,6 +61,26 @@ function resultDetail(value: unknown): string {
   return output.length > 8_000 ? `${output.slice(0, 8_000)}… (truncated)` : output
 }
 
+/** The tool's own report of failure (MCP `isError`), as words a person can read. Null when it acted. */
+function toolFailure(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) return null
+  const reply = value as { isError?: unknown; content?: unknown }
+  if (reply.isError !== true) return null
+  const parts = (Array.isArray(reply.content) ? reply.content : []) as Array<{
+    type?: unknown
+    text?: unknown
+  } | null>
+  const text = parts
+    .filter(
+      (part): part is { type: 'text'; text: string } =>
+        part?.type === 'text' && typeof part.text === 'string'
+    )
+    .map((part) => part.text.trim())
+    .filter(Boolean)
+    .join(' ')
+  return text ? resultDetail(text) : 'The connector reported that the action failed.'
+}
+
 export function makeConnectorRailExecutor(callConnector: CallConnector) {
   return async (action: ActionRecord): Promise<ExecuteResult> => {
     const parsed = connectorActionArgs(action.args)
@@ -69,9 +89,12 @@ export function makeConnectorRailExecutor(callConnector: CallConnector) {
     }
     try {
       const result = await callConnector(parsed.connectorId, parsed.tool, parsed.args)
-      return result.ok
-        ? { ok: true, detail: resultDetail(result.result) }
-        : { ok: false, detail: result.error ?? 'connector call failed' }
+      if (!result.ok) return { ok: false, detail: result.error ?? 'connector call failed' }
+      // A tool can answer and still say it failed; that is not an executed action.
+      const failure = toolFailure(result.result)
+      return failure
+        ? { ok: false, detail: failure }
+        : { ok: true, detail: resultDetail(result.result) }
     } catch (error) {
       return { ok: false, detail: `connector rail failed: ${(error as Error).message}` }
     }
