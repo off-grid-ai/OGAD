@@ -34,6 +34,22 @@ export const BOUNDARY_ALLOW: Readonly<
     modules: ['@offgrid/pro/renderer'],
     why: 'The open-core plugin boundary. To the core loader, the private Pro package is an optional, separately built module that may be absent, broken or partial; this test proves the loader survives each.'
   },
+  'src/main/__tests__/use-storage.integration.dbtest.ts': {
+    tables: ['app_settings'],
+    why: "The action engine's own fresh database, holding a table the engine must coexist with; no app write path owns that database."
+  },
+  'src/main/__tests__/knowledge-document-sync-owner.integration.dbtest.ts': {
+    tables: ['rag_documents'],
+    why: 'A knowledge-base row in the schema older releases wrote (no sync id); the test proves the upgrade gives it one.'
+  },
+  'src/main/__tests__/task-history.integration.dbtest.ts': {
+    tables: ['task_run_history'],
+    why: 'Task rows older releases wrote (their kind and status words, their schema, their uncleaned titles), which no current write path produces; the tests prove the current store reads or skips them.'
+  },
+  'src/main/__tests__/rag-message-uuid.dbtest.ts': {
+    tables: ['rag_conversations', 'rag_messages'],
+    why: 'A database from before messages had ids, and a duplicate id the writer can never produce; the tests prove the upgrade backfills ids and the schema refuses duplicates.'
+  },
   'src/renderer/src/lib/__tests__/chat-selected-version.test.ts': {
     tables: ['rag_messages'],
     why: 'A message in the format older releases wrote (versions as a list inside the row), which no current write path produces; the test proves the upgrade reads it.'
