@@ -1,34 +1,29 @@
 // The Decision runtime always starts at port 8459 and takes the first free one after it. Two test
 // files that start Decision servers at once can pick the same port; one file's server then answers
 // the other's requests. Files that start them take this machine-wide lock for each test, so they
-// take turns. A lock left by a process that died is taken over.
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+// take turns. The lock is a listening socket: the OS frees it when its holder exits, so a crashed
+// worker never leaves it behind and a reused pid never keeps it held.
+import net from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 
-const LOCK = path.join(os.tmpdir(), 'offgrid-decision-ports.lock')
+/** Far from the product's ports (8439-8489), so only test files ever hold it. */
+const LOCK_PORT = 47459
 
-function holderAlive(): boolean {
-  try {
-    const pid = Number(fs.readFileSync(path.join(LOCK, 'pid'), 'utf8'))
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
+function listen(): Promise<net.Server | null> {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+    server.once('error', () => resolve(null))
+    server.listen({ port: LOCK_PORT, host: '127.0.0.1', exclusive: true }, () =>
+      resolve(server.unref())
+    )
+  })
 }
 
 /** Wait for the Decision port range, then hold it; returns the release. */
 export async function holdDecisionPorts(): Promise<() => void> {
   for (;;) {
-    try {
-      fs.mkdirSync(LOCK)
-      fs.writeFileSync(path.join(LOCK, 'pid'), String(process.pid))
-      return () => fs.rmSync(LOCK, { recursive: true, force: true })
-    } catch {
-      if (!holderAlive()) fs.rmSync(LOCK, { recursive: true, force: true })
-      else await delay(50)
-    }
+    const server = await listen()
+    if (server) return () => server.close()
+    await delay(50)
   }
 }
