@@ -38,6 +38,14 @@ export const BOUNDARY_ALLOW: Readonly<
     tables: ['ai_request_logs'],
     why: 'Retention limits need rows the write path cannot produce in a test (thousands of rows, rows days old, 100 MB entries); the rows are the input of the pruning algorithm, compared with a reference.'
   },
+  'e2e/entities-evidence.spec.ts': {
+    tables: ['entities'],
+    why: "Capture history as Pro's capture and analysis pipeline writes it (people found in what was seen, with their observations); the spec reads it in the app."
+  },
+  'e2e/entities-merge-restore-delete.spec.ts': {
+    tables: ['entities'],
+    why: "Capture history as Pro's capture and analysis pipeline writes it (people found in what was seen, with their observations); the spec reads it in the app."
+  },
   'e2e/upgrade-0054-profile.spec.ts': {
     tables: ['app_settings'],
     why: 'A profile as release 0.0.54 left it; the spec proves the current app upgrades it.'

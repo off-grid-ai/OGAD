@@ -2,7 +2,5 @@
   "e2e/ai-activity-key.spec.ts": 1,
   "e2e/ai-activity.spec.ts": 1,
   "e2e/cu004-web-use-controls.spec.ts": 1,
-  "e2e/entities-evidence.spec.ts": 1,
-  "e2e/entities-merge-restore-delete.spec.ts": 1,
   "e2e/web-use-failed-task-status.spec.ts": 1
 }
