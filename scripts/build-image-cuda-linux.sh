@@ -80,6 +80,11 @@ for name in sd-cli sd-server; do
   test -z "$missing" || { printf '%s\n' "$missing" >&2; exit 1; }
 done
 install -m 644 "$WORK/src/LICENSE" "$DEST/LICENSE"
-help="$(LD_LIBRARY_PATH="$DEST:$ROOT/build/linux-bin/cuda-runtime" "$DEST/sd-cli" --help 2>&1)"
+# The runner has no GPU driver, and the CLI links libcuda.so.1 itself: run it in the CUDA image
+# with the toolkit's libcuda stub, which loads but never reaches a device.
+help="$("${DOCKER[@]}" run --rm --platform linux/amd64 -v "$DEST:/dest:ro" "$CUDA_BUILD_IMAGE" bash -euo pipefail -c '
+  mkdir -p /tmp/stub && ln -s /usr/local/cuda/lib64/stubs/libcuda.so /tmp/stub/libcuda.so.1
+  LD_LIBRARY_PATH=/dest:/tmp/stub:/usr/local/cuda/lib64 /dest/sd-cli --help
+' 2>&1)"
 grep -q -- '--decode-preview-path' <<< "$help"
 echo '[build-image-cuda-linux] staged CUDA image/video CLI with decoded previews'
