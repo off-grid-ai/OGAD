@@ -8,11 +8,8 @@
   "e2e/web-use-failed-task-status.spec.ts": 1,
   "src/main/__tests__/ai-request-log-retention.dbtest.ts": 1,
   "src/main/__tests__/desktop-backup-roundtrip.integration.dbtest.ts": 6,
-  "src/main/__tests__/image-generation-navigation.integration.dbtest.ts": 2,
-  "src/main/__tests__/ipc-fts-fallback.dbtest.ts": 2,
   "src/main/__tests__/knowledge-document-sync-owner.integration.dbtest.ts": 1,
   "src/main/__tests__/rag-message-uuid.dbtest.ts": 3,
   "src/main/__tests__/task-history.integration.dbtest.ts": 3,
-  "src/main/__tests__/tools-search.dbtest.ts": 2,
   "src/main/__tests__/use-storage.integration.dbtest.ts": 1
 }

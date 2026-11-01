@@ -40,7 +40,13 @@ vi.mock('@lancedb/lancedb', () => ({
 
 import { toolChat, type ToolActivity } from '../tools'
 import { llm } from '../llm'
-import { deleteSetting, getDB, saveSetting } from '../database'
+import {
+  addRagMessage,
+  createRagConversation,
+  deleteSetting,
+  getDB,
+  saveSetting
+} from '../database'
 import { createProject, ensureRagStoreSchema } from '../rag/store'
 import { knowledgeBase } from '../rag'
 import { documentStore } from '../documents'
@@ -111,13 +117,8 @@ function seedObservation(summary: string, surface: string): string {
 }
 
 function seedChat(id: string, title: string, content: string): string {
-  const db = getDB()
-  db.prepare('INSERT INTO rag_conversations (id, title) VALUES (?, ?)').run(id, title)
-  db.prepare('INSERT INTO rag_messages (conversation_id, role, content) VALUES (?, ?, ?)').run(
-    id,
-    'user',
-    content
-  )
+  createRagConversation(id, title)
+  addRagMessage(id, 'user', content)
   return `chat:${id}`
 }
 
@@ -244,7 +245,9 @@ async function addKnowledgeFile(
 /** A long handbook: too big to give whole, so a turn gives the passages that match. */
 function handbook(fact: string): string {
   const filler = (n: number): string =>
-    `Section ${n}. Staff read the notice board each morning and log visitors at the front desk. `.repeat(6)
+    `Section ${n}. Staff read the notice board each morning and log visitors at the front desk. `.repeat(
+      6
+    )
   const sections = Array.from({ length: 60 }, (_, i) => filler(i + 1))
   sections.splice(31, 0, fact)
   return sections.join('\n\n')
@@ -286,7 +289,9 @@ describe('project chats answer from the knowledge base', () => {
     expect(r.unified[0]).toMatchObject({ kind: 'attachment', surface: 'kiosk-hours.md' })
     expect(r.unified.map(({ surface }) => surface)).not.toContain('private-hours.md')
     // The work timeline says what the turn is doing with the files.
-    expect(activity).toEqual(expect.arrayContaining(['Opening 1 document…', 'Searching 1 document…']))
+    expect(activity).toEqual(
+      expect.arrayContaining(['Opening 1 document…', 'Searching 1 document…'])
+    )
   })
 
   it('numbers search_knowledge_base passages after the turn-s own, reusing a number the turn already gave', async () => {
