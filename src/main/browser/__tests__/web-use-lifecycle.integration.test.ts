@@ -1,44 +1,44 @@
 /**
- * Focused Web Use control journeys. Off Grid policy, lifecycle, and action
- * dispatch are real. Only the remote model, Playwright MCP, and pointer driver
- * boundaries are faked.
+ * Focused Web Use control journeys. Off Grid policy, lifecycle, action dispatch, task history and
+ * the chat engine owner are real. Only the model's tokens (a llama-server executable whose replies
+ * come from this test), Playwright MCP, and pointer driver boundaries are faked.
  */
 import type { BrowserLink } from '../../extension-bridge/bridge-socket'
 import type { SocketEvent } from '../../extension-bridge/bridge-socket-protocol'
-import type { TaskRunUpdate } from '../../tasks/task-history-store'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const history = vi.hoisted(() => ({ updates: [] as TaskRunUpdate[] }))
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, beforeAll } from 'vitest'
+import {
+  installFakeLlamaEngine,
+  processAlive,
+  unusedPort,
+  useModelBrain,
+  writeGguf,
+  type FakeLlamaEngine,
+  type ModelBrain
+} from '../../__tests__/harness/fake-llama-engine'
 
-vi.mock('../../tasks/task-history', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../tasks/task-history')>()),
-  getTaskExecutionDevice: () => ({ id: 'test-device', name: 'Test device' }),
-  recordTaskRun: (update: TaskRunUpdate) => history.updates.push(update),
-  reportTaskProgress: () => undefined
+const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-web-use-lifecycle-'))
+const previous = { data: process.env.OFFGRID_DATA_DIR, bin: process.env.OFFGRID_BIN_DIR }
+process.env.OFFGRID_DATA_DIR = PROFILE
+process.env.OFFGRID_BIN_DIR = fs.mkdtempSync(path.join(PROFILE, 'no-engines-'))
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => process.env.OFFGRID_DATA_DIR,
+    isPackaged: false,
+    getAppPath: () => process.cwd()
+  },
+  safeStorage: { isEncryptionAvailable: () => false },
+  BrowserWindow: { getAllWindows: () => [] }
 }))
 
-const model = vi.hoisted(() => ({
-  replies: [] as Array<string | ((signal?: AbortSignal) => Promise<string>)>
-}))
-
-vi.mock('../../llm', () => ({
-  llm: {
-    chat: vi.fn(
-      async (
-        _prompt: string,
-        _images: unknown[],
-        _timeout: number,
-        _maxTokens: number,
-        options?: { signal?: AbortSignal }
-      ) => {
-        const reply = model.replies.shift()
-        if (typeof reply === 'function') return reply(options?.signal)
-        if (typeof reply === 'string') return reply
-        throw new Error('The model boundary has no queued reply.')
-      }
-    )
-  }
-}))
+// The model: each request takes the next queued reply. A function reply gets the request's abort
+// signal, which fires when the app hangs up on the engine.
+const model = { replies: [] as Array<string | ((signal?: AbortSignal) => Promise<string>)> }
 
 import { createExtensionBrowserHost } from '../extension-browser-host'
 import {
@@ -53,6 +53,8 @@ import {
   type SemanticDecision
 } from '../browser-playwright-policy'
 import { llm } from '../../llm'
+import { configureTaskExecutionDevice, getTaskRun } from '../../tasks/task-history'
+import { importLocalModel, setActiveModel } from '../../models-manager'
 import type { PlaywrightMcpSession, PlaywrightToolResult } from '../playwright-mcp-session'
 import type { BrowserDriver } from '../browser-driver'
 import { VisionGuard } from '../../vision/vision-guard'
@@ -129,9 +131,39 @@ function pointerDriver(projected: string[]): BrowserDriver {
   } as unknown as BrowserDriver
 }
 
+let engine: FakeLlamaEngine
+let brain: ModelBrain
+
+beforeAll(async () => {
+  configureTaskExecutionDevice({ id: 'test-device', name: 'Test device' })
+  const chat = await importLocalModel(writeGguf(path.join(PROFILE, 'fixtures'), 'chat.gguf'))
+  expect(await setActiveModel(chat.id!)).toEqual({ success: true })
+  const bin = path.join(PROFILE, 'bin')
+  process.env.OFFGRID_BIN_DIR = bin
+  engine = installFakeLlamaEngine(bin)
+  brain = await useModelBrain(engine, ({ signal }) => {
+    const reply = model.replies.shift()
+    if (typeof reply === 'function') return reply(signal)
+    if (typeof reply === 'string') return reply
+    throw new Error('The model boundary has no queued reply.')
+  })
+  ;(llm as unknown as { port: number }).port = await unusedPort()
+  await llm.init()
+})
+
+afterAll(async () => {
+  llm.stop()
+  await brain.close()
+  for (const { pid } of engine.launches()) if (processAlive(pid)) process.kill(pid, 'SIGKILL')
+  fs.rmSync(PROFILE, { recursive: true, force: true })
+  if (previous.data === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previous.data
+  if (previous.bin === undefined) delete process.env.OFFGRID_BIN_DIR
+  else process.env.OFFGRID_BIN_DIR = previous.bin
+})
+
 beforeEach(() => {
   model.replies.length = 0
-  history.updates.length = 0
 })
 
 describe('Web Use shared lifecycle', () => {
@@ -192,7 +224,7 @@ describe('Web Use shared lifecycle', () => {
     ])
     const note = 'The page opened a new tab. Continuing there.'
     expect(result.steps.filter((step) => step === note)).toHaveLength(1)
-    expect(history.updates.some((update) => update.steps?.includes(note))).toBe(true)
+    expect(getTaskRun('web-child-tab')?.steps).toContain(note)
     expect(events.size).toBe(0)
   })
 
@@ -587,7 +619,7 @@ describe('Web Use shared lifecycle', () => {
     it('shows the model what its last steps did, and keeps the user guidance on every step', async () => {
       // From browser-use and Nanobrowser: each step sees its own recent actions and results.
       // Found live: with no history, a small model repeated steps and lost track.
-      vi.mocked(llm.chat).mockClear()
+      const before = brain.requests.length
       model.replies.push(
         decision({ action: 'click', ref: 'e3', element: 'Next', summary: 'Click Next.' }),
         decision({ action: 'click', ref: 'e1', element: 'Password', summary: 'Focus Password.' }),
@@ -618,7 +650,8 @@ describe('Web Use shared lifecycle', () => {
         onProgress: () => undefined
       })
       expect(result.ok).toBe(true)
-      const prompts = vi.mocked(llm.chat).mock.calls.map((call) => String(call[0]))
+      // What the model was asked, as it arrived at the engine.
+      const prompts = brain.requests.slice(before).map((request) => request.prompt)
       expect(prompts[0]).toContain('This is your first step on this page.')
       expect(prompts[1]).toContain('1. Click Next -> no visible change')
       expect(prompts[2]).toContain('2. Focus Password -> the page changed')

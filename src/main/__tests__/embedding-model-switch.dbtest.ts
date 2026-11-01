@@ -81,14 +81,13 @@ import {
   savePreviousEmbeddingChoice,
   startEmbeddingIndexRebuild
 } from '../embedding-index-rebuild'
+import { writeObservation } from './harness/capture-fixtures'
 
 const DEFAULT_MODEL = 'Xenova/multilingual-e5-small'
 const NEW_MODEL = 'Xenova/bge-small-en-v1.5'
 
 function moment(summary: string): void {
-  getDB()
-    .prepare("INSERT INTO observations (summary, surface, ts) VALUES (?, 'Notes', ?)")
-    .run(summary, '2026-10-10 10:00:00')
+  writeObservation(getDB(), { summary, surface: 'Notes', ts: '2026-10-10 10:00:00' })
 }
 
 function vectorModels(): string[] {

@@ -14,6 +14,13 @@ import { DatabaseSync } from 'node:sqlite'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
 import { completeOnboarding } from './helpers/onboarding'
 import { closeAndWait } from './helpers/windows'
+import {
+  linkObservationEntity,
+  writeObservation
+} from '../src/main/__tests__/harness/capture-fixtures'
+import { registerFtsFunctions } from '../src/main/fts-functions'
+
+const sqliteTime = (ms: number): string => new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
 
 const PRO_PRESENT = fs.existsSync(path.resolve('pro/package.json'))
 
@@ -47,23 +54,39 @@ const relaunch = async (): Promise<void> => {
 /** What capture saw over two days. */
 function seedHistory(): void {
   const history = new DatabaseSync(db())
-  history.exec(
-    `INSERT INTO entities (name, type) VALUES
-       ('Avery Quinn', 'Person'), ('Bea Moreno', 'Person'),
-       ('Cal Ortiz', 'Person'), ('Dana Lee', 'Person'), ('Eli Park', 'Person');
-     INSERT INTO observations (summary, surface, category, engagement, ts) VALUES
-       ('Read the Avery Quinn newsletter', 'Mail', 'consumption', 0.5, datetime('now', '-1 day')),
-       ('Skimmed another Avery Quinn digest', 'Mail', 'consumption', 0.5, datetime('now')),
-       ('Scrolled the inbox list', 'Mail', 'communication', 0.5, datetime('now')),
-       ('Talked through the launch with Bea Moreno', 'Slack', 'communication', 0.5, datetime('now', '-1 day')),
-       ('Agreed the budget with Bea Moreno', 'Slack', 'communication', 0.5, datetime('now'));
-     INSERT INTO observation_entities (observation_id, entity_id)
-       SELECT o.id, e.id FROM observations o JOIN entities e
-        WHERE (o.summary LIKE '%Avery Quinn%' AND e.name = 'Avery Quinn')
-           OR (o.summary LIKE '%Bea Moreno%' AND e.name = 'Bea Moreno')
-           OR (o.summary = 'Scrolled the inbox list'
-               AND e.name IN ('Avery Quinn', 'Cal Ortiz', 'Dana Lee', 'Eli Park', 'Bea Moreno'));`
-  )
+  // The app's index triggers call these functions; every writing connection registers them.
+  registerFtsFunctions(history)
+  const person: Record<string, number> = {}
+  for (const name of ['Avery Quinn', 'Bea Moreno', 'Cal Ortiz', 'Dana Lee', 'Eli Park'])
+    person[name] = Number(
+      history.prepare("INSERT INTO entities (name, type) VALUES (?, 'Person')").run(name)
+        .lastInsertRowid
+    )
+  // Observations as Pro's capture writes them (the shared capture fixtures), with who was in them.
+  const DAY = 86_400_000
+  const seen: Array<[string, string, string, number, string[]]> = [
+    ['Read the Avery Quinn newsletter', 'Mail', 'consumption', DAY, ['Avery Quinn']],
+    ['Skimmed another Avery Quinn digest', 'Mail', 'consumption', 0, ['Avery Quinn']],
+    [
+      'Scrolled the inbox list',
+      'Mail',
+      'communication',
+      0,
+      ['Avery Quinn', 'Cal Ortiz', 'Dana Lee', 'Eli Park', 'Bea Moreno']
+    ],
+    ['Talked through the launch with Bea Moreno', 'Slack', 'communication', DAY, ['Bea Moreno']],
+    ['Agreed the budget with Bea Moreno', 'Slack', 'communication', 0, ['Bea Moreno']]
+  ]
+  for (const [summary, surface, category, ago, names] of seen) {
+    const observation = writeObservation(history, {
+      summary,
+      surface,
+      category,
+      engagement: 0.5,
+      ts: sqliteTime(Date.now() - ago)
+    })
+    for (const name of names) linkObservationEntity(history, observation, person[name]!)
+  }
   history.close()
 }
 

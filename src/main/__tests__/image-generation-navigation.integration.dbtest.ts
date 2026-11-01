@@ -121,19 +121,9 @@ describe('image generation across feature navigation', () => {
     const detachRefresh = jobs.onConversationUpdated((conversationId) =>
       refreshed.push(conversationId)
     )
-    const { getDB } = await import('../database')
-    getDB()
-      .prepare(
-        `INSERT INTO rag_conversations (id, title)
-         VALUES (?, ?)`
-      )
-      .run(CONVERSATION_ID, 'Navigation image')
-    getDB()
-      .prepare(
-        `INSERT INTO rag_messages (uuid, conversation_id, role, content)
-         VALUES (?, ?, 'assistant', ?)`
-      )
-      .run(MESSAGE_ID, CONVERSATION_ID, 'Generated image')
+    const { addRagMessage, createRagConversation } = await import('../database')
+    createRagConversation(CONVERSATION_ID, 'Navigation image')
+    addRagMessage(CONVERSATION_ID, 'assistant', 'Generated image', undefined, MESSAGE_ID)
     expect(jobs.acknowledgeConversation(CONVERSATION_ID, MESSAGE_ID)).toBe(true)
     expect(refreshed).toEqual([CONVERSATION_ID])
     detachRefresh()

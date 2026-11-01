@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventEmitter } from 'node:events'
 // The process boundary: Electron's utilityProcess. The host, its request map, crash handling and
 // the helper's init message are production code.
@@ -7,11 +10,15 @@ interface TestWorker extends EventEmitter {
   kill: ReturnType<typeof vi.fn>
 }
 const host = vi.hoisted(() => ({ workers: [] as TestWorker[] }))
-vi.mock('node:fs', async (original) => ({
-  ...(await original<typeof import('node:fs')>()),
-  existsSync: () => true
-}))
-vi.mock('../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
+// The disk boundary: a built app has tts-onnx-worker.js beside tts-onnx; from source there is none.
+vi.mock('node:fs', async (original) => {
+  const actual = await original<typeof import('node:fs')>()
+  return {
+    ...actual,
+    existsSync: (file: import('node:fs').PathLike) =>
+      String(file).endsWith('tts-onnx-worker.js') || actual.existsSync(file)
+  }
+})
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   class FakeUtilityProcess extends EventEmitter {
@@ -22,6 +29,7 @@ vi.mock('electron', async () => {
     })
   }
   return {
+    safeStorage: { isEncryptionAvailable: () => false },
     utilityProcess: {
       fork: () => {
         const child = new FakeUtilityProcess()
@@ -32,6 +40,14 @@ vi.mock('electron', async () => {
   }
 })
 import { OnnxSpeechRuntime } from '../tts-onnx'
+import { configureRuntime } from '../runtime-env'
+// A temp profile for the real settings the runtime reads (the backend choice).
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-tts-onnx-'))
+configureRuntime({ dataDir: profile })
+afterAll(() => {
+  configureRuntime({ dataDir: undefined })
+  fs.rmSync(profile, { recursive: true, force: true })
+})
 beforeEach(() => {
   host.workers.length = 0
 })

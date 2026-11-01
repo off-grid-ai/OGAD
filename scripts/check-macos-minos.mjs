@@ -9,10 +9,11 @@ const [maximum = '13.0', ...requestedRoots] = process.argv.slice(2)
 if (!/^\d+(?:\.\d+){0,2}$/.test(maximum)) throw new Error('Expected a macOS version, e.g. 13.0')
 const folderOverrides = new Map([
   // Core ML image generation uses macOS 14 Core ML APIs.
-  ['coreml-sd', '14.0'],
-  // The Kev MLX runtime needs macOS 14; the app hides Kev on older macOS.
-  ['kev-runtime', '14.0']
+  ['coreml-sd', '14.0']
 ])
+// Kev's runtime downloads with a Kev model (resources/kev-runtime-packs.json); the copy the
+// engine archive puts here only serves the build's Python and never ships in the app.
+const unshipped = new Set(['kev-runtime'])
 const roots = requestedRoots.length
   ? requestedRoots.map((root) => path.resolve(root))
   : [
@@ -43,6 +44,7 @@ function exceeds(version, target) {
   return false
 }
 function walk(file, root) {
+  if (unshipped.has(path.relative(root, file).split(path.sep)[0])) return
   const real = fs.realpathSync(file)
   if (visited.has(real)) return
   visited.add(real)

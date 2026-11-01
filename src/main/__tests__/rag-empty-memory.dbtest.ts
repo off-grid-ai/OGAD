@@ -55,6 +55,7 @@ import { setupIPC } from '../ipc'
 import { llm } from '../llm'
 import { listProjects } from '../rag/store'
 import { toolChat } from '../tools'
+import { indexObservation, writeObservation } from './harness/capture-fixtures'
 
 let fake: FakeLlamaServer
 
@@ -204,20 +205,13 @@ describe('rag:chat on an empty memory corpus', () => {
   it('retrieves seeded local memory and returns its citation in All memory mode (#34)', async () => {
     fake.requests.length = 0
     const db = getDB()
-    const inserted = db
-      .prepare(
-        `INSERT INTO observations (summary, surface, url, ts)
-         VALUES (?, ?, ?, CURRENT_TIMESTAMP)`
-      )
-      .run(
-        'Project Aurora uses the release code obsidian.',
-        'Synthetic release notes',
-        'offgrid://synthetic/aurora'
-      )
-    db.prepare('INSERT INTO observation_fts(rowid, summary) VALUES (?, ?)').run(
-      inserted.lastInsertRowid,
-      'Project Aurora uses the release code obsidian.'
-    )
+    const summary = 'Project Aurora uses the release code obsidian.'
+    const inserted = writeObservation(db, {
+      summary,
+      surface: 'Synthetic release notes',
+      url: 'offgrid://synthetic/aurora'
+    })
+    indexObservation(db, inserted, summary)
     fake.enqueue(
       { toolCalls: [{ name: 'search_memory', args: { query: 'Aurora release code' } }] },
       { content: 'The Aurora release code is obsidian [S1].' }
@@ -231,8 +225,8 @@ describe('rag:chat on an empty memory corpus', () => {
     expect(result.answer).toBe('The Aurora release code is obsidian [S1].')
     expect(result.unified).toEqual([
       expect.objectContaining({
-        key: `obs:${Number(inserted.lastInsertRowid)}`,
-        refId: Number(inserted.lastInsertRowid),
+        key: `obs:${inserted}`,
+        refId: inserted,
         surface: 'Synthetic release notes'
       })
     ])

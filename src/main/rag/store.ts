@@ -9,12 +9,14 @@ import { emitKnowledgeDocumentMutation } from '../sync-knowledge-document'
 import { randomUUID } from 'crypto'
 import type { MediaKind, Project, RagDocument } from '@offgrid/rag'
 
-let migrated = false
+// The connection the tables were last ensured on. A reopened or switched profile is a new
+// connection and gets its tables too (a process-wide flag skipped them there).
+let migratedFor: object | undefined
 
 /** Ensure the core-owned RAG tables exist before any owner reads or materializes them. */
 export function ensureRagStoreSchema(): void {
-  if (migrated) return
   const db = getDB()
+  if (migratedFor === db) return
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
@@ -74,15 +76,14 @@ export function ensureRagStoreSchema(): void {
   getDB().exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_rag_documents_sync_id ON rag_documents(sync_id)'
   )
-  migrated = true
+  migratedFor = db
 }
 
 /** Whether a project folds captured memories into its KB (default on). */
 export function projectIncludesMemory(projectId: string): boolean {
   ensureRagStoreSchema()
   const row = getDB().prepare('SELECT include_memory FROM projects WHERE id = ?').get(projectId) as
-    | { include_memory: number }
-    | undefined
+    { include_memory: number } | undefined
   return row ? row.include_memory === 1 : true
 }
 
@@ -194,16 +195,14 @@ const DOCUMENT_SELECT =
 export function getRagDocument(docId: number): RagDocument | undefined {
   ensureRagStoreSchema()
   const row = getDB().prepare(`${DOCUMENT_SELECT} WHERE id = ?`).get(docId) as
-    | RagDocumentRow
-    | undefined
+    RagDocumentRow | undefined
   return row ? mapDocument(row) : undefined
 }
 
 export function getRagDocumentBySyncId(syncId: string): RagDocument | undefined {
   ensureRagStoreSchema()
   const row = getDB().prepare(`${DOCUMENT_SELECT} WHERE sync_id = ?`).get(syncId) as
-    | RagDocumentRow
-    | undefined
+    RagDocumentRow | undefined
   return row ? mapDocument(row) : undefined
 }
 

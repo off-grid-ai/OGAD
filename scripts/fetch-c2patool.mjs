@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Stages the pinned c2patool (Content Authenticity Initiative, MIT/Apache-2.0) into resources/bin,
 // like ffmpeg. The app signs a C2PA "made with AI" claim into every exported video with it.
-//   node scripts/fetch-c2patool.mjs [--platform darwin|win32|linux]
+//   node scripts/fetch-c2patool.mjs [--platform darwin|win32|linux] [--bin <dir>]
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -33,7 +33,9 @@ if (!asset) {
   console.log(`[c2patool] no build for ${platform}; exports keep the metadata label only`)
   process.exit(0)
 }
-const bin = path.join(root, 'resources', 'bin')
+const binFlag = process.argv.indexOf('--bin')
+// Where the installer takes binaries from: resources/bin, or build/linux-bin on Linux.
+const bin = binFlag > 0 ? path.resolve(process.argv[binFlag + 1]) : path.join(root, 'resources', 'bin')
 const target = path.join(bin, platform === 'win32' ? 'c2patool.exe' : 'c2patool')
 const stamp = `${target}.version`
 if (fs.existsSync(target) && fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8').trim() === `${VERSION} ${platform}`) {

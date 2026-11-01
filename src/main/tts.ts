@@ -186,11 +186,17 @@ export const ttsRuntime: ManagedRuntime = {
   }
 }
 
+interface ListVoicesOptions {
+  /** This machine's own voices, even when a remote voice is chosen (as synthesize's `local`). */
+  readonly local?: boolean
+}
+
 /** Runtime-owned catalogue. Listing it never downloads model assets. */
 export async function listVoiceCatalog(
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
+  options: ListVoicesOptions = {}
 ): Promise<RuntimeSpeechVoice[]> {
-  const remote = getActiveRemoteVisionServerForModality('voice')
+  const remote = options.local ? null : getActiveRemoteVisionServerForModality('voice')
   // Every remote provider owns its speakers; the remote model, not this machine, decides them.
   if (remote) return listRemoteVoices(remote)
   // Every voice but the English Kokoro ones speaks through the ExecuTorch runtime; without it,
@@ -208,8 +214,11 @@ export async function listVoiceCatalog(
   return voices
 }
 
-export async function listVoices(onProgress?: (progress: number) => void): Promise<string[]> {
-  return (await listVoiceCatalog(onProgress)).map(({ id }) => id)
+export async function listVoices(
+  onProgress?: (progress: number) => void,
+  options: ListVoicesOptions = {}
+): Promise<string[]> {
+  return (await listVoiceCatalog(onProgress, options)).map(({ id }) => id)
 }
 
 /** Download and validate the selected voice once. Cached assets return immediately. */

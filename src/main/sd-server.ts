@@ -345,6 +345,7 @@ class SdServerService {
   ): Promise<void> {
     if (!fs.existsSync(ctx.modelPath)) throw new Error(`Image model not found: ${ctx.modelPath}`)
     const binDir = path.dirname(bin)
+    const epoch = this.startEpoch
 
     // Downloaded DMGs are quarantined; clear it on packaged builds (mirrors llm.ts).
     if (isPackaged() && process.platform === 'darwin') {
@@ -365,6 +366,8 @@ class SdServerService {
       if (free === null) throw new Error(`No free port for the image engine near ${this.port}.`)
       this.port = free
     }
+    // A Stop during the port work above cancels this start: no engine starts after it.
+    if (epoch !== this.startEpoch) throw new Error('Image server startup canceled.')
 
     const args = buildSdServerContextArgs({ ...ctx, port: this.port })
     if (cpuOnly) args.push('--backend', 'cpu')

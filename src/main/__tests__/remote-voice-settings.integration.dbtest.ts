@@ -19,6 +19,7 @@ vi.mock('electron', () => ({
   safeStorage: { isEncryptionAvailable: () => false }
 }))
 import { getDB } from '../database'
+import { listVoices } from '../tts'
 import { setupTtsIpc } from '../tts-ipc'
 import {
   activateRemoteVisionMediaModel,
@@ -91,5 +92,24 @@ describe('remote speech speakers through the tts:voices contract', () => {
       { id: 'df_anna', label: 'Anna', language: 'de', languageLabel: 'German' },
       { id: 'hf_alpha', label: 'Alpha', language: 'hi', languageLabel: 'Hindi' }
     ])
+  })
+  it("lists this machine's own voices on request, with a remote speech model chosen", async () => {
+    const endpoint = await startGateway()
+    setRemoteVisionServerSettings({
+      serverId: 'gpu-pod',
+      name: 'GPU pod',
+      provider: 'custom',
+      endpoint,
+      model: '',
+      mediaModels: { voice: 'kokoro-82m-v1.0.onnx' }
+    })
+    expect(activateRemoteVisionMediaModel('gpu-pod', 'voice', 'kokoro-82m-v1.0.onnx')).toBe(true)
+
+    // Local synthesis (the wake word trainer) can only speak ids this machine knows.
+    const local = await listVoices(undefined, { local: true })
+
+    expect(await listVoices()).toEqual(['af_heart', 'df_anna', 'hf_alpha'])
+    expect(local).toContain('af_heart')
+    expect(local).toContain('am_adam')
   })
 })

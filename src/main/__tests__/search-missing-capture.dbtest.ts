@@ -35,6 +35,7 @@ import { getDB } from '../database'
 import { ensureRagStoreSchema } from '../rag/store'
 import { ensureRecordSchema } from '../records'
 import { universalSearch } from '../search'
+import { linkObservationFrame, writeFrame, writeObservation } from './harness/capture-fixtures'
 
 const kept = path.join(PROFILE_DIR, 'captures', 'capture-kept.png')
 const deleted = path.join(PROFILE_DIR, 'captures', 'capture-deleted.png')
@@ -43,20 +44,13 @@ const ids = { kept: 0, deleted: 0 }
 /** A moment and the screenshot frame it was summarised from, as the capture pipeline links them. */
 function moment(summary: string, imagePath: string): number {
   const db = getDB()
-  const id = Number(
-    db
-      .prepare("INSERT INTO observations (summary, surface, ts) VALUES (?, 'Brave Browser', ?)")
-      .run(summary, new Date().toISOString().slice(0, 19).replace('T', ' ')).lastInsertRowid
-  )
-  const frame = Number(
-    db
-      .prepare("INSERT INTO frames (image_path, text, surface) VALUES (?, '', 'Brave Browser')")
-      .run(imagePath).lastInsertRowid
-  )
-  db.prepare('INSERT INTO observation_frames (observation_id, frame_id) VALUES (?, ?)').run(
-    id,
-    frame
-  )
+  const id = writeObservation(db, {
+    summary,
+    surface: 'Brave Browser',
+    ts: new Date().toISOString().slice(0, 19).replace('T', ' ')
+  })
+  const frame = writeFrame(db, { imagePath, text: '', surface: 'Brave Browser' })
+  linkObservationFrame(db, id, frame)
   return id
 }
 
