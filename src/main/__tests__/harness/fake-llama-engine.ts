@@ -23,6 +23,13 @@ const valueAfter = (flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1]
 const root = path.dirname(__dirname)
 const folder = path.basename(__dirname)
 const model = path.basename(valueAfter('-m') || 'model.gguf')
+// The device probe (Linux and Windows, before choosing Vulkan or CUDA) lists this machine's
+// devices and exits, as llama-server does on a machine without a GPU.
+if (args.includes('--list-devices')) {
+  fs.appendFileSync(path.join(root, 'probes.log'), folder + ' ' + process.pid + ' ' + args.join(' ') + '\\n')
+  process.stdout.write('Available devices:\\n')
+  process.exit(0)
+}
 fs.appendFileSync(path.join(root, 'launches.log'), folder + ' ' + process.pid + ' ' + args.join(' ') + '\\n')
 const oom = path.join(root, folder + '.oom')
 if (fs.existsSync(oom) && args.join(' ').includes(fs.readFileSync(oom, 'utf8'))) {
@@ -79,10 +86,17 @@ export interface FakeLlamaEngine {
   outOfMemory(folder: string, whenArgsInclude?: string): void
   /** The JSON body the engine answers every POST with. */
   reply(body: unknown): void
-  /** Every start so far, oldest first. */
+  /** Every server start so far, oldest first; device probes are in probes(). */
   launches(): { folder: string; pid: number; args: string[] }[]
+  /** Every `--list-devices` probe so far, oldest first (Linux and Windows run one before a start). */
+  probes(): { folder: string; pid: number; args: string[] }[]
   /** Every non-probe request the engine served: method, path and body. */
   requests(): string[]
+}
+
+function launchOf(line: string): { folder: string; pid: number; args: string[] } {
+  const [folder = '', pid = '0', ...args] = line.split(' ')
+  return { folder, pid: Number(pid), args }
 }
 
 /** Install the fake as `<binDir>/<folder>/llama-server` for each engine folder given. */
@@ -111,11 +125,8 @@ export function installFakeLlamaEngine(
     outOfMemory: (folder, whenArgsInclude = '') =>
       fs.writeFileSync(path.join(binDir, `${folder}.oom`), whenArgsInclude),
     reply: (body) => fs.writeFileSync(path.join(binDir, 'reply.json'), JSON.stringify(body)),
-    launches: () =>
-      read('launches.log').map((line) => {
-        const [folder = '', pid = '0', ...args] = line.split(' ')
-        return { folder, pid: Number(pid), args }
-      }),
+    launches: () => read('launches.log').map(launchOf),
+    probes: () => read('probes.log').map(launchOf),
     requests: () => read('requests.log')
   }
 }
