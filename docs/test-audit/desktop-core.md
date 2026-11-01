@@ -42,48 +42,31 @@ E=$(node -p 'require("electron")'); OFFGRID_DATA_DIR=$(mktemp -d) ELECTRON_RUN_A
 
 ## Baseline burn-down (every other core test)
 
-The baseline started at 33 files and 133 mocks of our code. **Now: 2 files, 34 mocks**, as of `d2cced3f8`.
+**Mocks and spies of our code in core: 0.** The baseline started at 33 files and 133.
 
-**Rewritten, each faking only a boundary:**
-- ax-observation, files-audio-upload, supervisor-window
-- use-runtime: a native-helper executable, run from a temp working directory so the real Swift helper is never found
-- actions-ipc, task-role-models
-- system-status-ipc: macOS TCC and the multicast socket
-- ai-request-log-ipc, ConnectorsScreen
-- model-storage-move: hashing is watched at the disk
-- reconcile-projector, mcpConnectorToolExtension, decision-model-loader, web-use-lifecycle
-- web-use-decision-none: the Decider rejects through its engine
-- general-vision-operator-adapter, hybrid-vision-strategy: native tool calls and reasoning stream from the engine
-- mcp-remote-task
-- bridge-tools: context size from Settings; Pro switched on by its build constant and env
-- web-use-host and task-retry-context: real pairing, link registry, both browser hosts, retry IPC and privacy gate. The paired browser is its socket link, and Electron's view is inert.
-- ax-frame-success: the macOS capture helper executable and Electron's displays
-- bridge-media: the real voice worker, with only kokoro-js faked
-
-**Allowed by the guard:**
-- `vi.mock(x, () => import(real))` points a stubbed alias at the real module. That is wiring, not a fake.
-- `BOUNDARY_ALLOW` in `mock-guard.ts` names one real plugin boundary: the core loader's view of the private Pro package. The reason is written beside it.
+**The last two:**
+- `ax-host-lifecycle.dbtest.ts` runs the real AX rail on a fake Mac:
+  - It types the planned text and verifies it.
+  - Vision recovery being unavailable is reported in words a person can act on.
+  - A private field is handed to the person, with nothing typed.
+  - Recovery escalates from the grounding specialist to the reasoning model.
+  - Every actuator operation is covered.
+- `task-history-ipc.dbtest.ts`: Continue routes a web task to the paired browser. A computer task goes to the AX rail, or to the vision rail when there is no app to target.
 
 **Shared fakes:**
-- `harness/fake-llama-engine.ts`: the engine process, plus `useModelBrain`, which gives queued, delayed, abortable, tool-call and raw replies
-- `harness/fake-download-host.ts`
-- `harness/fake-kev-runtime.ts`
-- `harness/fake-actions-helper.ts`
-- `harness/decision-port-lock.ts`
+- `fake-mac-desktop.ts`: the Accessibility and capture helper executables, and `open`, `mdfind`, `mdls` and `PlistBuddy` at `node:child_process`.
+- `fake-input-device.ts`: nut.js through Node's module cache. It checks it is in place before anything acts, so no test moves this Mac's mouse or keyboard.
+- `fake-llama-engine.ts` with `useModelBrain`, `fake-kev-runtime.ts`, `fake-actions-helper.ts`, `fake-download-host.ts`, `decision-port-lock.ts`.
+
+**The guard is now wider.** It scans every file in a test folder (harnesses, setup files) and the e2e specs. It also counts hand-written `INSERT INTO` rows, the same rule as pro.
+- No harness or setup file mocks our code.
+- **34 files (77 `INSERT`s) are on the baseline.** That is the next burn-down: seed through the product's write paths, or a restore for dated rows. Old-version upgrade fixtures may need a documented boundary entry instead.
 
 **Findings fixed:**
 - The RAG tables were missed on a reopened profile.
 - Decision tests could answer each other's requests on the shared port range.
 - A performance-pack wait depended on time, not on the pack's status.
-
-**Left:**
-- `task-history-ipc.dbtest.ts`: its computer routing through AX and vision
-- `ax-host-lifecycle.dbtest.ts`: 24 mocks
-
-Both need a fake Mac desktop:
-- the `text-extractor` AX helper as an executable (`--apps`, `--elements`, `--default-browser`, `--set-slider-value`)
-- `/usr/bin/open`, `mdfind`, `mdls` and `PlistBuddy` faked at `node:child_process`
-- **nut-js faked through Node's module cache.** Under vitest, `loadActuation()` really loads nut-js through `require`. So un-mocking actuation without that fake would move this Mac's real mouse and keyboard.
+- **A connector tool that reports its own failure (MCP `isError`) was recorded as executed.** It is now recorded as failed, with its reason. Test: `connector-rail.integration.test.ts`, against a real stdio MCP server.
 
 ## Not covered yet
 
