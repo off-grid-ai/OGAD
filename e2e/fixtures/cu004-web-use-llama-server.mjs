@@ -296,6 +296,20 @@ const server = http.createServer((request, response) => {
       )
       return
     }
+    // The chat turn that starts the task: the model calls web_use once, then reports.
+    const tools = (payload.tools ?? []).map((tool) => tool.function?.name)
+    if (tools.includes('web_use')) {
+      const reported = (payload.messages ?? []).some((message) => message.role === 'tool')
+      sendDecision(
+        response,
+        reported
+          ? { content: 'The web task is running.' }
+          : { content: '', name: 'web_use', args: { goal: 'Complete the protected web form' } },
+        payload.stream === true,
+        { valid: true, errors: [] }
+      )
+      return
+    }
     const isPlan = prompt.includes('Create a short execution plan for a web agent.')
     if (isPlan) {
       const decision = decisionFor(prompt)

@@ -33,6 +33,7 @@ vi.mock('@huggingface/transformers', () => ({
 
 import { getDB, startIndexRebuilds, stopIndexRebuilds } from '../database'
 import { ensureRecordSchema, recordSearch } from '../records'
+import { writeMeeting, writeObservation } from './harness/capture-fixtures'
 
 /** Enough rows that the background rebuild takes several slices. */
 const OLD_MEETINGS = 4_000
@@ -59,21 +60,20 @@ beforeAll(() => {
       started_at INTEGER, ended_at INTEGER, duration_sec INTEGER, created_at INTEGER NOT NULL DEFAULT 0
     );
   `)
-  const meeting = db.prepare('INSERT INTO meetings (title, summary, started_at) VALUES (?, ?, ?)')
   db.transaction(() => {
     for (let i = 1; i <= OLD_MEETINGS; i++)
-      meeting.run(`Standup ${i}`, `Daily standup notes number ${i}`, 1_700_000_000_000 + i)
-    meeting.run(
-      'Harbourfront lease review',
-      'Lease renewal for the harbourfront office',
-      1_700_100_000_000
-    )
-    db.prepare("INSERT INTO observations (summary, surface) VALUES (?, 'Notes')").run(
-      'Read the harbourfront parking rules'
-    )
-    db.prepare("INSERT INTO observations (summary, surface) VALUES (?, 'Notes')").run(
-      '東京オフィスの移転計画'
-    )
+      writeMeeting(db, {
+        title: `Standup ${i}`,
+        summary: `Daily standup notes number ${i}`,
+        startedAt: 1_700_000_000_000 + i
+      })
+    writeMeeting(db, {
+      title: 'Harbourfront lease review',
+      summary: 'Lease renewal for the harbourfront office',
+      startedAt: 1_700_100_000_000
+    })
+    writeObservation(db, { summary: 'Read the harbourfront parking rules', surface: 'Notes' })
+    writeObservation(db, { summary: '東京オフィスの移転計画', surface: 'Notes' })
   })()
 })
 
@@ -93,11 +93,11 @@ describe('keyword indexes on an upgraded profile', () => {
 
     startIndexRebuilds()
     // While the rebuild runs: a new meeting, and an old one renamed.
-    const added = Number(
-      getDB()
-        .prepare('INSERT INTO meetings (title, summary, started_at) VALUES (?, ?, ?)')
-        .run('Quayside budget call', 'Budget for the quayside fitout', Date.now()).lastInsertRowid
-    )
+    const added = writeMeeting(getDB(), {
+      title: 'Quayside budget call',
+      summary: 'Budget for the quayside fitout',
+      startedAt: Date.now()
+    })
     getDB()
       .prepare('UPDATE meetings SET title = ?, summary = ? WHERE id = ?')
       .run('Lighthouse retrospective', 'What went well at the lighthouse event', 2)

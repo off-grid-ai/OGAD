@@ -242,7 +242,16 @@ export function streamCompletion(
       res.setEncoding('utf8')
       res.on('data', (chunk: string) => {
         armIdleTimer() // progress: reset the idle timeout on every chunk so a long stream survives
-        accumulator.push(chunk)
+        try {
+          accumulator.push(chunk)
+        } catch (error) {
+          // An error frame mid-stream (how llama-server reports a failed generation) ends the
+          // request. Thrown from this listener it escaped as an uncaught exception, and the reply
+          // never settled, so the chat waited forever.
+          cleanup()
+          res.destroy()
+          if (!timedOut && !aborted) reject(error)
+        }
       })
       res.on('end', () => {
         cleanup()

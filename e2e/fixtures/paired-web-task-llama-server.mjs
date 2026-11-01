@@ -6,7 +6,8 @@
 //   - The task's plan request gets two phases.
 //   - A page step returns "done" with the headline the snapshot shows. With OFFGRID_WEB_TASK_HOLD
 //     set, or for a task whose goal says "slowly", a page step is held open until the client goes
-//     away, so a spec can stop the task.
+//     away, so a spec can stop the task. For a goal that says the page "cannot finish", the page
+//     step fails (HTTP 500), as a model that stops answering mid-decision does.
 
 import fs from 'node:fs'
 import http from 'node:http'
@@ -106,6 +107,11 @@ const server = http.createServer((request, response) => {
     if (prompt.includes('You control one visible browser page with Playwright')) {
       const goal = prompt.match(/Goal: ([^\n]*(?:\n[^\n]+)*)/)?.[1] ?? ''
       if (hold || /slowly/i.test(goal)) return // held until Stop closes the request
+      if (/cannot finish/i.test(goal)) {
+        response.writeHead(500, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ error: { message: 'The model stopped answering.' } }))
+        return
+      }
       reply(response, stream, { content: step(prompt) })
       return
     }
@@ -118,7 +124,9 @@ const server = http.createServer((request, response) => {
     const webUse = (payload.tools ?? []).some((tool) => tool.function?.name === 'web_use')
     const toolResult = messages.find((message) => message.role === 'tool')
     if (webUse && !toolResult && prompt.includes('headline')) {
-      const slowly = /slowly/i.test(textOf(messages.filter((m) => m.role === 'user').at(-1)?.content))
+      const asked = textOf(messages.filter((m) => m.role === 'user').at(-1)?.content)
+      const slowly = /slowly/i.test(asked)
+      const unfinishable = /cannot finish/i.test(asked)
       reply(response, stream, {
         content: '',
         tool_calls: [
@@ -130,7 +138,9 @@ const server = http.createServer((request, response) => {
               arguments: JSON.stringify({
                 goal: slowly
                   ? 'Read the headline on the open page slowly.'
-                  : 'Read the headline on the open page.'
+                  : unfinishable
+                    ? 'Read the headline on the open page, which cannot finish.'
+                    : 'Read the headline on the open page.'
               })
             }
           }

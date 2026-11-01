@@ -5,13 +5,14 @@
  * paired browser and a fake llama-server that holds the task while it runs. With the default
  * browser chosen, the task runs on this device outside a watched browser, so the Tasks panel is
  * one column: the task's header (title, state, Pause / Take Over / Stop) above its steps and the
- * other tasks, all in one scroller. Older finished tasks are seeded so that scroller overflows.
+ * other tasks, all in one scroller. Earlier tasks are run to the end first, through the same chat
+ * and task loop, so that scroller overflows; the last one asks to go "slowly", which the model
+ * holds open.
  *
  * Asserts: scrolled part way and to the end, the header stays at the top of the scroller and Stop
  * stays in view; Stop, pressed from there, ends the task.
  */
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
@@ -24,41 +25,14 @@ import { closeAndWait, mainWindow } from './helpers/windows'
 const PRO_PRESENT = fs.existsSync(path.resolve('pro/package.json'))
 const HEADLINE = 'Harbour News'
 const ASK = 'Read the headline of the page in my browser.'
-const OLDER_TASKS = 10
+const ASK_SLOWLY = 'Read the headline of the page in my browser, slowly.'
+const EARLIER_TASKS = 4
 
 let app: ElectronApplication | null = null
 let page: Page
 let profileDir: string
 let modelLog: string
 let browser: FakeExtension | null = null
-
-const sql = (value: string): string => `'${value.replaceAll("'", "''")}'`
-
-/** Finished tasks from earlier, so the panel holds a list and not one task. */
-function seedOlderTasks(): void {
-  const now = Date.now()
-  const rows = Array.from({ length: OLDER_TASKS }, (_, index) => {
-    const at = now - (index + 2) * 3_600_000
-    return `INSERT INTO task_run_history VALUES (
-      ${sql(`sticky-older-${index}`)}, NULL, 'web_use', ${sql(`Earlier browser task ${index + 1}`)},
-      'done', 'Finished.', ${sql(JSON.stringify(['Opened the page', 'Read the page', 'Finished']))},
-      ${at}, ${at + 60_000}, ${at + 60_000}, NULL, NULL, 'done', 3, 'Finished',
-      'https://example.test/', 'Earlier page', NULL, NULL, '[]'
-    );`
-  }).join('\n')
-  execFileSync('sqlite3', [
-    path.join(profileDir, 'memories.db'),
-    `CREATE TABLE task_run_history (
-      task_id TEXT PRIMARY KEY, journey_id TEXT, kind TEXT NOT NULL, title TEXT NOT NULL,
-      status TEXT NOT NULL, summary TEXT, steps_json TEXT NOT NULL DEFAULT '[]',
-      started_at INTEGER NOT NULL, finished_at INTEGER, updated_at INTEGER NOT NULL,
-      execution_device_id TEXT, execution_device_name TEXT, phase TEXT, current_step INTEGER,
-      current_action TEXT, last_url TEXT, last_title TEXT, screenshot_path TEXT,
-      screenshot_device_id TEXT, step_details_json TEXT NOT NULL DEFAULT '[]'
-    );
-    ${rows}`
-  ])
-}
 
 /** A port free right now, for this app's gateway: the spec then shares no port with the dev app or
  *  another lane's tests, which otherwise all want 7878. */
@@ -87,7 +61,6 @@ const launch = async (): Promise<void> => {
   const executable = path.join(llamaDir, 'llama-server')
   fs.copyFileSync(path.resolve('e2e/fixtures/paired-web-task-llama-server.mjs'), executable)
   fs.chmodSync(executable, 0o755)
-  seedOlderTasks()
   const gatewayPort = await freePort()
   app = await launchOffGrid({
     env: {
@@ -95,8 +68,6 @@ const launch = async (): Promise<void> => {
       OFFGRID_USER_DATA: profileDir,
       OFFGRID_BIN_DIR: path.join(profileDir, 'bin'),
       OFFGRID_WEB_TASK_LOG: modelLog,
-      // The model holds the task while it reads the page, so it stays running.
-      OFFGRID_WEB_TASK_HOLD: '1',
       OFFGRID_PRO: '1',
       OFFGRID_GATEWAY_PORT: String(gatewayPort),
       NODE_ENV: 'production',
@@ -156,13 +127,25 @@ test.describe('The running task header', () => {
       BrowserWindow.getAllWindows()[0]?.setBounds({ x: 20, y: 40, width: 1480, height: 620 })
     })
     const composer = page.getByRole('textbox', { name: 'Message', exact: true })
-    await composer.fill(ASK)
-    await composer.press('Enter')
-    await expect
-      .poll(() => browser!.commands.some((command) => command.op === 'page.call'), {
+    const newChat = page.getByRole('button', { name: 'New chat', exact: true })
+    // Each earlier task runs in its own chat, to the end.
+    for (let task = 0; task < EARLIER_TASKS; task++) {
+      await newChat.click()
+      await composer.fill(ASK)
+      await composer.press('Enter')
+      await expect(page.getByText('Web Use done', { exact: true }).first()).toBeVisible({
         timeout: 60_000
       })
-      .toBe(true)
+    }
+    const pageCalls = browser!.commands.filter((command) => command.op === 'page.call').length
+    await newChat.click()
+    await composer.fill(ASK_SLOWLY)
+    await composer.press('Enter')
+    await expect
+      .poll(() => browser!.commands.filter((command) => command.op === 'page.call').length, {
+        timeout: 60_000
+      })
+      .toBeGreaterThan(pageCalls)
 
     const panel = page.getByRole('region', { name: 'Tasks' })
     const header = panel.getByTestId('task-live-controls')

@@ -31,7 +31,7 @@ vi.mock('@huggingface/transformers', () => ({
   }
 }))
 
-import { getDB } from '../database'
+import { addRagMessage, createRagConversation, getDB } from '../database'
 import { configureRuntime } from '../runtime-env'
 import { ensureRagStoreSchema } from '../rag/store'
 import { universalSearch } from '../search'
@@ -41,16 +41,8 @@ const CHAT_KEY = 'chat:aurora-chat'
 beforeAll(() => {
   configureRuntime({ dataDir: TMP_DIR })
   ensureRagStoreSchema()
-  const db = getDB()
-  db.prepare('INSERT INTO rag_conversations (id, title) VALUES (?, ?)').run(
-    'aurora-chat',
-    'Release'
-  )
-  db.prepare('INSERT INTO rag_messages (conversation_id, role, content) VALUES (?, ?, ?)').run(
-    'aurora-chat',
-    'user',
-    'Aurora release code obsidian café 日本語'
-  )
+  createRagConversation('aurora-chat', 'Release')
+  addRagMessage('aurora-chat', 'user', 'Aurora release code obsidian café 日本語')
 })
 
 afterAll(() => {

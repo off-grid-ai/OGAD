@@ -33,6 +33,7 @@ vi.mock('@huggingface/transformers', () => ({
 
 import { getDB } from '../database'
 import { runBackfill, searchStatus } from '../search'
+import { writeFrame } from './harness/capture-fixtures'
 
 beforeAll(() => {
   // Pro's capture tables, as its schema creates them; a core DB test cannot import Pro.
@@ -58,9 +59,8 @@ afterAll(() => {
 describe('search indexing backlog', () => {
   it('never queues short capture frames, so the backlog stays empty', async () => {
     expect((await searchStatus()).pending).toBe(0)
-    const insert = getDB().prepare("INSERT INTO frames (surface, text) VALUES ('Slack', ?)")
-    insert.run('ok')
-    insert.run('see you at 3')
+    writeFrame(getDB(), { surface: 'Slack', text: 'ok' })
+    writeFrame(getDB(), { surface: 'Slack', text: 'see you at 3' })
 
     expect((await searchStatus()).pending).toBe(0)
     await runBackfill()

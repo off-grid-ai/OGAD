@@ -68,21 +68,18 @@ import {
   recordSearch,
   releaseRecordIndex
 } from '../records'
+import { writeMeeting, writeObservation } from './harness/capture-fixtures'
 
 function moment(summary: string, ts = '2026-10-10 10:00:00'): number {
-  return Number(
-    getDB()
-      .prepare("INSERT INTO observations (summary, surface, ts) VALUES (?, 'Notes', ?)")
-      .run(summary, ts).lastInsertRowid
-  )
+  return writeObservation(getDB(), { summary, surface: 'Notes', ts })
 }
 
 function meeting(title: string, summary: string): number {
-  return Number(
-    getDB()
-      .prepare('INSERT INTO meetings (title, summary, started_at) VALUES (?, ?, ?)')
-      .run(title, summary, Date.parse('2026-10-11T09:00:00Z')).lastInsertRowid
-  )
+  return writeMeeting(getDB(), {
+    title,
+    summary,
+    startedAt: Date.parse('2026-10-11T09:00:00Z')
+  })
 }
 
 /** Meaning search alone. The Search screen's keywords need every word (keywordTypeahead), and no

@@ -2,7 +2,20 @@
  * The Computer Use supervisor boundary configured against an Electron window boundary.
  * The compact PiP stays visible without taking focus and remains visible in capture.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// The person's Computer Use settings live in the app's real settings store, in a temp profile.
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-supervisor-'))
+const previousDataDir = process.env.OFFGRID_DATA_DIR
+process.env.OFFGRID_DATA_DIR = profile
+afterAll(() => {
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
+  fs.rmSync(profile, { recursive: true, force: true })
+})
 
 const electron = vi.hoisted(() => ({
   options: [] as Array<Record<string, unknown>>,
@@ -16,6 +29,7 @@ vi.mock('electron', () => ({
   app: {
     getAppPath: () => '/tmp/offgrid-supervisor-test'
   },
+  safeStorage: { isEncryptionAvailable: () => false },
   screen: {
     getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }),
     getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } })
@@ -25,6 +39,10 @@ vi.mock('electron', () => ({
       electron.handlers.set(channel, handler)
   },
   BrowserWindow: class BrowserWindow {
+    static getAllWindows(): unknown[] {
+      return []
+    }
+
     private visible = false
     private bounds: { x: number; y: number; width: number; height: number }
 
@@ -74,13 +92,12 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('../computer-use-settings', () => ({
-  getComputerUseSettings: () => ({ showPictureInPicture: true })
-}))
-
 describe('Computer Use supervisor window', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules()
+    // Picture in picture is on, set the way the Settings screen sets it.
+    const { setComputerUseSettings } = await import('../computer-use-settings')
+    setComputerUseSettings({ showPictureInPicture: true })
     electron.options.length = 0
     electron.shown = 0
     electron.hidden = 0

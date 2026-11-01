@@ -233,7 +233,9 @@ export class TaskRetryService {
           executionDeviceName: device.name
         })
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        // The person reads the summary below; the cause goes to the log, or it is lost.
+        console.error('[tasks] Continue failed:', error)
         this.history.record({
           taskId: task.taskId,
           journeyId: task.journeyId,

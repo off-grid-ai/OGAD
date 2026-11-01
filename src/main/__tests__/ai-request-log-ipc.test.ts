@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 interface TestWindow {
   destroy: () => void
   loadFile: ReturnType<typeof vi.fn>
@@ -12,7 +15,12 @@ const state = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>()
 }))
 vi.mock('electron', () => ({
-  app: { isPackaged: true },
+  app: {
+    isPackaged: true,
+    getAppPath: () => '/application',
+    getPath: () => process.env.OFFGRID_DATA_DIR
+  },
+  safeStorage: { isEncryptionAvailable: () => false },
   ipcMain: {
     handle: (name: string, handler: (...args: unknown[]) => unknown) =>
       state.handlers.set(name, handler)
@@ -43,20 +51,22 @@ vi.mock('electron', () => ({
   }
 }))
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
-vi.mock('../preload-path', () => ({ preloadPath: () => '/application/preload.js' }))
-vi.mock('../renderer-path', () => ({ rendererHtmlPath: () => '/application/index.html' }))
-vi.mock('../ai-request-log-store', () => ({
-  listAIRequestLogs: vi.fn((query) => query),
-  getAIRequestLog: vi.fn(),
-  relatedAIRequests: vi.fn(),
-  clearAIRequestLogs: vi.fn(),
-  readAIRequestAttachment: vi.fn()
-}))
+// The request log is the app's real store, in a temp profile.
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-ai-log-ipc-'))
+const previousDataDir = process.env.OFFGRID_DATA_DIR
+process.env.OFFGRID_DATA_DIR = profile
+afterAll(() => {
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
+  fs.rmSync(profile, { recursive: true, force: true })
+})
 import {
   openAIActivityWindow,
   setupAIRequestLogIPC,
   validateAILogQuery
 } from '../ai-request-log-ipc'
+import { recordAIRequest } from '../ai-request-log'
+import { flushAIRequestLogs, initializeAIRequestLogs } from '../ai-request-log-store'
 
 beforeEach(() => {
   for (const window of state.windows) window.destroy()
@@ -69,7 +79,9 @@ describe('AI activity IPC and independent window', () => {
     await openAIActivityWindow()
     expect(state.windows).toHaveLength(1)
     const window = state.windows[0]!
-    expect(window.loadFile).toHaveBeenCalledWith('/application/index.html', { hash: 'ai-activity' })
+    expect(window.loadFile).toHaveBeenCalledWith('/application/out/renderer/index.html', {
+      hash: 'ai-activity'
+    })
     expect(window.options).toMatchObject({
       webPreferences: { contextIsolation: true, nodeIntegration: false }
     })
@@ -112,10 +124,23 @@ describe('AI activity IPC and independent window', () => {
       search: 'dog'
     })
   })
-  it('exposes validated filters and rejects non-string record identifiers', () => {
+  it('exposes validated filters and rejects non-string record identifiers', async () => {
+    // As at app startup, then two requests the app logs.
+    initializeAIRequestLogs()
+    for (const prompt of ['hello there', 'goodbye now'])
+      await recordAIRequest(
+        { modality: 'text', source: 'Chat', request: { prompt } },
+        async () => 'answered'
+      )
+    await flushAIRequestLogs()
     setupAIRequestLogIPC()
-    expect(state.handlers.get('ai-logs:list')!({}, { search: 'hello', sort: 'unsafe' })).toEqual({
-      search: 'hello'
+    // The search survives validation and filters the real log; the junk sort is dropped, not run.
+    await vi.waitFor(() => {
+      const page = state.handlers.get('ai-logs:list')!({}, { search: 'hello', sort: 'unsafe' }) as {
+        rows: Array<{ request?: unknown }>
+      }
+      expect(page.rows).toHaveLength(1)
+      expect(JSON.stringify(page.rows[0])).toContain('hello there')
     })
     expect(state.handlers.get('ai-logs:detail')!({}, {})).toBeNull()
     expect(state.handlers.get('ai-logs:attachment')!({}, 'id', {})).toBeNull()

@@ -78,13 +78,11 @@ describe('runtime residency persistence', () => {
   })
 
   it('falls back to defaults when the persisted JSON is corrupt', () => {
+    db.saveSetting(RESIDENCY_KEY, DEFAULT_RESIDENCY)
+    // A damaged file: the stored value is cut short (a disk fault, not a write path).
     db.getDB()
-      .prepare(
-        `INSERT INTO app_settings (key, value)
-         VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-      )
-      .run(RESIDENCY_KEY, '{not json')
+      .prepare('UPDATE app_settings SET value = ? WHERE key = ?')
+      .run('{not json', RESIDENCY_KEY)
 
     expect(getResidency()).toEqual(DEFAULT_RESIDENCY)
   })

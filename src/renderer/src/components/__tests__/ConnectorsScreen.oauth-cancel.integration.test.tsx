@@ -3,27 +3,28 @@
 import React, { useEffect } from 'react'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/bootstrap/slotRegistry', async (importOriginal) => {
-  function ReadyGoogleClient({
-    onReadyChange
-  }: Readonly<{ onReadyChange: (ready: boolean) => void }>): React.ReactElement {
-    useEffect(() => onReadyChange(true), [onReadyChange])
-    return <div>Your Google client</div>
-  }
+import { clearRegisteredSlots, registerSlot, SLOTS } from '@/bootstrap/slotRegistry'
 
-  // The real registry, with every slot answering as the ready Google client.
-  return {
-    ...(await importOriginal<typeof import('@/bootstrap/slotRegistry')>()),
-    getSlot: () => ReadyGoogleClient
-  }
-})
+function ReadyGoogleClient({
+  onReadyChange
+}: Readonly<{ onReadyChange: (ready: boolean) => void }>): React.ReactElement {
+  useEffect(() => onReadyChange(true), [onReadyChange])
+  return <div>Your Google client</div>
+}
+
+// The connector slots filled through the real registry, the way the Pro renderer fills them:
+// a ready Google client, and direct Google accounts on offer.
+registerSlot(SLOTS.connectorSetup, ReadyGoogleClient)
+registerSlot(SLOTS.quickConnectionProviders, ReadyGoogleClient)
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
 })
+
+afterAll(() => clearRegisteredSlots())
 
 // Any OAuth connector in the gallery: Gmail and Google Calendar are offered as a direct Google
 // account instead when that is available, so the flow is exercised on another one.

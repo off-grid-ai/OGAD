@@ -1,13 +1,16 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import Database from 'better-sqlite3-multiple-ciphers'
+import type Database from 'better-sqlite3-multiple-ciphers'
 import { BackupEngine, type BackupSink } from '@offgrid/sync/portable'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DesktopBackupArchive } from '../backup/archive'
 import { DesktopBackupDataPort } from '../backup/data-port'
 import { DesktopBackupFileMapper } from '../backup/file-mapper'
-import { ensureAttachedDocumentSchema } from '../documents/sqlite-store'
+import { documentStore } from '../documents/sqlite-store'
+import { configureRuntime } from '../runtime-env'
+import { addRagMessage, createRagConversation, getDB } from '../database'
+import { createProject, ensureRagStoreSchema, insertRagDocument, updateProject } from '../rag/store'
 import { registerDesktopBackupIPC, type BackupIpcBoundary } from '../backup/ipc'
 import type { DesktopBackupDelivery, DesktopBackupEngine } from '../backup'
 import { BACKUP_EXPORT_ALL_CHANNEL, BACKUP_IMPORT_CHANNEL } from '../../shared/backup-contracts'
@@ -19,52 +22,6 @@ function tempRoot(label: string): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `offgrid-backup-${label}-`))
   roots.push(root)
   return root
-}
-
-function database(root: string): Database.Database {
-  const db = new Database(path.join(root, 'memories.db'))
-  databases.push(db)
-  db.exec(`
-    CREATE TABLE projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      system_prompt TEXT NOT NULL DEFAULT '',
-      icon TEXT,
-      include_memory INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE rag_documents (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      path TEXT NOT NULL,
-      size INTEGER NOT NULL DEFAULT 0,
-      kind TEXT NOT NULL DEFAULT 'text',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL,
-      sync_id TEXT,
-      document_id TEXT
-    );
-    CREATE TABLE rag_conversations (
-      id TEXT PRIMARY KEY,
-      title TEXT,
-      project_id TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE rag_messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE,
-      conversation_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      context TEXT,
-      created_at TEXT NOT NULL
-    );
-  `)
-  return db
 }
 
 class PathSink implements BackupSink<DesktopBackupDelivery> {
@@ -108,76 +65,63 @@ function engine(db: Database.Database, root: string, sink: PathSink): DesktopBac
 const DOCUMENT_ID = 'a'.repeat(64)
 const DOCUMENT_TEXT = 'The launch stays local.'
 
-function seedSource(db: Database.Database, root: string): void {
+/** The app's own database in a fresh profile at `root`, with the tables its stores create. */
+function appDatabase(root: string): Database.Database {
+  if (databases.length) getDB().close()
+  configureRuntime({ dataDir: root })
+  ensureRagStoreSchema()
+  const db = getDB()
+  databases.push(db)
+  return db
+}
+
+/** A project with a knowledge file and a chat, made the way the app makes them. */
+async function seedSource(root: string): Promise<void> {
   const upload = path.join(root, 'uploads', 'launch-notes.txt')
   fs.mkdirSync(path.dirname(upload), { recursive: true })
   fs.writeFileSync(upload, 'OFFGRID_BACKUP_FILE_EVIDENCE')
 
-  db.prepare(
-    `INSERT INTO projects
-      (id, name, description, system_prompt, icon, include_memory, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    'project-aurora',
-    'Aurora',
-    'Desktop backup project',
-    'Answer from the imported notes.',
-    'folder',
-    0,
-    '2026-07-20T10:00:00.000Z',
-    '2026-07-21T10:00:00.000Z'
-  )
-  db.prepare(
-    `INSERT INTO rag_documents
-      (sync_id, project_id, name, path, size, kind, enabled, document_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    'sync-launch-notes',
-    'project-aurora',
-    'Launch notes',
-    upload,
-    fs.statSync(upload).size,
-    'text',
-    1,
-    DOCUMENT_ID,
-    '2026-07-20T11:00:00.000Z'
-  )
+  createProject({
+    id: 'project-aurora',
+    name: 'Aurora',
+    description: 'Desktop backup project',
+    systemPrompt: 'Answer from the imported notes.',
+    icon: 'folder'
+  })
+  updateProject('project-aurora', { includeMemory: false })
+  insertRagDocument({
+    projectId: 'project-aurora',
+    name: 'Launch notes',
+    path: upload,
+    size: fs.statSync(upload).size,
+    kind: 'text',
+    documentId: DOCUMENT_ID,
+    syncId: 'sync-launch-notes'
+  })
   // What the document engine keeps for the file: its pages, read once.
-  ensureAttachedDocumentSchema(db)
-  db.prepare(
-    `INSERT INTO attached_documents (id, name, kind, state, page_count, chunk_count, embedded_count,
-       unreadable_pages, embedder, schema_version, created_at, last_used_at)
-     VALUES (?, 'Launch notes', 'text', 'ready', 1, 1, 1, 0, 'Xenova/all-MiniLM-L6-v2', 1, 0, 0)`
-  ).run(DOCUMENT_ID)
-  db.prepare(
-    'INSERT INTO attached_document_pages (document_id, page, label, text, needs_ocr) VALUES (?, 1, ?, ?, 0)'
-  ).run(DOCUMENT_ID, 'part 1', DOCUMENT_TEXT)
-  db.prepare(
-    `INSERT INTO rag_conversations (id, title, project_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(
-    'chat-aurora',
-    'Launch plan',
-    'project-aurora',
-    '2026-07-20T12:00:00.000Z',
-    '2026-07-20T12:05:00.000Z'
-  )
-  db.prepare(
-    `INSERT INTO rag_messages
-      (uuid, conversation_id, role, content, context, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(
-    'source-message-id',
-    'chat-aurora',
-    'user',
-    'Keep this conversation.',
-    JSON.stringify({ scope: 'project-aurora' }),
-    '2026-07-20T12:01:00.000Z'
-  )
+  await documentStore.putDocument({
+    id: DOCUMENT_ID,
+    name: 'Launch notes',
+    kind: 'text',
+    state: 'ready',
+    pageCount: 1,
+    chunkCount: 1,
+    embeddedCount: 1,
+    unreadablePages: 0,
+    embedder: 'Xenova/all-MiniLM-L6-v2',
+    schemaVersion: 1,
+    createdAt: 0,
+    lastUsedAt: 0
+  })
+  await documentStore.putPages(DOCUMENT_ID, [{ page: 1, label: 'part 1', text: DOCUMENT_TEXT }])
+  createRagConversation('chat-aurora', 'Launch plan', 'project-aurora')
+  addRagMessage('chat-aurora', 'user', 'Keep this conversation.', { scope: 'project-aurora' })
 }
 
 afterEach(() => {
-  while (databases.length) databases.pop()!.close()
+  if (databases.length) getDB().close()
+  databases.length = 0
+  configureRuntime({ dataDir: undefined })
   while (roots.length) fs.rmSync(roots.pop()!, { recursive: true, force: true })
 })
 
@@ -185,13 +129,15 @@ describe('desktop portable Backup & Restore', () => {
   it('exports and additively restores chats, projects, knowledge files and their text', async () => {
     const sourceRoot = tempRoot('source')
     const targetRoot = tempRoot('target')
-    const sourceDb = database(sourceRoot)
-    const targetDb = database(targetRoot)
-    seedSource(sourceDb, sourceRoot)
+    const sourceDb = appDatabase(sourceRoot)
+    await seedSource(sourceRoot)
 
     const sink = new PathSink()
     const delivery = await engine(sourceDb, sourceRoot, sink).exportAll()
     expect(delivery?.path).toMatch(/offgrid-backup-2026-07-27T12-00-00-000Z\.zip$/)
+
+    // Another Mac: an empty profile.
+    const targetDb = appDatabase(targetRoot)
 
     const first = await engine(targetDb, targetRoot, sink).import()
     expect(first).toEqual({
@@ -218,10 +164,12 @@ describe('desktop portable Backup & Restore', () => {
     expect(
       targetDb.prepare('SELECT name, kind FROM attached_documents WHERE id = ?').get(DOCUMENT_ID)
     ).toEqual({ name: 'Launch notes', kind: 'text' })
-    expect(targetDb.prepare('SELECT content, context FROM rag_messages').get()).toEqual({
-      content: 'Keep this conversation.',
-      context: JSON.stringify({ scope: 'project-aurora' })
-    })
+    const restored = targetDb.prepare('SELECT content, context FROM rag_messages').get() as {
+      content: string
+      context: string
+    }
+    expect(restored.content).toBe('Keep this conversation.')
+    expect(JSON.parse(restored.context)).toMatchObject({ scope: 'project-aurora' })
 
     const second = await engine(targetDb, targetRoot, sink).import()
     expect(second).toEqual({
@@ -240,8 +188,8 @@ describe('desktop portable Backup & Restore', () => {
 
   it('exports and restores through the desktop IPC boundary', async () => {
     const root = tempRoot('ipc')
-    const db = database(root)
-    seedSource(db, root)
+    const db = appDatabase(root)
+    await seedSource(root)
     const sink = new PathSink()
     const backup = engine(db, root, sink)
     const ipc = new BackupIpcHarness()

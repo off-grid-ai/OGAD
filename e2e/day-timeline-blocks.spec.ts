@@ -8,13 +8,14 @@
  * profile before launch, and background capture is off so nothing else lands in the day.
  */
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
+import { DatabaseSync } from 'node:sqlite'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
 import { completeOnboarding } from './helpers/onboarding'
 import { closeAndWait } from './helpers/windows'
+import { writeFrame } from '../src/main/__tests__/harness/capture-fixtures'
 
 const PRO_PRESENT = fs.existsSync(path.resolve('pro/package.json'))
 
@@ -51,23 +52,21 @@ function seedFrames(t0: number): void {
     [t0 + 720, 'Mail', 'Harbour contract'],
     [t0 + 750, 'Mail', 'Harbour contract']
   ]
-  const rows = frames
-    .map(([sec, app, title]) => `('${sqliteTime(sec)}', '${app}', '${app}', '${title}', 'ax')`)
-    .join(',\n')
   // A profile from before encryption: the app opens a memories.db without a key as plaintext.
-  execFileSync('sqlite3', [
-    path.join(profileDir, 'memories.db'),
-    `CREATE TABLE frames (
-       id INTEGER PRIMARY KEY AUTOINCREMENT, ts DATETIME DEFAULT CURRENT_TIMESTAMP,
-       surface TEXT, app TEXT, window_title TEXT, url TEXT, image_path TEXT, text TEXT,
-       source TEXT, processing_status TEXT NOT NULL DEFAULT 'observed', processing_error TEXT,
-       processing_error_code TEXT, processed_at DATETIME,
-       attempt_count INTEGER NOT NULL DEFAULT 0,
-       transient_failure_count INTEGER NOT NULL DEFAULT 0, retry_after DATETIME,
-       blocked_min_context INTEGER
-     );
-     INSERT INTO frames (ts, surface, app, window_title, source) VALUES ${rows};`
-  ])
+  const db = new DatabaseSync(path.join(profileDir, 'memories.db'))
+  db.exec(`CREATE TABLE frames (
+     id INTEGER PRIMARY KEY AUTOINCREMENT, ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+     surface TEXT, app TEXT, window_title TEXT, url TEXT, image_path TEXT, text TEXT,
+     source TEXT, processing_status TEXT NOT NULL DEFAULT 'observed', processing_error TEXT,
+     processing_error_code TEXT, processed_at DATETIME,
+     attempt_count INTEGER NOT NULL DEFAULT 0,
+     transient_failure_count INTEGER NOT NULL DEFAULT 0, retry_after DATETIME,
+     blocked_min_context INTEGER
+   )`)
+  // Frames as Pro's capture writes them (the shared capture fixtures).
+  for (const [sec, app, title] of frames)
+    writeFrame(db, { ts: sqliteTime(sec), surface: app, app, windowTitle: title, source: 'ax' })
+  db.close()
 }
 
 const nav = (name: string): ReturnType<Page['getByRole']> =>
