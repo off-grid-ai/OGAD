@@ -5,9 +5,37 @@
  * Radix primitives remain real; the fake owns no timers or subscriptions, and its
  * lifecycle methods are deliberately inert.
  */
-import { vi } from 'vitest'
+import { afterAll, vi } from 'vitest'
 // The DOM globals jsdom lacks. One owner, shared with the db suite - see the file.
 import './dom-globals.setup'
+
+// Animation frames belong to the DOM that asked for them. Motion (the copy inside
+// @offgrid/operator-ui too) captures requestAnimationFrame when it loads, before any test runs, so
+// a frame it queued can fire after jsdom has removed `document` at the end of the file, and its
+// projection then reads the scroll of a document that is gone ("document is not defined" from
+// measureScroll). Frames are tracked here: one that fires with no document does nothing, and the
+// ones still queued when the file ends are cancelled. Animations run as they do in the browser.
+const browserFrame = globalThis.requestAnimationFrame?.bind(globalThis)
+const browserCancelFrame = globalThis.cancelAnimationFrame?.bind(globalThis)
+if (browserFrame && browserCancelFrame) {
+  const queued = new Set<number>()
+  globalThis.requestAnimationFrame = (callback: FrameRequestCallback): number => {
+    const id = browserFrame((time) => {
+      queued.delete(id)
+      if (typeof document !== 'undefined') callback(time)
+    })
+    queued.add(id)
+    return id
+  }
+  globalThis.cancelAnimationFrame = (id: number): void => {
+    queued.delete(id)
+    browserCancelFrame(id)
+  }
+  afterAll(() => {
+    for (const id of queued) browserCancelFrame(id)
+    queued.clear()
+  })
+}
 
 // motion/react (framer-motion) drives animations off requestAnimationFrame, which
 // jsdom stubs — so an AnimatePresence EXIT animation never completes and the
