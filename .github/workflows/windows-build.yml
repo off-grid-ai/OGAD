@@ -182,6 +182,9 @@ jobs:
           npm --prefix ../shared/packages/automation run build
           npm --prefix ../shared/packages/speech run build
           npm --prefix ../shared/packages/ui run build
+          # Scribe and Notes (Pro) import @offgrid/writing and @offgrid/notes: built dist/ like ui.
+          npm --prefix ../shared/packages/writing run build
+          npm --prefix ../shared/packages/notes run build
 
       - name: Let npm read the private UI package (Pro)
         # @offgrid/operator-ui is a private Wednesday package that only Pro uses. Core lists it as an
@@ -345,7 +348,7 @@ jobs:
           rm -rf ../shared
           mv _shared ../shared
           npm --prefix ../shared ci
-          for package in models sync use automation speech ui rag design; do
+          for package in models sync use automation speech ui rag design writing notes; do
             npm --prefix "../shared/packages/$package" run build
           done
 

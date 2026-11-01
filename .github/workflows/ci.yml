@@ -144,6 +144,9 @@ jobs:
           npm --prefix ../shared/packages/rag run build
           npm --prefix ../shared/packages/speech run build
           npm --prefix ../shared/packages/ui run build
+          # Scribe and Notes (Pro) import @offgrid/writing and @offgrid/notes: built dist/ like ui.
+          npm --prefix ../shared/packages/writing run build
+          npm --prefix ../shared/packages/notes run build
       - name: Check out the private Desktop speech runtime
         if: ${{ !cancelled() }}
         uses: actions/checkout@v4
@@ -543,7 +546,7 @@ jobs:
           mv _shared ../shared
           mv _executorch_speech ../executorch-speech
           npm --prefix ../shared ci
-          for package in models rag sync use automation speech ui; do
+          for package in models rag sync use automation speech ui writing notes; do
             npm --prefix "../shared/packages/$package" run build
           done
           npm ci
