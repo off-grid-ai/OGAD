@@ -24,10 +24,12 @@ const root = path.dirname(__dirname)
 const folder = path.basename(__dirname)
 const model = path.basename(valueAfter('-m') || 'model.gguf')
 // The device probe (Linux and Windows, before choosing Vulkan or CUDA) lists this machine's
-// devices and exits, as llama-server does on a machine without a GPU.
+// devices and exits. The machine has one GPU, as a Mac has Metal, so every OS walks the same
+// engine ladder: the GPU engine first, then CPU.
 if (args.includes('--list-devices')) {
   fs.appendFileSync(path.join(root, 'probes.log'), folder + ' ' + process.pid + ' ' + args.join(' ') + '\\n')
-  process.stdout.write('Available devices:\\n')
+  const device = folder.endsWith('-cuda') ? 'CUDA0' : 'Vulkan0'
+  process.stdout.write('Available devices:\\n  ' + device + ': Fake GPU (8192 MiB, 8000 MiB free)\\n')
   process.exit(0)
 }
 fs.appendFileSync(path.join(root, 'launches.log'), folder + ' ' + process.pid + ' ' + args.join(' ') + '\\n')
