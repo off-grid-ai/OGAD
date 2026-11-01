@@ -250,10 +250,10 @@ describe('task history IPC composition', () => {
 
   it('continues a web task in the browser Tasks > Web Use picks', async () => {
     failedTask('web-1', 'web_use', 'Find the release notes')
-    await ui.handlers.get('tasks:retry')!({}, 'web-1')
+    expect(await ui.handlers.get('tasks:retry')!({}, 'web-1')).toMatchObject({ available: true })
     await settled('web-1')
-    // The connected default browser, not Off Grid AI's own.
-    expect(browserAsked.length).toBeGreaterThan(0)
+    // The connected default browser, not Off Grid AI's own. On failure, say how the run ended.
+    expect(browserAsked.length, getTaskRun('web-1')?.summary).toBeGreaterThan(0)
   })
 
   it('continues a computer task on the AX rail when its app shows usable controls', async () => {
