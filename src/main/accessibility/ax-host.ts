@@ -334,7 +334,7 @@ function verificationObservation(snapshot: AxSnapshot): VerificationObservation 
   }
 }
 
-function makeElementActuator(
+export function makeElementActuator(
   actuation: ActuationPort,
   guard: VisionGuard,
   appName: string,
