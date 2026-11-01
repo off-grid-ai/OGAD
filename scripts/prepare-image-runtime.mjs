@@ -26,7 +26,8 @@ for (const patch of [...patches].reverse()) {
 }
 git('fetch', '--depth', '1', 'origin', revision)
 git('checkout', '--detach', 'FETCH_HEAD')
-git('submodule', 'update', '--init', '--depth', '1', 'ggml')
+// Recursive: newer ggml carries CUTLASS as its own submodule, which the CUDA build needs.
+git('submodule', 'update', '--init', '--recursive', '--depth', '1', 'ggml')
 if (execFileSync('git', ['-C', source, 'status', '--porcelain'], { encoding: 'utf8' }).trim()) {
   throw new Error(`Native source has unrelated changes: ${source}`)
 }
