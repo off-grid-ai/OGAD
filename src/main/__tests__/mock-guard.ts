@@ -46,6 +46,10 @@ export const BOUNDARY_ALLOW: Readonly<
     tables: ['entities'],
     why: "Capture history as Pro's capture and analysis pipeline writes it (people found in what was seen, with their observations); the spec reads it in the app."
   },
+  'e2e/tidy-up-0054.spec.ts': {
+    tables: ['action_items', 'observations'],
+    why: 'What release 0.0.54 left (to-dos with its accepted_at column, a meeting it saved twice); the spec proves the current app tidies it.'
+  },
   'e2e/upgrade-0054-profile.spec.ts': {
     tables: ['app_settings'],
     why: 'A profile as release 0.0.54 left it; the spec proves the current app upgrades it.'

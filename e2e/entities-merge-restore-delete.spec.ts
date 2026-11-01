@@ -14,6 +14,13 @@ import { DatabaseSync } from 'node:sqlite'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
 import { completeOnboarding } from './helpers/onboarding'
 import { closeAndWait } from './helpers/windows'
+import {
+  linkObservationEntity,
+  writeObservation
+} from '../src/main/__tests__/harness/capture-fixtures'
+import { registerFtsFunctions } from '../src/main/fts-functions'
+
+const sqliteTime = (ms: number): string => new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
 
 const PRO_PRESENT = fs.existsSync(path.resolve('pro/package.json'))
 const NOTES_SERVER = path.resolve('e2e/fixtures/team-notes-mcp-connector.mjs')
@@ -49,20 +56,23 @@ const relaunch = async (): Promise<void> => {
 /** Each person in conversations on two days; Zoe was archived earlier. */
 function seedPeople(): void {
   const history = new DatabaseSync(db())
+  // The app's index triggers call these functions; every writing connection registers them.
+  registerFtsFunctions(history)
   for (const name of PEOPLE) {
-    history.prepare("INSERT INTO entities (name, type) VALUES (?, 'Person')").run(name)
-    for (const when of ['-1 day', '+0 day']) {
-      const { lastInsertRowid } = history
-        .prepare(
-          `INSERT INTO observations (summary, surface, category, engagement, ts)
-           VALUES (?, 'Slack', 'communication', 0.5, datetime('now', ?))`
-        )
-        .run(`Planned the launch with ${name}`, when)
-      history
-        .prepare(
-          'INSERT INTO observation_entities (observation_id, entity_id) SELECT ?, id FROM entities WHERE name = ?'
-        )
-        .run(lastInsertRowid, name)
+    const person = Number(
+      history.prepare("INSERT INTO entities (name, type) VALUES (?, 'Person')").run(name)
+        .lastInsertRowid
+    )
+    // Observations as Pro's capture writes them (the shared capture fixtures).
+    for (const daysAgo of [1, 0]) {
+      const observation = writeObservation(history, {
+        summary: `Planned the launch with ${name}`,
+        surface: 'Slack',
+        category: 'communication',
+        engagement: 0.5,
+        ts: sqliteTime(Date.now() - daysAgo * 86_400_000)
+      })
+      linkObservationEntity(history, observation, person)
     }
   }
   history.prepare("UPDATE entities SET hidden = 1 WHERE name = 'Zoe Archer'").run()
