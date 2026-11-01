@@ -72,31 +72,33 @@ export const BOUNDARY_ALLOW: Readonly<
   }
 }
 
+/** Tables written by Pro's capture and analysis pipeline, which open-core tests cannot import.
+ *  Core tests seed them only through harness/capture-fixtures.ts, which mirrors Pro's writers and
+ *  is checked against them by a Pro contract test. */
+export const CAPTURE_TABLES: readonly string[] = [
+  'observations',
+  'observation_fts',
+  'observation_frames',
+  'observation_entities',
+  'frames',
+  'meetings',
+  'action_items',
+  'entity_edges',
+  'entity_facts'
+]
+export const CAPTURE_FIXTURE_BUILDER = 'src/main/__tests__/harness/capture-fixtures.ts'
+
 /**
- * Tables core has no write path for, so a core test may seed them, and why. Every other table is
+ * Tables core has no write path for, which any core test may seed, and why. Every other table is
  * written through the app's own code in tests. Tables a test creates itself (`test_*`) are not
  * product data.
  */
-export const BOUNDARY_TABLES: Readonly<Record<string, string>> = Object.fromEntries([
-  ...[
-    'observations',
-    'observation_fts',
-    'observation_frames',
-    'observation_entities',
-    'frames',
-    'meetings',
-    'action_items',
-    'entity_edges',
-    'entity_facts'
-  ].map((table) => [
-    table,
-    "Written by Pro's capture and analysis pipeline, which open-core tests cannot import."
-  ]),
-  ...['conversations', 'messages', 'memories'].map((table) => [
+export const BOUNDARY_TABLES: Readonly<Record<string, string>> = Object.fromEntries(
+  ['conversations', 'messages', 'memories'].map((table) => [
     table,
     'Written only by older releases; the current app reads, migrates and purges them.'
   ])
-])
+)
 
 /** A module specifier that names our own code (see the header). */
 export function isOurs(specifier: string): boolean {
@@ -144,7 +146,9 @@ export function mocksOfOurs(
   }
   // A row written straight into a table tests a guess of the schema, not the product: data
   // enters through the app's own write paths.
-  for (const match of source.matchAll(/\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+([A-Za-z_]\w*)/g)) {
+  // A trigger's body is schema (it keeps an index in step), not data a test seeds.
+  const seeding = source.replace(/CREATE\s+TRIGGER[\s\S]*?\bEND\b/gi, '')
+  for (const match of seeding.matchAll(/\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+([A-Za-z_]\w*)/g)) {
     const table = match[1]!
     if (table.startsWith('test_') || table in BOUNDARY_TABLES || allowedTables.includes(table))
       continue
@@ -183,11 +187,10 @@ export function scanMocks(
     const relative = path.relative(root, file)
     if (skip.includes(relative)) continue
     const allow = BOUNDARY_ALLOW[relative]
-    const count = mocksOfOurs(
-      fs.readFileSync(file, 'utf8'),
-      allow?.modules ?? [],
-      allow?.tables ?? []
-    ).length
+    const count = mocksOfOurs(fs.readFileSync(file, 'utf8'), allow?.modules ?? [], [
+      ...(allow?.tables ?? []),
+      ...(relative === CAPTURE_FIXTURE_BUILDER ? CAPTURE_TABLES : [])
+    ]).length
     if (count) counts[relative] = count
   }
   return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)))
