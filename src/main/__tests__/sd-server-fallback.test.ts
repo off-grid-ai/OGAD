@@ -51,6 +51,12 @@ function launches(): { folder: string; pid: number }[] {
 
 const fail = (folder: string): void => fs.writeFileSync(path.join(BIN, `${folder}.fail`), '')
 
+/** Resolves when the first engine has started. Before that start the product reaps orphans on
+ *  its port with lsof, whose time depends on the machine, so this waits for the event itself. */
+async function firstLaunch(): Promise<void> {
+  while (!launches().length) await new Promise((resolve) => setTimeout(resolve, 20))
+}
+
 let sdServer: (typeof import('../sd-server'))['sdServer']
 
 beforeAll(async () => {
@@ -95,10 +101,18 @@ describe('resident image runtime fallback', () => {
     fs.writeFileSync(path.join(BIN, 'hold'), '')
     const starting = sdServer.ensureUp({ modelPath: MODEL })
     const rejected = expect(starting).rejects.toThrow()
-    await vi.waitFor(() => expect(launches()).toHaveLength(1))
+    await firstLaunch()
     sdServer.stop()
     await rejected
     expect(launches().map((launch) => launch.folder)).toEqual(['sd'])
+    expect(sdServer.isUp()).toBe(false)
+  })
+
+  it('starts no engine when the user stops before the first one starts', async () => {
+    const starting = sdServer.ensureUp({ modelPath: MODEL })
+    sdServer.stop()
+    await expect(starting).rejects.toThrow('Image server startup canceled.')
+    expect(launches()).toEqual([])
     expect(sdServer.isUp()).toBe(false)
   })
 
