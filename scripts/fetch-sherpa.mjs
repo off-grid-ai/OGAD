@@ -68,12 +68,28 @@ if (!/^[0-9a-f]{64}$/.test(expected ?? '')) {
   process.exit(1)
 }
 
+// GitHub's release downloads can drop a connection mid-body; a bare fetch then never settles
+// and the release job sits until it is cancelled. Each attempt gets two minutes, three in all.
 async function download(url) {
-  const response = await fetch(url, {
-    headers: process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}
-  })
-  if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`)
-  return Buffer.from(await response.arrayBuffer())
+  let lastError
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: process.env.GITHUB_TOKEN
+          ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
+          : {},
+        signal: AbortSignal.timeout(120_000)
+      })
+      if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`)
+      return Buffer.from(await response.arrayBuffer())
+    } catch (error) {
+      lastError = error
+      console.warn(
+        `[sherpa] download attempt ${attempt} failed: ${error instanceof Error ? error.message : error}`
+      )
+    }
+  }
+  throw lastError
 }
 
 const binRoot = path.resolve(root, values.bin ?? path.join('resources', 'bin'))
