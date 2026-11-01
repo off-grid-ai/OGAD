@@ -6,6 +6,5 @@
   "e2e/entities-merge-restore-delete.spec.ts": 1,
   "e2e/upgrade-0054-profile.spec.ts": 1,
   "e2e/web-use-failed-task-status.spec.ts": 1,
-  "src/main/__tests__/ai-request-log-retention.dbtest.ts": 1,
-  "src/main/__tests__/desktop-backup-roundtrip.integration.dbtest.ts": 6
+  "src/main/__tests__/ai-request-log-retention.dbtest.ts": 1
 }
