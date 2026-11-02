@@ -11,6 +11,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
+import { DOCUMENT_EMBEDDER } from '../embedding-models'
 import { createOfflineFetchBoundary, type OfflineFetchBoundary } from './harness/offline-fetch'
 
 const hostFetch = globalThis.fetch.bind(globalThis)
@@ -156,13 +157,14 @@ process.stdin.on('end', () => {
 
 /**
  * Requests other than fetching the public document-embedding model. A knowledge-base file is
- * indexed with MiniLM, which downloads on first use (as for chat attachments); offline, that fetch
- * fails and the file is searched by keyword. It carries no session content; everything else must
- * stay on this machine.
+ * indexed with the app's document embedder, which downloads on first use (as for chat
+ * attachments); offline, that fetch fails and the file is searched by keyword. It carries no
+ * session content; everything else must stay on this machine. Named from the app's own constant,
+ * so a change of embedder does not read as a privacy leak.
  */
 function userRequests(requests: string[]): string[] {
   return requests.filter(
-    (url) => !url.startsWith('https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/')
+    (url) => !url.startsWith(`https://huggingface.co/${DOCUMENT_EMBEDDER}/resolve/`)
   )
 }
 
