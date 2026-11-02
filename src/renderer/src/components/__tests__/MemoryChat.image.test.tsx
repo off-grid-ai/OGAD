@@ -152,6 +152,9 @@ type InstallApiOptions = {
 type InstalledApi = {
   generateImage: Mock<(payload: GenPayload) => Promise<ImageResult>>
   emitConversationUpdated: (conversationId: string) => void
+  emitConversationUpdated: (conversationId: string) => void
+  /** A row another device wrote, now in this device's store (what a materialised sync op leaves). */
+  storeMessage: (conversationId: string, row: unknown) => void
   emitJobState: (job: ImageGenerationJobContract) => void
   setActiveModalModel: Mock<(kind: string, model: string) => Promise<void>>
   toolChat: Mock<
@@ -1672,6 +1675,41 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     expect(within(viewer).getByAltText('dog.png').getAttribute('src')).toBe(
       'ogcapture:///received/dog.png'
     )
+  })
+
+  it('draws a picture sent with a message across the full width of its bubble', async () => {
+    const conv = conversation('c-sent-picture', 'What is in this image?')
+    installApi({
+      active: FULL,
+      models: [FULL],
+      conversations: [conv],
+      messages: {
+        [conv.id]: [
+          {
+            uuid: 'message-picture-1',
+            role: 'user',
+            content: 'What is in this image? One sentence.',
+            context: JSON.stringify({
+              attachments: [
+                { id: 'photo-1', name: 'lighthouse.jpg', kind: 'image', path: '/received/l.jpg' },
+                { id: 'photo-2', name: 'harbour.jpg', kind: 'image', path: '/received/h.jpg' }
+              ]
+            })
+          }
+        ]
+      }
+    })
+    renderChat({ conversationId: conv.id })
+
+    // Each picture fills its own line of the bubble, never a thumbnail beside the words.
+    for (const name of ['lighthouse.jpg', 'harbour.jpg']) {
+      const picture = await screen.findByAltText(name)
+      expect(picture.className).toContain('w-full')
+      expect(picture.className).not.toContain('size-24')
+      expect(picture.closest('button')?.className).toContain('w-full')
+      expect(picture.closest('button')?.parentElement?.className).toContain('basis-full')
+    }
+    expect(screen.getByText('What is in this image? One sentence.')).toBeTruthy()
   })
 
   it('shows live progress, renders one generated image, and opens and saves it (#61, #67)', async () => {
