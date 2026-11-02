@@ -152,7 +152,6 @@ type InstallApiOptions = {
 type InstalledApi = {
   generateImage: Mock<(payload: GenPayload) => Promise<ImageResult>>
   emitConversationUpdated: (conversationId: string) => void
-  emitConversationUpdated: (conversationId: string) => void
   /** A row another device wrote, now in this device's store (what a materialised sync op leaves). */
   storeMessage: (conversationId: string, row: unknown) => void
   emitJobState: (job: ImageGenerationJobContract) => void
@@ -403,6 +402,9 @@ function installApi(opts: InstallApiOptions): InstalledApi {
         startedAt: 1,
         finishedAt: null
       })
+    },
+    storeMessage(conversationId: string, row: unknown): void {
+      messages.set(conversationId, [...(messages.get(conversationId) ?? []), row])
     },
     emitConversationUpdated(conversationId: string): void {
       convUpdatedCb?.(conversationId)
@@ -1710,6 +1712,62 @@ describe('<MemoryChat/> image and vision release journeys', () => {
       expect(picture.closest('button')?.parentElement?.className).toContain('basis-full')
     }
     expect(screen.getByText('What is in this image? One sentence.')).toBeTruthy()
+  })
+
+  it('says a chat from another device is still arriving until its message lands', async () => {
+    const conv = conversation('c-arriving', 'a single red ball on a plain white table')
+    const api = installApi({
+      active: FULL,
+      models: [FULL],
+      isPro: true,
+      conversations: [conv],
+      messages: { [conv.id]: [] }
+    })
+    renderChat({ conversationId: conv.id })
+    expect(await screen.findByTestId('chat-empty-hero')).toBeTruthy()
+
+    // The title came across; the picture is announced for a message that has not landed here yet.
+    act(() => {
+      api.emitIncomingFiles([
+        {
+          syncId: 'sync-red-ball',
+          conversationId: conv.id,
+          messageId: 'message-red-ball',
+          name: 'red-ball.png',
+          fileSize: 10,
+          mimeType: 'image/png',
+          kind: 'image'
+        },
+        {
+          syncId: 'sync-other-chat',
+          conversationId: 'c-some-other-chat',
+          messageId: 'message-elsewhere',
+          name: 'elsewhere.png',
+          fileSize: 10,
+          mimeType: 'image/png',
+          kind: 'image'
+        }
+      ])
+    })
+    const arriving = await screen.findByTestId('arriving-from-peer')
+    expect(within(arriving).getByText('Still arriving from your other device')).toBeTruthy()
+    expect(within(arriving).getByText('red-ball.png')).toBeTruthy()
+    expect(screen.queryByText('elsewhere.png')).toBeNull()
+    expect(screen.queryByTestId('chat-empty-hero')).toBeNull()
+
+    // The message lands: the chat shows it, and the file's wait moves under it.
+    api.storeMessage(conv.id, {
+      uuid: 'message-red-ball',
+      role: 'user',
+      content: 'a single red ball on a plain white table, photo'
+    })
+    act(() => api.emitConversationUpdated(conv.id))
+    expect(await screen.findByText('a single red ball on a plain white table, photo')).toBeTruthy()
+    await waitFor(() => expect(screen.queryByTestId('arriving-from-peer')).toBeNull())
+
+    // The bytes land too: nothing is waiting any more.
+    act(() => api.emitIncomingFiles([]))
+    await waitFor(() => expect(screen.queryByTestId('incoming-shared-file')).toBeNull())
   })
 
   it('shows live progress, renders one generated image, and opens and saves it (#61, #67)', async () => {

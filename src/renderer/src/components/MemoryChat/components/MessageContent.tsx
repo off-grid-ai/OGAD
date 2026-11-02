@@ -36,6 +36,22 @@ function IncomingFileRowsComponent({
   )
 }
 
+/** Files from another device whose message has not landed yet, so the chat shows the wait. */
+function ArrivingFromPeerComponent({
+  files
+}: Readonly<{ files: readonly IncomingSharedFile[] }>): React.JSX.Element {
+  return (
+    <div
+      role="status"
+      data-testid="arriving-from-peer"
+      className="mb-5 flex flex-col items-end gap-1.5"
+    >
+      <span className="text-[11px] text-neutral-400">Still arriving from your other device</span>
+      <IncomingFileRows files={files} />
+    </div>
+  )
+}
+
 function MessageAttachmentsComponent({
   attachments,
   onOpenAttachment,
@@ -160,5 +176,6 @@ function MessageEditorComponent({
 }
 
 export const IncomingFileRows = memo(IncomingFileRowsComponent)
+export const ArrivingFromPeer = memo(ArrivingFromPeerComponent)
 export const MessageAttachments = memo(MessageAttachmentsComponent)
 export const MessageEditor = memo(MessageEditorComponent)
