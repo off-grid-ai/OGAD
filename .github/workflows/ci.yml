@@ -121,6 +121,37 @@ jobs:
           path: _shared
           ref: main
           persist-credentials: false
+      # npm's download cache (both installs below) and Electron's (the Electron zip and the headers
+      # that native modules compile against). npm keys on both lockfiles, Electron on its version.
+      #
+      # The caches in this workflow restore and save in separate steps. actions/cache saves in its
+      # post step only when the whole job succeeds, and the gates here keep running after one fails,
+      # so a single red gate threw the cache away. Each save runs once the install that fills it has run.
+      - name: Locate the download caches
+        id: caches
+        if: ${{ !cancelled() }}
+        run: |
+          echo "npm_config_cache=$RUNNER_TEMP/npm-cache" >> "$GITHUB_ENV"
+          echo "electron_config_cache=$RUNNER_TEMP/electron-cache" >> "$GITHUB_ENV"
+          echo "electron=$(node -p "require('./package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
+      - name: Restore npm downloads
+        id: npm_cache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/npm-cache
+          key: npm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json', '_shared/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-${{ runner.arch }}-node22-
+      - name: Restore Electron downloads
+        id: electron_cache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/electron-cache
+            ~/.electron-gyp
+            ~/.cache/node-gyp
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.caches.outputs.electron }}-node22
       - name: Put shared beside this checkout
         if: ${{ !cancelled() }}
         run: |
@@ -204,7 +235,9 @@ jobs:
           git -C _executorch_speech config --unset-all http.https://github.com/.extraheader || true
           rm -rf ../executorch-speech
           mv _executorch_speech ../executorch-speech
-      - if: ${{ !cancelled() }}
+      - name: Install dependencies
+        id: install
+        if: ${{ !cancelled() }}
         run: npm ci
       # Hard gates: types + the full test suite.
       - name: Typecheck (core)
@@ -222,6 +255,22 @@ jobs:
       - name: Rebuild SQLite for the Node test runner
         if: ${{ !cancelled() }}
         run: npm rebuild better-sqlite3-multiple-ciphers
+      # After the rebuild above, which fetches Node's headers and the module's prebuilt binary.
+      - name: Save npm downloads
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.npm_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/npm-cache
+          key: ${{ steps.npm_cache.outputs.cache-primary-key }}
+      - name: Save Electron downloads
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.electron_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/electron-cache
+            ~/.electron-gyp
+            ~/.cache/node-gyp
+          key: ${{ steps.electron_cache.outputs.cache-primary-key }}
       # This is the fast report, not the complete coverage measurement. DB-only
       # journeys run next and e2e can add coarse coverage later. Test failures still
       # block here; the aggregate new-code gate below owns the coverage decision.
@@ -502,6 +551,28 @@ jobs:
         if: runner.os == 'Windows'
         with:
           python-version: '3.12'
+      # The same download caches as the ci job, restored and saved apart for the same reason.
+      - name: Locate the download caches
+        id: caches
+        run: |
+          echo "npm_config_cache=$RUNNER_TEMP/npm-cache" >> "$GITHUB_ENV"
+          echo "electron_config_cache=$RUNNER_TEMP/electron-cache" >> "$GITHUB_ENV"
+          echo "electron=$(node -p "require('./package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
+      - name: Restore npm downloads
+        id: npm_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/npm-cache
+          key: npm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json', '_shared/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-${{ runner.arch }}-node22-
+      - name: Restore Electron downloads
+        id: electron_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/electron-cache
+            ~/.electron-gyp
+          key: electron-native-${{ runner.os }}-${{ runner.arch }}-${{ steps.caches.outputs.electron }}
       - name: Let npm read the private UI package (core and Pro)
         # @offgrid/operator-ui is a private Wednesday package that core and Pro both render with
         # (skin, primitives, motion). It is listed as optional, so npm would skip it silently
@@ -539,6 +610,7 @@ jobs:
             exit 1
           fi
       - name: Install workspace dependencies
+        id: install
         run: |
           mv _shared ../shared
           mv _executorch_speech ../executorch-speech
@@ -547,6 +619,20 @@ jobs:
             npm --prefix "../shared/packages/$package" run build
           done
           npm ci
+      - name: Save npm downloads
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.npm_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/npm-cache
+          key: ${{ steps.npm_cache.outputs.cache-primary-key }}
+      - name: Save Electron downloads
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.electron_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/electron-cache
+            ~/.electron-gyp
+          key: ${{ steps.electron_cache.outputs.cache-primary-key }}
       - name: Install the virtual Linux desktop and media runtime
         if: runner.os == 'Linux'
         run: |

@@ -39,26 +39,28 @@ export function AnalyticsPanel(): React.ReactElement {
           title="Anonymous stats"
           description="How many times each feature is used, and how fast models run. Never your prompts, replies or files."
           className="pt-0"
-        >
-          <Switch
-            aria-label="Anonymous stats"
-            checked={consent.usage}
-            disabled={busy}
-            onCheckedChange={(checked) => void change({ usage: checked === true })}
-          />
-        </SettingRow>
+          toggle={
+            <Switch
+              aria-label="Anonymous stats"
+              checked={consent.usage}
+              disabled={busy}
+              onCheckedChange={(checked) => void change({ usage: checked === true })}
+            />
+          }
+        />
         <SettingRow
           title="Crash reports"
           description="What broke and where in our code. File paths and typed text are removed."
           className="pt-0"
-        >
-          <Switch
-            aria-label="Crash reports"
-            checked={consent.crashes}
-            disabled={busy}
-            onCheckedChange={(checked) => void change({ crashes: checked === true })}
-          />
-        </SettingRow>
+          toggle={
+            <Switch
+              aria-label="Crash reports"
+              checked={consent.crashes}
+              disabled={busy}
+              onCheckedChange={(checked) => void change({ crashes: checked === true })}
+            />
+          }
+        />
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
