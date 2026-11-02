@@ -627,6 +627,8 @@ jobs:
     # windows-2022 = VS 2022 toolchain. windows-latest ships VS 2026, which node-gyp 11
     # can't parse, breaking native-module (better-sqlite3) compiles. Pin until it catches up.
     runs-on: windows-2022
+    env:
+      VULKAN_VERSION: '1.4.321.1' # the SDK the Whisper build compiles against
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -776,13 +778,21 @@ jobs:
           fi
       - name: Install dependencies
         run: npm ci
+      # Whisper is built from source with Vulkan on every release (about 5 minutes with the SDK
+      # install). Its pin lives in the build script, so the build is cached on that script and the
+      # runtime config it copies from, and the SDK install and build run only when one changes.
+      - name: Restore the Windows Vulkan Whisper
+        id: whisper_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: resources/bin/whisper-vulkan
+          key: whisper-vulkan-win-${{ env.VULKAN_VERSION }}-${{ hashFiles('scripts/build-whisper-vulkan-win.ps1', 'scripts/config/windows-vc-runtime.ps1') }}
       - name: Install Vulkan SDK for Whisper
         # LunarG's own installer, run silently, as llama.cpp's Windows CI does. In the SDK that
         # humbletim/install-vulkan-sdk unpacked, CMake's FindVulkan found glslc but not the loader
         # library or headers, so Whisper's configure failed; the step below checks all three.
+        if: ${{ steps.whisper_cache.outputs.cache-hit != 'true' }}
         shell: pwsh
-        env:
-          VULKAN_VERSION: '1.4.321.1'
         run: |
           $installer = Join-Path $env:RUNNER_TEMP 'vulkansdk.exe'
           curl.exe -fsSL --retry 3 -o $installer "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/vulkansdk-windows-X64-$env:VULKAN_VERSION.exe"
@@ -796,8 +806,15 @@ jobs:
           "VULKAN_SDK=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "$root\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - name: Build Windows Vulkan Whisper
+        if: ${{ steps.whisper_cache.outputs.cache-hit != 'true' }}
         shell: pwsh
         run: ./scripts/build-whisper-vulkan-win.ps1
+      - name: Save the Windows Vulkan Whisper
+        if: ${{ steps.whisper_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: resources/bin/whisper-vulkan
+          key: ${{ steps.whisper_cache.outputs.cache-primary-key }}
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
         shell: pwsh
         env:
@@ -988,8 +1005,11 @@ jobs:
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
           ref: d005e3509e6f608bb4e70abbe9f089120a08e973
           path: _executorch_speech
-          lfs: false # Build the Linux executable from the pinned source.
-          submodules: recursive
+          # The package's JavaScript only, one commit deep: the Linux executable comes from the
+          # pinned linux-native archive below, so the vendored ExecuTorch submodules and the LFS
+          # files are never read.
+          fetch-depth: 1
+          lfs: false
           persist-credentials: false
       - name: Put the speech package beside this checkout
         run: |
