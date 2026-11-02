@@ -1,0 +1,224 @@
+name: Set up the desktop workspace
+description: >
+  Pro, shared and the speech runtime beside this checkout, the private UI package, Node and
+  `npm ci`: the setup every CI job runs first. One definition, so the parallel jobs cannot drift
+  apart.
+
+inputs:
+  cross-repo-token:
+    description: CI_CROSS_REPO_TOKEN, which reads desktop-pro, shared and executorch-speech.
+    required: true
+  ui-token:
+    description: OPERATOR_UI_TOKEN, tried before the cross-repo token for the private UI package.
+    required: false
+    default: ''
+  fetch-depth:
+    description: History to fetch for pro. The coverage job measures new code against the base branch, so it needs all of it.
+    required: false
+    default: '1'
+
+runs:
+  using: composite
+  steps:
+    # Pro and shared on the branch that MATCHES this PR/push, so a coordinated core+pro (or
+    # core+shared) change is tested together; the PR base branch otherwise, and shared falls back to
+    # main last. Without this, CI tested the core branch against pro `main`: pro's new test files
+    # were absent while pro source was still measured, and coverage cratered (PR #46).
+    #
+    # A composite step cannot continue on error, so each branch is looked up before the checkout.
+    # The lookup clears the login header actions/checkout saved for github.com, which would override
+    # the token. `--exit-code` exits 2 when the branch does not exist; any other failure stops the
+    # job, so a bad token cannot quietly test against a fallback branch.
+    - name: Pick the pro and shared branches
+      id: refs
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.cross-repo-token }}
+        HEAD_REF: ${{ github.head_ref || github.ref_name }}
+        BASE_REF: ${{ github.base_ref || 'main' }}
+      run: |
+        exists() {
+          local status=0
+          git -c http.https://github.com/.extraheader= ls-remote --exit-code --heads \
+            "https://x-access-token:${TOKEN}@github.com/off-grid-ai/$1.git" "$2" >/dev/null || status=$?
+          case "$status" in
+            0) return 0 ;;
+            2) return 1 ;;
+            *) echo "::error::Could not read off-grid-ai/$1 (git exit $status). Check CI_CROSS_REPO_TOKEN." >&2; exit 1 ;;
+          esac
+        }
+        pick() {
+          for ref in "${@:2}"; do
+            if exists "$1" "$ref"; then echo "$ref"; return; fi
+          done
+          echo "::error::off-grid-ai/$1 has none of: ${*:2}" >&2
+          exit 1
+        }
+        pro=$(pick desktop-pro "$HEAD_REF" "$BASE_REF")
+        shared=$(pick shared "$HEAD_REF" "$BASE_REF" main)
+        echo "pro=$pro" >> "$GITHUB_OUTPUT"
+        echo "shared=$shared" >> "$GITHUB_OUTPUT"
+        echo "pro: $pro, shared: $shared"
+
+    - name: Check out pro into ./pro
+      uses: actions/checkout@v4
+      with:
+        repository: off-grid-ai/desktop-pro
+        token: ${{ inputs.cross-repo-token }}
+        path: pro
+        ref: ${{ steps.refs.outputs.pro }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+        # Don't leave the cross-repo PAT in ./pro/.git/config where a later PR-controlled step
+        # could reuse it.
+        persist-credentials: false
+
+    # pro MUST be present: without it the guarded typecheck/coverage path is skipped and CI would
+    # pass core-only with cratered, misleading coverage.
+    - name: Require pro
+      shell: bash
+      run: |
+        if [ ! -f pro/tsconfig.json ]; then
+          echo "::error::pro (desktop-pro) was not checked out - cannot validate the open-core build."
+          exit 1
+        fi
+
+    - uses: actions/setup-node@v4
+      with:
+        # Node 22 supports node:sqlite and both native SQLite dependencies. Node 24 aborts while
+        # Vitest unloads the cipher module; Node 26 cannot build better-sqlite3 12.6.
+        node-version: '22'
+
+    # Shared packages are file: dependencies on the SIBLING shared monorepo. actions/checkout
+    # refuses a path outside the workspace, so it lands inside and is moved up one level - exactly
+    # where the file: specifiers point.
+    - name: Check out the shared monorepo
+      uses: actions/checkout@v4
+      with:
+        repository: off-grid-ai/shared
+        token: ${{ inputs.cross-repo-token }}
+        path: _shared
+        ref: ${{ steps.refs.outputs.shared }}
+        persist-credentials: false
+
+    # npm's download cache (both installs below) and Electron's (the Electron zip and the headers
+    # that native modules compile against). npm keys on both lockfiles, Electron on its version.
+    # Restored and saved in separate steps, so a red gate later in the job cannot throw them away.
+    - name: Locate the download caches
+      id: caches
+      shell: bash
+      run: |
+        echo "npm_config_cache=$RUNNER_TEMP/npm-cache" >> "$GITHUB_ENV"
+        echo "electron_config_cache=$RUNNER_TEMP/electron-cache" >> "$GITHUB_ENV"
+        echo "electron=$(node -p "require('./package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
+    - name: Restore npm downloads
+      id: npm_cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/npm-cache
+        key: npm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json', '_shared/package-lock.json') }}
+        restore-keys: npm-${{ runner.os }}-${{ runner.arch }}-node22-
+    - name: Restore Electron downloads
+      id: electron_cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ runner.temp }}/electron-cache
+          ~/.electron-gyp
+          ~/.cache/node-gyp
+        key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.caches.outputs.electron }}-node22
+
+    - name: Put shared beside this checkout
+      shell: bash
+      run: |
+        rm -rf ../shared
+        mv _shared ../shared
+        # Install at the WORKSPACE ROOT: shared is an npm-workspaces monorepo, and the lockfile and
+        # the build tool (tsup) live at the root. A LOCKED install and no fallback: a drifted lock
+        # should stop the build, not resolve a graph nobody committed.
+        npm --prefix ../shared ci
+        npm --prefix ../shared/packages/sync run build
+        npm --prefix ../shared/packages/models run build
+        # @offgrid/rag (the document engine) ships a built dist/ like sync and models.
+        npm --prefix ../shared/packages/rag run build
+        npm --prefix ../shared/packages/speech run build
+        npm --prefix ../shared/packages/ui run build
+        # Scribe and Notes (Pro) import @offgrid/writing and @offgrid/notes: built dist/ like ui.
+        npm --prefix ../shared/packages/writing run build
+        npm --prefix ../shared/packages/notes run build
+
+    - name: Check out the private Desktop speech runtime
+      uses: actions/checkout@v4
+      with:
+        repository: off-grid-ai/executorch-speech
+        token: ${{ inputs.cross-repo-token }}
+        path: _executorch_speech
+        lfs: false
+        # Kept only until the selective LFS pull below, which removes it before any project code runs.
+        persist-credentials: true
+    - name: Put the speech runtime beside this checkout
+      shell: bash
+      run: |
+        if [ ! -f _executorch_speech/package.json ]; then
+          echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
+          exit 1
+        fi
+        # Tests exercise the real native boundary, but ordinary CI does not need the 350 MB
+        # bundled English asset set used only by the Mac release.
+        git -C _executorch_speech lfs pull --include='native/bin/executorch-speech' --exclude=''
+        git -C _executorch_speech config --unset-all http.https://github.com/.extraheader || true
+        rm -rf ../executorch-speech
+        mv _executorch_speech ../executorch-speech
+
+    # @offgrid/operator-ui is a private package that core and Pro both render with. It is listed as
+    # optional, so npm would skip it silently without access and the build would fail later; this
+    # step makes that failure immediate.
+    - name: Let npm read the private UI package (core and Pro)
+      shell: bash
+      env:
+        UI_TOKEN_PRIMARY: ${{ inputs.ui-token }}
+        UI_TOKEN_FALLBACK: ${{ inputs.cross-repo-token }}
+      run: |
+        # Use the first token that can read off-grid-ai/ui-library (a pasted secret can carry a
+        # newline or spaces). The probes clear the checkout's GitHub login header for the library,
+        # or it would override the probed token.
+        UI_TOKEN=""
+        for candidate in "$UI_TOKEN_PRIMARY" "$UI_TOKEN_FALLBACK"; do
+          candidate="$(printf '%s' "$candidate" | tr -d '[:space:]')"
+          [ -z "$candidate" ] && continue
+          if git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${candidate}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
+            UI_TOKEN="$candidate"
+            break
+          fi
+        done
+        if [ -n "$UI_TOKEN" ]; then
+          git config --global url."https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library".insteadOf "ssh://git@github.com/off-grid-ai/ui-library"
+          # Clear this repo's saved login for the library only (the most specific address wins).
+          if git rev-parse --git-dir >/dev/null 2>&1; then
+            git config --local http.https://github.com/off-grid-ai/ui-library.git.extraheader ""
+          fi
+        fi
+        if ! git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
+          status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${UI_TOKEN}" https://api.github.com/repos/off-grid-ai/ui-library)"
+          echo "::error::CI cannot read off-grid-ai/ui-library (GitHub answered ${status}: 401 bad token, 403 org policy or IP allow list, 404 no access to the repo). Core and Pro will not build without it."
+          exit 1
+        fi
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Save npm downloads
+      if: ${{ steps.npm_cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/npm-cache
+        key: ${{ steps.npm_cache.outputs.cache-primary-key }}
+    - name: Save Electron downloads
+      if: ${{ steps.electron_cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ runner.temp }}/electron-cache
+          ~/.electron-gyp
+          ~/.cache/node-gyp
+        key: ${{ steps.electron_cache.outputs.cache-primary-key }}

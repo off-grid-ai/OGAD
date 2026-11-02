@@ -5,9 +5,20 @@
  * Radix primitives remain real; the fake owns no timers or subscriptions, and its
  * lifecycle methods are deliberately inert.
  */
+import { configure } from '@testing-library/dom'
 import { afterAll, vi } from 'vitest'
 // The DOM globals jsdom lacks. One owner, shared with the db suite - see the file.
 import './dom-globals.setup'
+
+// findBy*/waitFor wait for something to APPEAR; they are not a speed check. Their 1s default made
+// every cold <App/> or <MemoryChat/> mount a race against the machine: alone it wins, under the
+// pre-push hook's parallel workers (and other apps building) it loses, and the test fails on a
+// screen that was still mounting. The test timeout already allows for that load; a wait gets a
+// third of it, so a thing that never appears still fails with its own message, not a timeout.
+// Set through @testing-library/dom (the one copy React Testing Library reads), never by importing
+// @testing-library/react here: that loads react-dom before the DOM globals exist, and react-dom
+// then picks its old-IE input path, so typing into a field changes nothing.
+configure({ asyncUtilTimeout: 5000 })
 
 // Animation frames belong to the DOM that asked for them. Motion (the copy inside
 // @offgrid/operator-ui too) captures requestAnimationFrame when it loads, before any test runs, so

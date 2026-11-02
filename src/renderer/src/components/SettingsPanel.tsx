@@ -1288,20 +1288,21 @@ export function SettingsPanel({
               title="Enable tools"
               description="Controls whether any tools are sent to the chat model."
               className="mb-3 pt-0"
-            >
-              <Switch
-                aria-label="Enable tools"
-                checked={toolsEnabled}
-                onCheckedChange={() => {
-                  const next = !toolsEnabled
-                  setToolsEnabled(next)
-                  void window.api.saveSetting('toolsEnabled', next)
-                  window.dispatchEvent(
-                    new CustomEvent('offgrid-tools-enabled-changed', { detail: next })
-                  )
-                }}
-              />
-            </SettingRow>
+              toggle={
+                <Switch
+                  aria-label="Enable tools"
+                  checked={toolsEnabled}
+                  onCheckedChange={() => {
+                    const next = !toolsEnabled
+                    setToolsEnabled(next)
+                    void window.api.saveSetting('toolsEnabled', next)
+                    window.dispatchEvent(
+                      new CustomEvent('offgrid-tools-enabled-changed', { detail: next })
+                    )
+                  }}
+                />
+              }
+            />
             {tools.length === 0 ? (
               <p className="text-xs text-neutral-600">No tools.</p>
             ) : (
@@ -1450,17 +1451,18 @@ export function SettingsPanel({
               title="Enable connectors"
               description="Controls whether any connector tools are sent to the chat model."
               className="mb-3 pt-0"
-            >
-              <Switch
-                aria-label="Enable connectors"
-                checked={connectorsEnabled}
-                onCheckedChange={() => {
-                  const next = !connectorsEnabled
-                  setConnectorsEnabled(next)
-                  void window.api.saveSetting('connectorsEnabled', next)
-                }}
-              />
-            </SettingRow>
+              toggle={
+                <Switch
+                  aria-label="Enable connectors"
+                  checked={connectorsEnabled}
+                  onCheckedChange={() => {
+                    const next = !connectorsEnabled
+                    setConnectorsEnabled(next)
+                    void window.api.saveSetting('connectorsEnabled', next)
+                  }}
+                />
+              }
+            />
             <p className="mb-2 text-[11.5px] leading-snug text-neutral-500">
               Connect MCP servers — your reusable tool library (web search, fetch, etc.). Add an
               HTTP MCP endpoint:

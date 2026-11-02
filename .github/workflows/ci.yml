@@ -1,11 +1,11 @@
-# PR + main verification, as ONE job: typecheck (core + pro), the full vitest suite with the coverage floor
-# (which includes the pro/ tests when the pro repo is checked out alongside), dependency boundaries, lint, and
-# the Playwright e2e tour on the built app.
+# PR + main verification: typecheck (core + pro), the full vitest suite (which includes the pro/ tests
+# when the pro repo is checked out alongside), the DB journeys, the heavy integration tests,
+# dependency boundaries, lint, the native recording journeys, and the new-code coverage report across
+# all of them. The optional Playwright e2e tour runs beside them when OFFGRID_CI_E2E is set.
 #
 # Cross-repo note: pro/ is a separate private repo (paid features). Set the repo
 # secret CI_CROSS_REPO_TOKEN (a PAT with read access to off-grid-ai/desktop-pro)
-# so the pro tests + pro typecheck run here too. Without it, core is still fully
-# verified and the pro steps are skipped gracefully.
+# so the pro tests + pro typecheck run here too.
 name: CI
 on:
   pull_request:
@@ -17,338 +17,192 @@ permissions:
   contents: read
   actions: read
 
+# A new push to a pull request replaces its running checks, which would otherwise hold runners for a
+# commit nobody will merge. Pushes to main each finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  # ONE job per repo, matching mobile and mobile-pro: typecheck, tests + coverage, boundaries, lint and the
-  # Playwright e2e all report as a single `ci` check.
+  # Every gate as a parallel job on one shared setup (.github/actions/setup-desktop).
   #
-  # This used to be two parallel jobs (verify + e2e). Merging them costs ~7 minutes of wall clock - the e2e tour
-  # now runs after the unit gates instead of beside them - and buys one check to read instead of two, plus the
-  # deletion of a duplicated pro + shared checkout and a second `npm ci` that existed only to feed the second
-  # job. An earlier attempt at this was reverted because appending e2e "blew the 25-min job cap" (PR #68); that
-  # cap was this workflow's own timeout-minutes, so it is raised here deliberately rather than worked around.
-  ci:
+  # This was ONE job for a reason worth keeping: an earlier verify + e2e split duplicated the pro and
+  # shared checkouts and a second `npm ci`, and the copies were the bug. The setup now lives once and
+  # every job calls it. Run in one job, the gates took 37 minutes, 16 of them the vitest suite alone;
+  # here the suite is split into four shards balanced by recorded file run time
+  # (scripts/config/vitest-duration-sequencer.ts).
+  test:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 50 # backstop: a hung step fails fast instead of running for hours (unit gates + e2e tour)
-    # Each gate below uses !cancelled() so later checks still report after an earlier failure.
-    # Required failures still make this job fail; only the marked advisory steps can fail without blocking.
+    timeout-minutes: 30 # backstop: a hung step fails fast instead of running for hours
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { task: checks, name: 'types, boundaries, lint' }
+          - { task: unit, shard: 1, name: 'vitest (1/4)' }
+          - { task: unit, shard: 2, name: 'vitest (2/4)' }
+          - { task: unit, shard: 3, name: 'vitest (3/4)' }
+          - { task: unit, shard: 4, name: 'vitest (4/4)' }
+          - { task: db, name: 'DB journeys' }
+          - { task: heavy, name: 'heavy integration' }
     steps:
       - uses: actions/checkout@v4
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-desktop
         with:
-          # The authoritative coverage gate compares the checked-out change with
-          # this PR's base branch. A depth-1 checkout has no merge base to measure.
-          fetch-depth: 0
-      # Check out pro on the branch that MATCHES this PR/push (so a coordinated
-      # core+pro change is tested together). If pro has no such branch (most PRs),
-      # this step's checkout fails quietly and the fallback below pulls pro `main`.
-      # Without this, CI silently tested the core branch against pro `main`, so
-      # pro's new test files were absent while pro source was still measured →
-      # coverage cratered (60% vs 97% local). See PR #46.
-      - name: Check out pro (matching branch) into ./pro
-        id: pro_branch
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          repository: off-grid-ai/desktop-pro
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: pro
-          ref: ${{ github.head_ref || github.ref_name }}
-          fetch-depth: 0
-          # Don't leave the cross-repo PAT in ./pro/.git/config where a later
-          # PR-controlled step could reuse it — we only need it for the clone.
-          persist-credentials: false
-      - name: Fall back to the Pro base branch if no matching branch
-        if: ${{ !cancelled() && (steps.pro_branch.outcome != 'success' || hashFiles('pro/tsconfig.json') == '') }}
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/desktop-pro
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: pro
-          ref: ${{ github.base_ref || 'main' }}
-          fetch-depth: 0
-          persist-credentials: false
-      # pro MUST be present: without it the guarded typecheck/coverage path is skipped and
-      # CI would pass core-only with cratered/misleading coverage (the failure the
-      # matching-branch checkout above was added to fix). Fail loudly instead of silently.
-      - name: Require pro checkout to have succeeded
-        if: ${{ !cancelled() }}
-        run: |
-          if [ ! -f pro/tsconfig.json ]; then
-            echo "::error::pro (desktop-pro) was not checked out — cannot validate the open-core build. Check CI_CROSS_REPO_TOKEN / repo access."
-            exit 1
-          fi
-      - uses: actions/setup-node@v4
-        if: ${{ !cancelled() }}
-        with:
-          # Node 22 supports node:sqlite and both native SQLite dependencies. Node
-          # 24 aborts while Vitest unloads the cipher module; Node 26 cannot build
-          # better-sqlite3 12.6.
-          node-version: '22'
-      # Shared packages are file: dependencies on the SIBLING shared monorepo. CI must provision it before
-      # installing Desktop. actions/checkout refuses a path outside the workspace, so it lands inside and is
-      # moved up one level - exactly where the file: specifiers point.
-      #
-      # Matching branch first, main as the fallback, the same shape as the pro checkout above: a PR that changes
-      # the app and the shared package together must be tested against the package it expects.
-      - name: Check out the shared monorepo
-        if: ${{ !cancelled() }}
-        id: shared_branch
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: _shared
-          ref: ${{ github.head_ref || github.ref_name }}
-          persist-credentials: false
-      - name: Fall back to the Shared base branch
-        if: ${{ !cancelled() && steps.shared_branch.outcome != 'success' }}
-        id: shared_base
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: _shared
-          ref: ${{ github.base_ref || 'main' }}
-          persist-credentials: false
-      - name: Fall back to Shared main
-        if: ${{ !cancelled() && steps.shared_branch.outcome != 'success' && steps.shared_base.outcome != 'success' }}
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: _shared
-          ref: main
-          persist-credentials: false
-      - name: Put shared beside this checkout
-        if: ${{ !cancelled() }}
-        run: |
-          if [ ! -f _shared/package-lock.json ]; then
-            echo "::error::off-grid-ai/shared was not checked out - shared packages cannot resolve. Check CI_CROSS_REPO_TOKEN."
-            exit 1
-          fi
-          rm -rf ../shared
-          mv _shared ../shared
-          # Install at the WORKSPACE ROOT, not inside packages/sync. shared is an npm-workspaces
-          # monorepo: the lockfile and the build tool (tsup) live at the root, and packages/sync
-          # declares neither. Installing inside the member failed `npm ci` (no lockfile there), fell
-          # through to `npm install`, pulled the member's five runtime deps, and left the build to
-          # die on `sh: 1: tsup: not found` (exit 127), taking both jobs with it.
-          # A LOCKED install, and no fallback: an unlocked install would resolve a different graph and let the
-          # later gates run against dependencies nobody committed. A drifted lock should stop the build.
-          npm --prefix ../shared ci
-          npm --prefix ../shared/packages/sync run build
-          npm --prefix ../shared/packages/models run build
-          # @offgrid/rag (the document engine) ships a built dist/ like sync and models.
-          npm --prefix ../shared/packages/rag run build
-          npm --prefix ../shared/packages/speech run build
-          npm --prefix ../shared/packages/ui run build
-          # Scribe and Notes (Pro) import @offgrid/writing and @offgrid/notes: built dist/ like ui.
-          npm --prefix ../shared/packages/writing run build
-          npm --prefix ../shared/packages/notes run build
-      - name: Check out the private Desktop speech runtime
-        if: ${{ !cancelled() }}
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/executorch-speech
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: _executorch_speech
-          lfs: false
-          # Keep the checkout credential only until the selective LFS pull in
-          # the next step. That step removes it before any project code runs.
-          persist-credentials: true
-      - name: Let npm read the private UI package (core and Pro)
-        # @offgrid/operator-ui is a private Wednesday package that core and Pro both render with
-        # (skin, primitives, motion). It is listed as optional, so npm would skip it silently
-        # without access and the build would fail later; this step makes that failure immediate.
-        shell: bash
-        env:
-          UI_TOKEN_PRIMARY: ${{ secrets.OPERATOR_UI_TOKEN }}
-          UI_TOKEN_FALLBACK: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-        run: |
-          # The library moved to off-grid-ai/ui-library. Use the first token that can read it (a pasted
-          # secret can carry a newline or spaces, which break token authentication). The probes clear the
-          # checkout's GitHub login header for the library, or it would override the probed token.
-          UI_TOKEN=""
-          for candidate in "$UI_TOKEN_PRIMARY" "$UI_TOKEN_FALLBACK"; do
-            candidate="$(printf '%s' "$candidate" | tr -d '[:space:]')"
-            [ -z "$candidate" ] && continue
-            if git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${candidate}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-              UI_TOKEN="$candidate"
-              break
-            fi
-          done
-          if [ -n "$UI_TOKEN" ]; then
-            git config --global url."https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library".insteadOf "ssh://git@github.com/off-grid-ai/ui-library"
-            # actions/checkout saves this repo's own GitHub login as a header for all of github.com,
-            # and it overrides the token above. Clear it for the library only (the most specific
-            # address wins), so everything else keeps the checkout login.
-            if git rev-parse --git-dir >/dev/null 2>&1; then
-              git config --local http.https://github.com/off-grid-ai/ui-library.git.extraheader ""
-            fi
-          fi
-          # Check access before installation so authentication failures are clear.
-          if ! git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-            status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${UI_TOKEN}" https://api.github.com/repos/off-grid-ai/ui-library)"
-            echo "::error::CI cannot read off-grid-ai/ui-library (GitHub answered ${status}: 401 bad token, 403 org policy or IP allow list, 404 no access to the repo). Core and Pro will not build without it."
-            exit 1
-          fi
-      - name: Put the speech runtime beside this checkout
-        if: ${{ !cancelled() }}
-        run: |
-          if [ ! -f _executorch_speech/package.json ]; then
-            echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
-            exit 1
-          fi
-          # Tests exercise the real native boundary, but ordinary CI does not need
-          # the 350 MB bundled English asset set used only by the Mac release.
-          git -C _executorch_speech lfs pull --include='native/bin/executorch-speech' --exclude=''
-          git -C _executorch_speech config --unset-all http.https://github.com/.extraheader || true
-          rm -rf ../executorch-speech
-          mv _executorch_speech ../executorch-speech
-      - if: ${{ !cancelled() }}
-        run: npm ci
-      # Hard gates: types + the full test suite.
+          cross-repo-token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ui-token: ${{ secrets.OPERATOR_UI_TOKEN }}
+
+      # ── checks. Each runs even when an earlier one failed, so one red gate cannot hide the rest.
       - name: Typecheck (core)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.task == 'checks' }}
         timeout-minutes: 6
         run: npm run typecheck
       - name: Typecheck (pro)
-        if: ${{ !cancelled() && hashFiles('pro/tsconfig.json') != '' }}
+        if: ${{ !cancelled() && matrix.task == 'checks' }}
         timeout-minutes: 6
         run: cd pro && npx tsc --noEmit -p tsconfig.json
-      # npm's Electron install hooks leave sqlite compiled for Electron's ABI. The
-      # Vitest process is plain Node, and some default integration tests open the
-      # real database, so put the native module on Node's ABI before that gate.
-      # The later DB journey script restores the Electron ABI in its EXIT trap.
+      # Architecture-boundary gate (hygiene §A/§H): walks the import graph and fails on a forbidden
+      # edge - core->pro (open-core), a pure-logic module gaining an IO import, renderer->main,
+      # circular deps.
+      - name: Dependency boundaries
+        if: ${{ !cancelled() && matrix.task == 'checks' }}
+        timeout-minutes: 4
+        run: npm run depcruise
+      # NOTE: SonarCloud runs via Automatic Analysis (SonarCloud clones this repo and analyzes core
+      # on each push/PR - no CI step, token, or coverage upload here).
+      - name: Lint
+        if: ${{ !cancelled() && matrix.task == 'checks' }}
+        timeout-minutes: 8
+        run: npm run lint
+
+      # ── unit: a quarter of the product suite, by run time.
+      #
+      # npm's Electron install hooks leave sqlite compiled for Electron's ABI. The Vitest process is
+      # plain Node, and some default integration tests open the real database, so put the native
+      # module on Node's ABI first.
       - name: Rebuild SQLite for the Node test runner
-        if: ${{ !cancelled() }}
+        if: ${{ matrix.task == 'unit' }}
         run: npm rebuild better-sqlite3-multiple-ciphers
-      # This is the fast report, not the complete coverage measurement. DB-only
-      # journeys run next and e2e can add coarse coverage later. Test failures still
-      # block here; the aggregate new-code gate below owns the coverage decision.
-      - name: Test + fast coverage report
-        if: ${{ !cancelled() }}
-        # The tests finish in about four minutes. V8 then maps coverage across the
-        # complete core + Pro source set, including files no test imported. That
-        # aggregation can take another six minutes on a busy runner, so give report
-        # generation enough time to finish.
+      # The fast report, not the complete coverage measurement: the coverage job merges every shard
+      # with the DB, heavy and native reports. Test failures still block here.
+      - name: Test + coverage (shard ${{ matrix.shard }}/4)
+        id: unit
+        if: ${{ matrix.task == 'unit' }}
+        # V8 maps coverage across the complete core + Pro source set, including files no test
+        # imported, which can take several minutes on a busy runner.
         timeout-minutes: 20
         env:
           OFFGRID_AGGREGATE_COVERAGE: '1'
-        run: npm run test:coverage
-      # The DB journeys - 74 files, 255 cases - which CI has NEVER run.
+          SHARD: ${{ matrix.shard }}
+        run: >-
+          npm run test:coverage -- --shard="$SHARD/4" --coverage.reportsDirectory="coverage-unit-$SHARD"
+          --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-results.json"
+      - name: Upload the shard's coverage
+        if: ${{ !cancelled() && steps.unit.outcome != 'skipped' }}
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: coverage-unit-${{ matrix.shard }}
+          path: coverage-unit-${{ matrix.shard }}/coverage-final.json
+          retention-days: 1
+      # The meeting recorder worker's own V8 output (integration-tests/meeting-recorder-worker.test.ts),
+      # written by whichever shard runs that file.
+      - name: Upload the native recording worker coverage
+        if: ${{ !cancelled() && steps.unit.outcome != 'skipped' }}
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: coverage-native-raw-${{ matrix.shard }}
+          path: coverage-native-raw/
+          if-no-files-found: ignore
+          retention-days: 1
+      # Each file's run time, to refresh scripts/config/vitest-timings.json
+      # (scripts/update-vitest-timings.mjs).
+      - name: Upload the shard's file times
+        if: ${{ !cancelled() && steps.unit.outcome != 'skipped' }}
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: vitest-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/vitest-results.json
+          retention-days: 14
+
+      # ── db: the DB journeys - 74 files, 255 cases - against the real native SQLite.
       #
-      # They are excluded from the default vitest project because they load the real native SQLite and need
-      # better-sqlite3-multiple-ciphers rebuilt for the TEST RUNNER's node ABI (the app builds it for
-      # ELECTRON's). scripts/test-db.sh does that swap and restores Electron's build afterwards, which is why
-      # this is its own step: the rebuild mutates node_modules.
+      # They are excluded from the default vitest project because they load the real native SQLite
+      # and need better-sqlite3-multiple-ciphers rebuilt for the TEST RUNNER's node ABI.
+      # scripts/test-db.sh does that swap and restores Electron's build afterwards.
       #
-      # Not running them had a measurable cost. The default config EXCLUDES database.ts, rag/store.ts,
-      # prompt-store and runtime-residency with the note "covered by the tests in *.dbtest.ts via
-      # npm run test:db" - a claim nothing verified. approval-lifecycle.ts measured 0% for the same reason
-      # while having tests all along.
-      #
-      # OFFGRID_DB_VITEST_CONFIG selects the coverage variant, which is "the db journeys that pass today": it
-      # skips four files whose causes are each documented in vitest.db.coverage.config.ts (one of them is the
-      # control-center projection bug still awaiting a decision). vitest writes no report at all when any test
-      # fails, so the variant is what makes a report possible; the exclusions are visible in that file rather
-      # than hidden here, and each is meant to be deleted as its cause is resolved.
+      # OFFGRID_DB_VITEST_CONFIG selects the CI variant: the coverage variant ("the db journeys that
+      # pass today", each skip documented in vitest.db.coverage.config.ts) plus four files that fail
+      # on a LINUX runner rather than in the code, each reason recorded in vitest.db.ci.config.ts.
       - name: DB journeys (real native SQLite)
-        if: ${{ !cancelled() }}
+        id: db
+        if: ${{ matrix.task == 'db' }}
         timeout-minutes: 12
         env:
-          # The CI variant: the coverage variant plus four files that fail on a LINUX runner rather than in the
-          # code - a bundled macOS ffmpeg, a live engine port, the update feed, and one still undiagnosed. Each
-          # reason is recorded in vitest.db.ci.config.ts with the evidence from the run that found it. 243 of the
-          # 248 cases still run here.
           OFFGRID_DB_VITEST_CONFIG: vitest.db.ci.config.ts
         run: npm run test:db -- --coverage
-      # Build/native/port integration tests (packaging, whisper build-staging, the
-      # model-port + System Health seams that own :8439). These need a packaged
-      # build / native toolchain / a live engine port the pure `verify` runner
-      # doesn't have. They run here against synthetic profiles and external
-      # native boundaries, and failures block this job.
+      - name: Upload the DB coverage
+        if: ${{ !cancelled() && steps.db.outcome != 'skipped' }}
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: coverage-db
+          path: coverage-db/coverage-final.json
+          retention-days: 1
+
+      # ── heavy: build/native/port integration tests (packaging, whisper build-staging, the
+      # model-port + System Health seams that own :8439), against synthetic profiles and external
+      # native boundaries. The gateway, Team mode and model-port seams are tested here and nowhere else.
       - name: Heavy integration (build/native/port)
-        if: ${{ !cancelled() }}
+        id: heavy
+        if: ${{ matrix.task == 'heavy' }}
         timeout-minutes: 15
         run: |
-          # The preceding DB journey restores Electron's SQLite ABI. These
-          # tests run in Node; restore Electron again before the worker test.
+          # These tests run in Node; restore Electron's SQLite ABI again before the worker test.
           trap 'npx electron-rebuild -f -w better-sqlite3-multiple-ciphers' EXIT
           npm explore better-sqlite3-multiple-ciphers -- npm run build-release
-          # Measured too: the gateway, Team mode and model-port seams are tested here, against a fake
-          # engine on the real port, and nowhere else.
           OFFGRID_AGGREGATE_COVERAGE=1 npm run test:heavy -- --coverage --coverage.reportsDirectory=coverage-heavy
-      # Architecture-boundary gate (hygiene §A/§H): walks the import graph and fails
-      # on a forbidden edge — core->pro (open-core), a pure-logic module gaining an
-      # IO import, renderer->main, circular deps. Fast (graph-only, ~2s), so unlike
-      # eslint it can BLOCK without wedging CI. Rules verified clean on the tree.
-      - name: Dependency boundaries
-        if: ${{ !cancelled() }}
-        timeout-minutes: 4
-        run: npm run depcruise
-      # NOTE: SonarCloud runs via Automatic Analysis (SonarCloud clones this repo and
-      # analyzes core on each push/PR — no CI step, token, or coverage upload here).
-      # Lint errors block CI. Keep the timeout bounded for the full source tree.
-      - name: Lint
-        if: ${{ !cancelled() }}
-        timeout-minutes: 8
-        run: npm run lint
-      # The full Playwright tour on the BUILT app - the one check unit/integration cannot give: does the app
-      # actually render and drive. Specs needing real models/engine binaries (functional-real-engine, voice/tts)
-      # self-skip when those are absent, as they are here, so this gates the model-free surfaces: onboarding,
-      # nav, Settings, Models, Replay (incl. the capture toggle), Integrations (BYO Google).
-      #
-      # Electron needs an X server on Linux; xvfb-run provides a virtual one. --no-sandbox via env (Electron's
-      # sandbox cannot run under the CI user without SUID setup).
-      #
-      # ADVISORY (continue-on-error) for now - same policy as lint and test:heavy above. The remaining reason is
-      # headless-Electron launch instability on the ubuntu runner (waitForEvent 'window' timeouts, "page/context
-      # closed", clipboard/display-dependent specs), NOT product failures.
-      #
-      # NOTE: this being advisory hid four real spec defects on main for days (a selector that could never match,
-      # a section never opened, two stale accessible names) - the job was green while 7 specs failed. Every one is
-      # fixed and the full suite is 73/73 on a real display, so the ONLY thing still standing between this and
-      # BLOCKING is runner stability. Steps taken: retries: 2 in CI (playwright.config.ts) for whole-instance
-      # launch flakes, and fixed-port specs now self-skip instead of failing (e2e/helpers/ports.ts).
-      #
-      # Graduate to BLOCKING (delete continue-on-error) once a few consecutive runs are green - do NOT flip it
-      # while the runner still drops instances, or the gate gets reverted and we lose the signal again. Tracked
-      # in docs/GAPS_BACKLOG.md.
-      #
-      # OFFGRID_E2E_COVERAGE makes this run COUNT. 25 specs drive the real app - devices-sync alone stands up a
-      # synthetic peer with a real SyncEngine - and none of it reached a coverage report before, because
-      # Playwright launches Electron as its own process. With the variable set, Node writes V8 coverage for the
-      # main process and the vite build emits the sourcemaps that map it back to src/**.ts; both are gated on this
-      # variable, so a normal run and every shipped artifact are byte-identical to before.
-      #
-      # OFF BY DEFAULT since 2026-08-11. It was advisory, so it never gated anything, and it spent up to
-      # 28 minutes of every run to say so. The suite now runs on a real macOS display through
-      # `scripts/e2e-on-box.sh`, which is where its failures are actionable: the specs added on 2026-08-09
-      # pass there and fail here, because a Linux runner cannot satisfy a fixture that needs Pro's
-      # macOS-only native layer.
-      #
-      # Set the repository variable OFFGRID_CI_E2E=1 to turn it back on - no code change needed. Do not
-      # make it blocking on this runner; read the note above first.
+      - name: Upload the heavy coverage
+        if: ${{ !cancelled() && steps.heavy.outcome != 'skipped' }}
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: coverage-heavy
+          path: coverage-heavy/coverage-final.json
+          retention-days: 1
+
+  # The full Playwright tour on the BUILT app. OFF BY DEFAULT since 2026-08-11: it was advisory, so it
+  # never gated anything, and it spent up to 28 minutes of every run to say so. The suite runs on a
+  # real macOS display through `scripts/e2e-on-box.sh`, where its failures are actionable (a Linux
+  # runner cannot satisfy a fixture that needs Pro's macOS-only native layer).
+  #
+  # Set the repository variable OFFGRID_CI_E2E=1 to turn it back on - no code change needed. It then
+  # runs beside the other jobs, and stays ADVISORY: headless-Electron launch instability on the
+  # ubuntu runner (waitForEvent 'window' timeouts, "page/context closed") is not a product failure.
+  #
+  # OFFGRID_E2E_COVERAGE makes the run count: Node writes V8 coverage for the main process and the
+  # vite build emits the sourcemaps that map it back to src/**.ts. c8 turns it into an Istanbul
+  # report, which the coverage job takes as --coarse (whole-file denominators, covered lines only).
+  e2e:
+    name: e2e (advisory)
+    if: ${{ vars.OFFGRID_CI_E2E == '1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-desktop
+        with:
+          cross-repo-token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ui-token: ${{ secrets.OPERATOR_UI_TOKEN }}
       - name: E2E (Playwright, xvfb)
-        if: ${{ !cancelled() && vars.OFFGRID_CI_E2E == '1' }}
         timeout-minutes: 28
-        continue-on-error: true
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
           OFFGRID_E2E_COVERAGE: ${{ github.workspace }}/coverage-e2e-raw
         run: xvfb-run -a npm run test:e2e
-      # c8 turns the raw V8 output into an Istanbul report. It lives in the shared monorepo's node_modules and
-      # needs no new dependency here.
-      #
-      # The report is a build ARTIFACT rather than a gate: its statement map comes from the bundle, so its
-      # denominators are whole-file and must not set a threshold - see shared/scripts/merge-line-coverage.mjs,
-      # which accepts it as --coarse and lets it contribute covered lines only.
       - name: Convert e2e coverage
-        if: ${{ !cancelled() && vars.OFFGRID_CI_E2E == '1' }}
-        continue-on-error: true
+        if: ${{ !cancelled() }}
         run: |
           if [ -d coverage-e2e-raw ] && [ -n "$(ls -A coverage-e2e-raw 2>/dev/null)" ]; then
             npx c8 report --temp-directory=coverage-e2e-raw --reporter=json --reporter=text-summary \
@@ -356,73 +210,15 @@ jobs:
           else
             echo "no e2e coverage captured (the suite may not have launched)"
           fi
-      - name: Convert native recording worker coverage
-        if: ${{ !cancelled() }}
-        run: |
-          node ../shared/node_modules/c8/bin/c8.js report --temp-directory=coverage-native-raw \
-            --reporter=json --reporter=text-summary --report-dir=coverage-native --all=false
-          test -f coverage-native/coverage-final.json
-      # Match the pre-push authority: merge every report that can cover this change,
-      # then gate only executable lines added on this branch. The floors are the same
-      # ratchets as scripts/hooks/pre-push; neither whole-tree debt nor a partial suite
-      # can decide the result.
-      - name: Wait for native desktop coverage
-        if: ${{ !cancelled() }}
-        timeout-minutes: 12
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in $(seq 1 48); do
-            completed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
-              --jq '[.jobs[] | select(.name | startswith("Native recording (")) | select(.status == "completed")] | length')
-            if [ "$completed" -eq 2 ]; then
-              failed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
-                --jq '[.jobs[] | select(.name | startswith("Native recording (")) | select(.conclusion != "success")] | length')
-              test "$failed" -eq 0
-              break
-            fi
-            sleep 15
-          done
-          test "$completed" -eq 2
-      - name: Download native desktop source coverage
-        if: ${{ !cancelled() }}
-        uses: actions/download-artifact@v4
-        with:
-          pattern: native-desktop-coverage-*
-          path: coverage-native-desktop
-      - name: Normalize native source paths
-        if: ${{ !cancelled() }}
-        run: |
-          for report in coverage-native-desktop/*/coverage-final.json; do
-            node scripts/normalize-native-coverage.mjs "$report" absolute
-          done
-      # Report only (maintainer's call, 2026-10-21): new-code coverage is printed for the reviewer but
-      # never blocks a merge. Total coverage is what is tracked.
-      - name: Coverage report (new code across all suites)
-        if: ${{ !cancelled() }}
-        run: |
-          reports="coverage/coverage-final.json coverage-db/coverage-final.json coverage-heavy/coverage-final.json coverage-native-desktop/native-desktop-coverage-ubuntu-latest/coverage-final.json coverage-native-desktop/native-desktop-coverage-windows-2022/coverage-final.json"
-          for report in $reports; do
-            if [ ! -f "$report" ]; then
-              echo "::error::required coverage report is missing: $report"
-              exit 1
-            fi
-          done
-          coarse="--coarse=coverage-native/coverage-final.json"
-          if [ -f coverage-e2e/coverage-final.json ]; then
-            coarse="$coarse --coarse=coverage-e2e/coverage-final.json"
-          fi
-          node ../shared/scripts/new-code-coverage.mjs . $reports $coarse
-          node ../shared/scripts/new-code-coverage.mjs ./pro $reports $coarse
       - name: Upload e2e coverage
-        if: ${{ !cancelled() && vars.OFFGRID_CI_E2E == '1' }}
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
         with:
           name: e2e-coverage
           path: coverage-e2e/
           if-no-files-found: ignore
       - name: Upload e2e screenshots
-        if: ${{ !cancelled() && vars.OFFGRID_CI_E2E == '1' }}
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
         with:
           name: e2e-screenshots
@@ -505,6 +301,28 @@ jobs:
         if: runner.os == 'Windows'
         with:
           python-version: '3.12'
+      # The same download caches as the ci job, restored and saved apart for the same reason.
+      - name: Locate the download caches
+        id: caches
+        run: |
+          echo "npm_config_cache=$RUNNER_TEMP/npm-cache" >> "$GITHUB_ENV"
+          echo "electron_config_cache=$RUNNER_TEMP/electron-cache" >> "$GITHUB_ENV"
+          echo "electron=$(node -p "require('./package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
+      - name: Restore npm downloads
+        id: npm_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/npm-cache
+          key: npm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json', '_shared/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-${{ runner.arch }}-node22-
+      - name: Restore Electron downloads
+        id: electron_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/electron-cache
+            ~/.electron-gyp
+          key: electron-native-${{ runner.os }}-${{ runner.arch }}-${{ steps.caches.outputs.electron }}
       - name: Let npm read the private UI package (core and Pro)
         # @offgrid/operator-ui is a private Wednesday package that core and Pro both render with
         # (skin, primitives, motion). It is listed as optional, so npm would skip it silently
@@ -542,6 +360,7 @@ jobs:
             exit 1
           fi
       - name: Install workspace dependencies
+        id: install
         run: |
           mv _shared ../shared
           mv _executorch_speech ../executorch-speech
@@ -550,6 +369,20 @@ jobs:
             npm --prefix "../shared/packages/$package" run build
           done
           npm ci
+      - name: Save npm downloads
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.npm_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/npm-cache
+          key: ${{ steps.npm_cache.outputs.cache-primary-key }}
+      - name: Save Electron downloads
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.electron_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/electron-cache
+            ~/.electron-gyp
+          key: ${{ steps.electron_cache.outputs.cache-primary-key }}
       - name: Install the virtual Linux desktop and media runtime
         if: runner.os == 'Linux'
         run: |
@@ -598,3 +431,103 @@ jobs:
           name: native-desktop-coverage-${{ matrix.os }}
           path: coverage-native-desktop/coverage-final.json
           if-no-files-found: error
+
+  # The new-code coverage report across every suite. It starts with the others and sets up while
+  # they run, then waits for them, so its setup is not added to the wall clock.
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The report compares the change with this PR's base branch. A depth-1 checkout has no
+          # merge base to measure.
+          fetch-depth: 0
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-desktop
+        with:
+          cross-repo-token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ui-token: ${{ secrets.OPERATOR_UI_TOKEN }}
+          fetch-depth: '0'
+      # Every other job except the final `ci` gate. A job that failed still uploaded what coverage it
+      # had; its failure is the `ci` gate's to report.
+      - name: Wait for the test jobs
+        timeout-minutes: 35
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          jobs() {
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+              --jq "[.jobs[] | select(.name != \"coverage\" and .name != \"ci\") | select(.status != \"completed\")] | length"
+          }
+          # A failed API call is not "done": wait until it returns a real zero.
+          while true; do
+            pending="$(jobs || true)"
+            if [[ "$pending" =~ ^[0-9]+$ ]] && [ "$pending" -eq 0 ]; then break; fi
+            sleep 15
+          done
+      - name: Download the coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage-reports
+      - name: Download native desktop source coverage
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-desktop-coverage-*
+          path: coverage-native-desktop
+      - name: Download e2e coverage
+        if: ${{ vars.OFFGRID_CI_E2E == '1' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-coverage
+          path: coverage-e2e
+      # c8 turns the worker's raw V8 output into an Istanbul report. It lives in the shared
+      # monorepo's node_modules and needs no new dependency here.
+      - name: Convert native recording worker coverage
+        run: |
+          mkdir -p coverage-native-raw
+          cp coverage-reports/coverage-native-raw-*/* coverage-native-raw/
+          node ../shared/node_modules/c8/bin/c8.js report --temp-directory=coverage-native-raw \
+            --reporter=json --reporter=text-summary --report-dir=coverage-native --all=false
+          test -f coverage-native/coverage-final.json
+      - name: Normalize native source paths
+        run: |
+          for report in coverage-native-desktop/*/coverage-final.json; do
+            node scripts/normalize-native-coverage.mjs "$report" absolute
+          done
+      # Report only (maintainer's call, 2026-10-21): new-code coverage is printed for the reviewer but
+      # never blocks a merge. Total coverage is what is tracked. Every report that can cover this
+      # change is merged, then only executable lines added on this branch are measured; the floors
+      # are the same ratchets as scripts/hooks/pre-push.
+      - name: Coverage report (new code across all suites)
+        run: |
+          reports="coverage-reports/coverage-unit-1/coverage-final.json coverage-reports/coverage-unit-2/coverage-final.json coverage-reports/coverage-unit-3/coverage-final.json coverage-reports/coverage-unit-4/coverage-final.json coverage-reports/coverage-db/coverage-final.json coverage-reports/coverage-heavy/coverage-final.json coverage-native-desktop/native-desktop-coverage-ubuntu-latest/coverage-final.json coverage-native-desktop/native-desktop-coverage-windows-2022/coverage-final.json"
+          for report in $reports; do
+            if [ ! -f "$report" ]; then
+              echo "::error::required coverage report is missing: $report"
+              exit 1
+            fi
+          done
+          coarse="--coarse=coverage-native/coverage-final.json"
+          if [ -f coverage-e2e/coverage-final.json ]; then
+            coarse="$coarse --coarse=coverage-e2e/coverage-final.json"
+          fi
+          node ../shared/scripts/new-code-coverage.mjs . $reports $coarse
+          node ../shared/scripts/new-code-coverage.mjs ./pro $reports $coarse
+
+  # One check to read, and the name the single job had: green only when every gate above is. The
+  # e2e tour is advisory and not part of it.
+  ci:
+    needs: [test, native-desktop, coverage]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every gate passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do [ "$result" = success ] || exit 1; done

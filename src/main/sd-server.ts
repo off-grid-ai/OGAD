@@ -507,6 +507,21 @@ class SdServerService {
     if (wasUp) this.evictionHook?.()
   }
 
+  /** Stop the server without warming the LLM: an image job continues on the one-shot engine,
+   *  which must not load the model beside a resident copy. Resolves once the process has exited
+   *  and its memory is free. */
+  stopForFallback(): Promise<void> {
+    this.startEpoch += 1
+    this.clearIdleTimer()
+    const child = this.server
+    const exited =
+      !child || child.exitCode !== null || child.signalCode !== null
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => child.once('exit', () => resolve()))
+    this.stopProcess()
+    return exited
+  }
+
   /** Kill the process without firing the eviction hook (used on internal swaps
    *  where a new spawn follows immediately). */
   private stopProcess(): void {

@@ -135,7 +135,7 @@
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron/asar": "3.4.1",
     "@offgrid/executorch-speech": "file:../executorch-speech",
-    "@offgrid/operator-ui": "github:off-grid-ai/ui-library#e48004e4197153dd174c5f18b0a8b7572564d91e",
+    "@offgrid/operator-ui": "github:off-grid-ai/ui-library#4c4caa4966ac5348cbfeb11a26a63be4a0afd11a",
     "@phosphor-icons/react": "^2.1.10",
     "@playwright/test": "^1.61.1",
     "@scure/bip39": "^2.2.0",

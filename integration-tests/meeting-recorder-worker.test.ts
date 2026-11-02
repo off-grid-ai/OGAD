@@ -86,12 +86,19 @@ app.whenReady().then(async () => {
       delete env.ELECTRON_RUN_AS_NODE
       const command = process.platform === 'linux' ? 'xvfb-run' : binary
       const args = process.platform === 'linux' ? ['-a', binary, '--no-sandbox', entry] : [entry]
-      const { stdout } = await promisify(execFile)(command, args, {
+      // The worker's own 18s timer is the deadline for the recording, counted once Electron runs it.
+      // This one only stops a child that never exits: it allows for xvfb and Electron to start, which
+      // on a loaded CI runner took past the old 22s - and a kill there hid the worker's own message.
+      const run = await promisify(execFile)(command, args, {
         env,
-        timeout: 22_000,
+        timeout: 50_000,
         maxBuffer: 1024 * 1024
+      }).catch((error: { stdout?: string; stderr?: string; message: string }) => {
+        throw new Error(
+          `${error.message}\nstdout: ${error.stdout ?? ''}\nstderr: ${error.stderr ?? ''}`
+        )
       })
-      expect(stdout).toContain('RECORDING_FINALIZED')
+      expect(run.stdout).toContain('RECORDING_FINALIZED')
       if (process.env.OFFGRID_AGGREGATE_COVERAGE === '1') {
         // Keep the compiled script and its inline map available while c8 converts
         // the browser report. This reports actual renderer execution, not a mock.
@@ -132,5 +139,5 @@ app.whenReady().then(async () => {
       await fs.rm(root, { recursive: true, force: true })
     }
   },
-  30_000
+  60_000
 )

@@ -125,12 +125,14 @@ async function openProject(): Promise<void> {
     .getByRole('navigation', { name: 'Primary navigation' })
     .getByRole('button', { name: 'Projects', exact: true })
     .click()
-  await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible()
+  // The screen reopens on the last project, so its heading is that project's name; the project
+  // search is on the screen either way.
+  await expect(page.getByPlaceholder('Find a project')).toBeVisible()
 }
 
 async function askInNewProjectChat(question = QUESTION): Promise<void> {
   await openProject()
-  await page.getByText(PROJECT, { exact: true }).first().click()
+  await page.getByRole('button', { name: PROJECT, exact: true }).click()
   await page.getByRole('radio', { name: 'Chats', exact: true }).click()
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
   const composer = page.getByRole('textbox', { name: 'Message', exact: true })

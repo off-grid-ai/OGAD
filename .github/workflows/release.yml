@@ -124,6 +124,7 @@ jobs:
     runs-on: macos-15 # Standard arm64 runner; matches the pinned native payload.
     env:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
+      SPEECH_REF: d005e3509e6f608bb4e70abbe9f089120a08e973 # ExecuTorch 1.5.1; the same commit on every platform
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -145,8 +146,30 @@ jobs:
             "https://github.com/off-grid-ai/OGAD/releases/download/$release/$name"
           echo "$sha  $RUNNER_TEMP/mac-native.tar.gz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/mac-native.tar.gz" -C resources/bin
+      # The image engine is built from source for macOS 13, which took about 9 minutes on every
+      # release. It is cached on its pin and on the scripts and patches that build it, so it is
+      # rebuilt only when one of those changes. The pinned archive above carries an sd/ of its own;
+      # it is removed first so the folder holds exactly what this build made, as a fresh build does.
+      - name: Read the image engine pin
+        id: sd_pin
+        run: |
+          echo "commit=$(node -p "require('./resources/engine-pins.json').sd.commit")" >> "$GITHUB_OUTPUT"
+          rm -rf resources/bin/sd
+      - name: Restore the macOS image engine
+        id: sd_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: resources/bin/sd
+          key: sd-macos-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ steps.sd_pin.outputs.commit }}-${{ hashFiles('scripts/build-sd-macos.sh', 'scripts/prepare-image-runtime.mjs', 'scripts/check-macos-minos.mjs', 'scripts/patches/**') }}
       - name: Build macOS image engine for macOS 13
+        if: ${{ steps.sd_cache.outputs.cache-hit != 'true' }}
         run: bash scripts/build-sd-macos.sh
+      - name: Save the macOS image engine
+        if: ${{ steps.sd_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: resources/bin/sd
+          key: ${{ steps.sd_cache.outputs.cache-primary-key }}
       - name: Verify cached macOS engines
         run: |
           for variant in llama llama-prism; do
@@ -297,17 +320,39 @@ jobs:
           # Scribe and Notes (Pro) import @offgrid/writing and @offgrid/notes: built dist/ like ui.
           npm --prefix ../shared/packages/writing run build
           npm --prefix ../shared/packages/notes run build
+      # The speech runtime is checked out with its submodules and LFS voices and built from source,
+      # about 6 minutes on every release. The app takes only the package's shipped files from it
+      # (package.json, dist/, generated/ with the default voices, native/bin/), so those are cached
+      # on the speech commit and the build script, and the checkout and build run only when one of
+      # them changes.
+      - name: Restore the macOS speech runtime
+        id: speech_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/speech-runtime.tar
+          key: speech-macos-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ env.SPEECH_REF }}-${{ hashFiles('scripts/build-speech-macos.sh') }}
+      # Cached as one archive in the runner's temp folder: actions/cache saved nothing for the same
+      # files listed by their ../executorch-speech paths, outside the workspace.
+      - name: Unpack the cached speech runtime
+        if: ${{ steps.speech_cache.outputs.cache-hit == 'true' }}
+        run: |
+          rm -rf ../executorch-speech
+          mkdir ../executorch-speech
+          tar -xf "$RUNNER_TEMP/speech-runtime.tar" -C ../executorch-speech
       - name: Check out the private Desktop speech runtime
+        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: d005e3509e6f608bb4e70abbe9f089120a08e973 # ExecuTorch 1.5.1; the same commit on every platform
+          ref: ${{ env.SPEECH_REF }}
           path: _executorch_speech
+          fetch-depth: 1 # one commit, and depth 1 for every submodule
           lfs: true # Mac releases bundle the default English voices for offline first use.
           submodules: recursive
           persist-credentials: false
       - name: Put the speech runtime beside this checkout
+        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
         run: |
           if [ ! -f _executorch_speech/package.json ]; then
             echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
@@ -316,16 +361,16 @@ jobs:
           rm -rf ../executorch-speech
           mv _executorch_speech ../executorch-speech
       - name: Build macOS speech runtime for macOS 13
+        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
         run: |
-          npm --prefix ../executorch-speech ci
-          # Use the bundled Python and its existing torchgen, YAML, and Jinja dependencies.
-          speech_python="$GITHUB_WORKSPACE/resources/bin/kev-runtime/python/bin/python3"
-          "$speech_python" -c 'import torchgen, yaml, jinja2'
-          cmake -S ../executorch-speech/native -B ../executorch-speech/native/build \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
-            -DFLATCC_ALLOW_WERROR=OFF -DPYTHON_EXECUTABLE="$speech_python"
-          cmake --build ../executorch-speech/native/build --config Release --parallel 4 \
-            --target executorch-speech
+          bash scripts/build-speech-macos.sh
+          tar -cf "$RUNNER_TEMP/speech-runtime.tar" -C ../executorch-speech package.json dist generated native/bin
+      - name: Save the macOS speech runtime
+        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/speech-runtime.tar
+          key: ${{ steps.speech_cache.outputs.cache-primary-key }}
       - name: Let npm read the private UI package (core and Pro)
         # @offgrid/operator-ui is a private Wednesday package that core and Pro both render with
         # (skin, primitives, motion). It is listed as optional, so npm would skip it silently
@@ -587,6 +632,8 @@ jobs:
     # windows-2022 = VS 2022 toolchain. windows-latest ships VS 2026, which node-gyp 11
     # can't parse, breaking native-module (better-sqlite3) compiles. Pin until it catches up.
     runs-on: windows-2022
+    env:
+      VULKAN_VERSION: '1.4.321.1' # the SDK the Whisper build compiles against
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -743,13 +790,21 @@ jobs:
           fi
       - name: Install dependencies
         run: npm ci
+      # Whisper is built from source with Vulkan on every release (about 5 minutes with the SDK
+      # install). Its pin lives in the build script, so the build is cached on that script and the
+      # runtime config it copies from, and the SDK install and build run only when one changes.
+      - name: Restore the Windows Vulkan Whisper
+        id: whisper_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: resources/bin/whisper-vulkan
+          key: whisper-vulkan-win-${{ env.VULKAN_VERSION }}-${{ hashFiles('scripts/build-whisper-vulkan-win.ps1', 'scripts/config/windows-vc-runtime.ps1') }}
       - name: Install Vulkan SDK for Whisper
         # LunarG's own installer, run silently, as llama.cpp's Windows CI does. In the SDK that
         # humbletim/install-vulkan-sdk unpacked, CMake's FindVulkan found glslc but not the loader
         # library or headers, so Whisper's configure failed; the step below checks all three.
+        if: ${{ steps.whisper_cache.outputs.cache-hit != 'true' }}
         shell: pwsh
-        env:
-          VULKAN_VERSION: '1.4.321.1'
         run: |
           $installer = Join-Path $env:RUNNER_TEMP 'vulkansdk.exe'
           curl.exe -fsSL --retry 3 -o $installer "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/vulkansdk-windows-X64-$env:VULKAN_VERSION.exe"
@@ -763,8 +818,15 @@ jobs:
           "VULKAN_SDK=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "$root\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - name: Build Windows Vulkan Whisper
+        if: ${{ steps.whisper_cache.outputs.cache-hit != 'true' }}
         shell: pwsh
         run: ./scripts/build-whisper-vulkan-win.ps1
+      - name: Save the Windows Vulkan Whisper
+        if: ${{ steps.whisper_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: resources/bin/whisper-vulkan
+          key: ${{ steps.whisper_cache.outputs.cache-primary-key }}
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
         shell: pwsh
         env:
@@ -955,8 +1017,11 @@ jobs:
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
           ref: d005e3509e6f608bb4e70abbe9f089120a08e973
           path: _executorch_speech
-          lfs: false # Build the Linux executable from the pinned source.
-          submodules: recursive
+          # The package's JavaScript only, one commit deep: the Linux executable comes from the
+          # pinned linux-native archive below, so the vendored ExecuTorch submodules and the LFS
+          # files are never read.
+          fetch-depth: 1
+          lfs: false
           persist-credentials: false
       - name: Put the speech package beside this checkout
         run: |
