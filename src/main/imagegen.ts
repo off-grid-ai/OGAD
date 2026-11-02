@@ -1028,6 +1028,7 @@ async function runImageGen(
       )
       // The one-shot engine loads the model itself; two copies would not fit a small machine.
       await sdServer.stopForFallback()
+      generationLifecycle.throwIfCancelled()
     } finally {
       generationLifecycle.finish()
       currentChild = null
