@@ -1,0 +1,59 @@
+name: Windows Vulkan Whisper
+description: >
+  whisper.cpp built with Vulkan in resources/bin/whisper-vulkan: restored from the cache, or built
+  when its build script changed. The one definition of its cache key, shared by the release and by
+  main's CI, which saves it.
+
+inputs:
+  save:
+    description: Save a fresh build. Release passes 'false' and only restores.
+    required: false
+    default: 'false'
+  lookup-only:
+    description: Only check the cache, and build when it misses. Main's CI warms the cache this way without downloading it.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    # Whisper is built from source with Vulkan (about 5 minutes with the SDK install). Its pin lives
+    # in the build script, so the build is cached on that script and the runtime config it copies
+    # from, and the SDK install and build run only when one changes.
+    - name: Restore the Windows Vulkan Whisper
+      id: whisper_cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: resources/bin/whisper-vulkan
+        key: whisper-vulkan-win-1.4.321.1-${{ hashFiles('scripts/build-whisper-vulkan-win.ps1', 'scripts/config/windows-vc-runtime.ps1') }}
+        lookup-only: ${{ inputs.lookup-only }}
+    - name: Install Vulkan SDK for Whisper
+      # LunarG's own installer, run silently, as llama.cpp's Windows CI does. In the SDK that
+      # humbletim/install-vulkan-sdk unpacked, CMake's FindVulkan found glslc but not the loader
+      # library or headers, so Whisper's configure failed; the step below checks all three.
+      if: ${{ steps.whisper_cache.outputs.cache-hit != 'true' }}
+      shell: pwsh
+      env:
+        VULKAN_VERSION: '1.4.321.1' # the SDK the Whisper build compiles against; also in the key above
+      run: |
+        $installer = Join-Path $env:RUNNER_TEMP 'vulkansdk.exe'
+        curl.exe -fsSL --retry 3 -o $installer "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/vulkansdk-windows-X64-$env:VULKAN_VERSION.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Vulkan SDK download failed' }
+        $root = "C:\VulkanSDK\$env:VULKAN_VERSION"
+        & $installer --root $root --accept-licenses --default-answer --confirm-command install
+        if ($LASTEXITCODE -ne 0) { throw 'Vulkan SDK install failed' }
+        foreach ($need in @('Lib\vulkan-1.lib', 'Include\vulkan\vulkan.h', 'Bin\glslc.exe')) {
+          if (-not (Test-Path (Join-Path $root $need))) { throw "Vulkan SDK is missing $need" }
+        }
+        "VULKAN_SDK=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        "$root\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+    - name: Build Windows Vulkan Whisper
+      if: ${{ steps.whisper_cache.outputs.cache-hit != 'true' }}
+      shell: pwsh
+      run: ./scripts/build-whisper-vulkan-win.ps1
+    - name: Save the Windows Vulkan Whisper
+      if: ${{ inputs.save == 'true' && steps.whisper_cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: resources/bin/whisper-vulkan
+        key: ${{ steps.whisper_cache.outputs.cache-primary-key }}
