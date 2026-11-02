@@ -106,11 +106,39 @@ jobs:
       - name: Free runner disk
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - name: Install build dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y cmake libvulkan-dev glslc libgomp1
+        run: sudo apt-get update -qq && sudo apt-get install -y cmake libvulkan-dev glslc libgomp1 ccache
+      # ggml's CMake (GGML_CCACHE, on by default) compiles through ccache when it finds it. The build
+      # scripts work in a fresh mktemp directory, so TMPDIR moves it under one fixed base directory
+      # that ccache rewrites to relative paths; otherwise every path differs and nothing hits.
+      #
+      # Restored and saved in separate steps: actions/cache saves in its post step only when the
+      # whole job succeeds, so a failed smoke test would throw away the compiled objects.
+      - name: Locate the compiler cache
+        run: |
+          mkdir -p "$RUNNER_TEMP/build-tmp"
+          { echo "TMPDIR=$RUNNER_TEMP/build-tmp"; echo "CCACHE_BASEDIR=$RUNNER_TEMP"
+            echo "CCACHE_DIR=$RUNNER_TEMP/ccache"; echo "CCACHE_MAXSIZE=2G"; } >> "$GITHUB_ENV"
+      - name: Restore the compiler cache
+        id: ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-linux-whisper-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('resources/engine-pins.json', 'scripts/build-voice-linux.sh') }}
+          restore-keys: ccache-linux-whisper-${{ runner.os }}-${{ runner.arch }}-
       - name: Stage the CUDA runtime the engine links against
         run: LLAMA_ACCELERATOR=cuda bash scripts/build-llama-linux.sh
       - name: Build whisper.cpp (CUDA, Vulkan, CPU) from the pinned source
-        run: OFFGRID_BUILD_VOICE_FROM_SOURCE=1 bash scripts/build-voice-linux.sh
+        id: build
+        run: |
+          ccache --zero-stats
+          OFFGRID_BUILD_VOICE_FROM_SOURCE=1 bash scripts/build-voice-linux.sh
+          ccache --show-stats
+      - name: Save the compiler cache
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' && steps.ccache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
       - name: Smoke-test transcription
         run: |
           curl -fsSL -o "$RUNNER_TEMP/model.bin" "$WHISPER_MODEL_URL"
@@ -225,13 +253,36 @@ jobs:
           tar -xzf "$RUNNER_TEMP/base.tar.gz" -C "$RUNNER_TEMP/base"
           rm -rf resources/bin/kev-runtime
           mv "$RUNNER_TEMP/base/kev-runtime" resources/bin/kev-runtime
-      - name: Build llama.cpp, Prism, stable-diffusion.cpp and whisper.cpp (universal, macOS 13+)
+      # The same compiler cache as linux-whisper, for the four engines this job compiles.
+      - name: Locate the compiler cache
         run: |
+          brew install ccache
+          mkdir -p "$RUNNER_TEMP/build-tmp"
+          { echo "TMPDIR=$RUNNER_TEMP/build-tmp"; echo "CCACHE_BASEDIR=$RUNNER_TEMP"
+            echo "CCACHE_DIR=$RUNNER_TEMP/ccache"; echo "CCACHE_MAXSIZE=2G"; } >> "$GITHUB_ENV"
+      - name: Restore the compiler cache
+        id: ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-mac-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('resources/engine-pins.json', 'scripts/build-llama.sh', 'scripts/build-sd-macos.sh', 'scripts/build-whisper-cli.sh') }}
+          restore-keys: ccache-mac-native-${{ runner.os }}-${{ runner.arch }}-
+      - name: Build llama.cpp, Prism, stable-diffusion.cpp and whisper.cpp (universal, macOS 13+)
+        id: build
+        run: |
+          ccache --zero-stats
           rm -rf resources/bin/llama resources/bin/llama-prism resources/bin/sd resources/bin/whisper
           LLAMA_VARIANT=standard bash scripts/build-llama.sh
           LLAMA_VARIANT=prism bash scripts/build-llama.sh
           bash scripts/build-sd-macos.sh
           bash scripts/build-whisper-cli.sh
+          ccache --show-stats
+      - name: Save the compiler cache
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' && steps.ccache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
       - name: Smoke-test every engine
         run: |
           bin=resources/bin
