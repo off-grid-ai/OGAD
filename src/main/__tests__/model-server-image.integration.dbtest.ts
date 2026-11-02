@@ -11,7 +11,8 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
-import { PICTURE_PNG_BASE64 as PNG_BASE64 } from './harness/fake-picture'
+import { BLANK_IMAGE_MESSAGE } from '../imagegen/blank-image'
+import { PICTURE_PNG_BASE64 as PNG_BASE64, BLANK_PNG_BASE64 } from './harness/fake-picture'
 
 const fixture = (() => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-image-'))
@@ -52,15 +53,17 @@ const fs = require('node:fs')
 const args = process.argv.slice(2)
 const value = (flag) => args[args.indexOf(flag) + 1]
 const slow = value('-p') === 'A slow green cabin under stars'
+const blank = value('-p') === 'A blank green cabin under stars'
 const valid =
-  (value('-p') === 'A green cabin under stars' || slow) &&
+  (value('-p') === 'A green cabin under stars' || slow || blank) &&
   value('-W') === '640' &&
   value('-H') === '384' &&
   value('--steps') === '7' &&
   value('-s') === '314'
 if (!valid) process.exit(17)
 process.stderr.write('1/7 - 0.01s/it\\n')
-const finish = () => fs.writeFileSync(value('-o'), Buffer.from('${PNG_BASE64}', 'base64'))
+const finish = () =>
+  fs.writeFileSync(value('-o'), Buffer.from(blank ? '${BLANK_PNG_BASE64}' : '${PNG_BASE64}', 'base64'))
 if (slow) setTimeout(finish, 10000)
 else finish()
 `
@@ -157,6 +160,31 @@ describe('model gateway image generation', () => {
         .readFileSync(path.join(fixture.dataDir, 'generated-images', generated[0]!))
         .toString('base64')
     ).toBe(PNG_BASE64)
+  })
+
+  it('fails an image the engine renders as one colour on every engine, and saves nothing', async () => {
+    const generatedDir = path.join(fixture.dataDir, 'generated-images')
+    const before = fs.existsSync(generatedDir) ? fs.readdirSync(generatedDir) : []
+    const response = await fetch(`http://127.0.0.1:${String(gatewayPort)}/v1/images`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: 'A blank green cabin under stars',
+        width: 640,
+        height: 384,
+        steps: 7,
+        seed: 314,
+        model: MODEL_NAME,
+        response_format: 'b64_json'
+      })
+    })
+
+    const body = (await response.json()) as { data?: unknown; error?: { message?: string } }
+    expect(response.status, JSON.stringify(body)).toBeGreaterThanOrEqual(400)
+    expect(body.data).toBeUndefined()
+    expect(body.error?.message).toContain(BLANK_IMAGE_MESSAGE)
+    const after = fs.existsSync(generatedDir) ? fs.readdirSync(generatedDir) : []
+    expect(after).toEqual(before)
   })
 
   it('returns an actionable unavailable response when the native runtime is absent', async () => {

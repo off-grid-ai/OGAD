@@ -1326,7 +1326,12 @@ async function runImageGen(
           async () => runNativeCli(runtime, step.cpuOnly, step.backend)
         )
         // A blank frame is a failed run, so the next engine (down to CPU) gets the prompt.
-        if (!coreml && (await isBlankImage(outPath))) throw new Error(BLANK_IMAGE_MESSAGE)
+        // The blank file is removed first: outPath is in the gallery folder, and a run that failed
+        // must not leave its flat frame there for the Gallery to show.
+        if (!coreml && (await isBlankImage(outPath))) {
+          await fs.promises.rm(outPath, { force: true })
+          throw new Error(BLANK_IMAGE_MESSAGE)
+        }
         completedRuntime = runtime
         completedCpuOnly = step.cpuOnly
         break
