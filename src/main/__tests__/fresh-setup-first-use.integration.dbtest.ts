@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { PICTURE_PNG_BASE64 as PNG_BASE64 } from './harness/fake-picture'
 
 const originalDataDir = process.env.OFFGRID_DATA_DIR
 const originalBinDir = process.env.OFFGRID_BIN_DIR
@@ -55,8 +56,6 @@ function isFirstUseModelKind(kind: string): kind is JourneyModel['kind'] {
   return ['text', 'vision', 'image', 'transcription', 'voice'].includes(kind)
 }
 
-const PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 const delivery = new Map<string, Buffer>()
 const originalCatalogHashes: Array<{ file: { sha256?: string }; sha256?: string }> = []
 const interrupted = new Set<string>()

@@ -271,6 +271,7 @@ import {
 } from './components/StylePresetPicker'
 
 import { MessageRow } from './components/MessageRow'
+import { ArrivingFromPeer } from './components/MessageContent'
 import { ConversationSidebar } from './components/ConversationSidebar'
 import {
   applyStreamViewEvent,
@@ -574,6 +575,20 @@ export function MemoryChat({
   const displayMessages = useMemo(
     () => groupChatTurnWork(god?.presentMessages ? god.presentMessages(messages) : messages),
     [god, messages]
+  )
+  // A peer's file can land before the message it belongs to. Its row then has no message to sit
+  // under, so it is drawn at the foot of its chat instead of not at all: a chat whose turn is still
+  // on its way says so rather than looking empty.
+  const arrivingFiles = useMemo(
+    () =>
+      activeConversationId
+        ? incomingFiles.filter(
+            (file) =>
+              file.conversationId === activeConversationId &&
+              !messages.some((message) => message.id === file.messageId)
+          )
+        : [],
+    [activeConversationId, incomingFiles, messages]
   )
   const [remoteWorkPreview, setRemoteWorkPreview] = useState<ChatStreamPreviewRow | null>(null)
   useEffect(() => {
@@ -5120,7 +5135,7 @@ export function MemoryChat({
                             }}
                           />
                         </div>
-                      ) : messages.length === 0 ? (
+                      ) : messages.length === 0 && arrivingFiles.length === 0 ? (
                         <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
                           {presetSetup ? (
                             <PresetSetup
@@ -5322,6 +5337,7 @@ export function MemoryChat({
                               )
                             })}
                           </AnimatePresence>
+                          {arrivingFiles.length ? <ArrivingFromPeer files={arrivingFiles} /> : null}
                           {/* A reply generating on another one of your devices, streaming here live. Pro
                     registers the renderer; the free build has no slot and this is nothing. */}
                           {ChatMessagesFooter && activeConversationId ? (

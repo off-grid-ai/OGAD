@@ -9,13 +9,16 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
 import { completeOnboarding } from './helpers/onboarding'
 import { navButton } from './helpers/settings'
 import {
   createKnowledgeDocumentStateFields,
+  createSharedFileDescriptor,
+  createSharedFileStateFields,
+  SHARED_FILE_ENTITY,
   ClipboardSyncCoordinator,
   CLIPBOARD_CHANNEL,
   FileTransferManager,
@@ -38,6 +41,12 @@ import type { KeygenPersonalMeshRegistry } from '../pro/main/sync/keygen-persona
 const PRO_PRESENT = fs.existsSync(path.resolve('pro/package.json'))
 // Pro implementation modules load lazily behind PRO_PRESENT: a static import
 // fails spec COLLECTION in a core-only checkout, before the guard can skip.
+const sharedFileTransfer = PRO_PRESENT
+  ? // eslint-disable-next-line @typescript-eslint/no-require-imports
+    (require('../pro/main/sync/shared-file-transfer') as {
+      createSharedFileSource: (...args: never[]) => unknown
+    })
+  : null
 const knowledgeDocumentTransfer = PRO_PRESENT
   ? // eslint-disable-next-line @typescript-eslint/no-require-imports
     (require('../pro/main/sync/knowledge-document-transfer') as {
@@ -735,6 +744,102 @@ test.describe('Devices surface — pro tier', () => {
       page.getByRole('button', { name: `Delete ${knowledgeDocument.name}`, exact: true })
     ).toBeVisible()
     await page.screenshot({ path: 'e2e/screenshots/devices-state-sync.png' })
+
+    // A chat with a picture, the way a phone sends it: the chat and the picture's announcement can
+    // land before the message. The chat must say what is still on its way, never look empty.
+    const pictureChatId = randomUUID()
+    const pictureMessageId = randomUUID()
+    const picturePath = path.resolve('resources/style-thumbs/Photoreal.png')
+    const pictureBytes = fs.readFileSync(picturePath)
+    const picture = createSharedFileDescriptor({
+      syncId: randomUUID(),
+      kind: 'message_attachment',
+      name: 'red-ball.png',
+      mimeType: 'image/png',
+      fileSize: pictureBytes.length,
+      contentHash: createHash('sha256').update(pictureBytes).digest('hex'),
+      createdAt: timestamp,
+      conversationId: pictureChatId,
+      messageId: pictureMessageId
+    })!
+    expect(
+      syntheticPeer.sendApp(desktop.localDevice.id, 'state', {
+        t: 'ops',
+        ops: [
+          syntheticLog.record('conversation', pictureChatId, 'put', {
+            title: 'a single red ball on a plain white table',
+            project_id: null,
+            created_at: timestamp,
+            updated_at: timestamp
+          }),
+          syntheticLog.record(
+            SHARED_FILE_ENTITY,
+            picture.syncId,
+            'put',
+            createSharedFileStateFields(picture)
+          )
+        ]
+      })
+    ).toBe(true)
+    await page.getByRole('button', { name: 'Chat', exact: true }).click()
+    await page
+      .getByText('a single red ball on a plain white table', { exact: true })
+      .first()
+      .click()
+    const arriving = page.getByTestId('arriving-from-peer')
+    await expect(arriving.getByText('Still arriving from your other device')).toBeVisible({
+      timeout: 15_000
+    })
+    await expect(arriving.getByText('red-ball.png')).toBeVisible()
+    await page.screenshot({ path: 'e2e/screenshots/chat-sync-arriving.png' })
+
+    expect(
+      syntheticPeer.sendApp(desktop.localDevice.id, 'state', {
+        t: 'ops',
+        ops: [
+          syntheticLog.record('message', pictureMessageId, 'put', {
+            conversation_id: pictureChatId,
+            role: 'user',
+            content: 'What is in this image? One sentence.',
+            context: null,
+            created_at: timestamp
+          })
+        ]
+      })
+    ).toBe(true)
+    await expect(page.getByText('What is in this image? One sentence.')).toBeVisible({
+      timeout: 15_000
+    })
+    await expect(arriving).toHaveCount(0)
+
+    await syntheticFiles.sendFile(
+      desktop.localDevice.id,
+      sharedFileTransfer!.createSharedFileSource(picturePath as never, picture as never) as never
+    )
+    const received = page.getByAltText('red-ball.png')
+    await expect(received).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('incoming-shared-file')).toHaveCount(0)
+    // The picture fills its message: as wide as the words under it, not a thumbnail beside them.
+    const widths = await received.evaluate((image) => {
+      let bubble = image.parentElement
+      while (bubble && !bubble.textContent?.includes('What is in this image? One sentence.')) {
+        bubble = bubble.parentElement
+      }
+      const style = bubble ? getComputedStyle(bubble) : null
+      return {
+        picture: image.getBoundingClientRect().width,
+        bubbleContent: bubble
+          ? bubble.getBoundingClientRect().width -
+            parseFloat(style!.paddingLeft) -
+            parseFloat(style!.paddingRight)
+          : 0
+      }
+    })
+    expect(widths.picture).toBeGreaterThan(200)
+    expect(widths.picture).toBeGreaterThanOrEqual(widths.bubbleContent - 1)
+    await page.screenshot({ path: 'e2e/screenshots/chat-sync-picture-full-width.png' })
+    await navButton(page, 'Projects').click()
+    await page.getByRole('button', { name: 'Synced from phone' }).click()
 
     await page.getByRole('button', { name: 'New project', exact: true }).click()
     const projectName = page.getByRole('textbox', { name: 'Project name…', exact: true })

@@ -336,15 +336,15 @@ export function SoftwareUpdateSection(): React.ReactElement {
           title="Automatic updates"
           description="Off Grid AI Desktop checks for updates in the background and installs them when you quit. Turn this off to update only when you choose."
           className="pt-0"
-        >
-          <Switch aria-label="Automatic updates" checked={auto} onCheckedChange={toggle} />
-        </SettingRow>
+          toggle={<Switch aria-label="Automatic updates" checked={auto} onCheckedChange={toggle} />}
+        />
         <SettingRow
           title="Nightly builds"
           description="Get nightly builds. New features land here first, on every change, before they reach stable. These are pre-release - expect rough edges. Off by default."
-        >
-          <Switch aria-label="Nightly builds" checked={beta} onCheckedChange={toggleBeta} />
-        </SettingRow>
+          toggle={
+            <Switch aria-label="Nightly builds" checked={beta} onCheckedChange={toggleBeta} />
+          }
+        />
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <IconTip label={checking ? 'Checking...' : 'Check for updates'}>

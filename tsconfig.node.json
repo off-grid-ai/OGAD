@@ -1,6 +1,6 @@
 {
   "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
-  "include": ["electron.vite.config.*", "src/main/**/*", "src/preload/**/*", "src/bootstrap/**/*", "src/shared/**/*"],
+  "include": ["electron.vite.config.*", "src/main/**/*", "src/preload/**/*", "src/bootstrap/**/*", "src/shared/**/*", "scripts/config/vitest-duration-sequencer.ts"],
   "compilerOptions": {
     "composite": true,
     // Dead-code gates at type-check time (strongest place — blocks the build): no
