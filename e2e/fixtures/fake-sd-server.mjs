@@ -19,7 +19,8 @@ const log = (event, detail = {}) => {
     )
 }
 
-// Two real, distinct PNGs (solid 8×8 colours): the preview frame and the finished image.
+// Two real, distinct 8×8 PNGs, each a checkerboard of its colour and white: the preview frame and the
+// finished image. Not solid: the app refuses a one-colour frame as a failed render.
 const crcTable = Array.from({ length: 256 }, (_, n) => {
   let c = n
   for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
@@ -45,8 +46,13 @@ const png = ([r, g, b]) => {
   header.writeUInt32BE(size, 4)
   header.set([8, 2, 0, 0, 0], 8)
   const rows = Buffer.concat(
-    Array.from({ length: size }, () =>
-      Buffer.from([0, ...Array.from({ length: size }, () => [r, g, b]).flat()])
+    Array.from({ length: size }, (_, y) =>
+      Buffer.from([
+        0,
+        ...Array.from({ length: size }, (_, x) =>
+          (x + y) % 2 ? [r, g, b] : [255, 255, 255]
+        ).flat()
+      ])
     )
   )
   return Buffer.concat([
