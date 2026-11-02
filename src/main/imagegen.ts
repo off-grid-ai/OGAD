@@ -1027,7 +1027,7 @@ async function runImageGen(
         '[imagegen] resident image engine returned a blank image; retrying through the engine ladder'
       )
       // The one-shot engine loads the model itself; two copies would not fit a small machine.
-      sdServer.stopForFallback()
+      await sdServer.stopForFallback()
     } finally {
       generationLifecycle.finish()
       currentChild = null
