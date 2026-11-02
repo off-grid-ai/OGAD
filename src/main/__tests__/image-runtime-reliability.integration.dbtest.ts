@@ -433,6 +433,11 @@ describe('multimodal runtime reliability', () => {
     await expect(fetch('https://example.invalid/health')).rejects.toThrow(
       'network unavailable in offline integration fixture: https://example.invalid'
     )
+    // The chat model is down, as after an image job evicted it, and the client names a model the
+    // catalog does not know. The gateway still answers with this Mac's chat model, loading it first.
+    const { unloadRuntime } = await import('../runtime-manager')
+    expect(await unloadRuntime('llm')).toBe(true)
+    const startsBefore = lineCount(fixture.llamaLog)
 
     const response = await fetch(`http://127.0.0.1:${String(gatewayPort)}/v1/chat/completions`, {
       method: 'POST',
@@ -447,6 +452,7 @@ describe('multimodal runtime reliability', () => {
     expect(await response.json()).toMatchObject({
       choices: [{ message: { content: 'chat recovered' } }]
     })
+    expect(lineCount(fixture.llamaLog)).toBe(startsBefore + 1)
   })
 
   it('keeps the core product session private across RAG, image generation, vision, and artifacts', async () => {
