@@ -11,6 +11,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
+import { PICTURE_PNG_BASE64 as PNG_BASE64 } from './harness/fake-picture'
 
 const fixture = (() => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-image-'))
@@ -35,8 +36,6 @@ vi.mock('electron', () => ({
   }
 }))
 
-const PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 const MODEL_NAME = 'gateway-image-fixture.safetensors'
 const CLI_PATH = path.join(fixture.binDir, 'sd', 'sd-cli')
 

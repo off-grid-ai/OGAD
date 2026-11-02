@@ -13,6 +13,10 @@ import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { DOCUMENT_EMBEDDER } from '../embedding-models'
 import { createOfflineFetchBoundary, type OfflineFetchBoundary } from './harness/offline-fetch'
+import {
+  BLANK_PNG_BASE64,
+  PICTURE_PNG_BASE64 as PNG_BASE64
+} from './harness/fake-picture'
 
 const hostFetch = globalThis.fetch.bind(globalThis)
 
@@ -48,11 +52,6 @@ vi.mock('electron', () => ({
 
 const CHAT_MODEL = 'chat-runtime-fixture.gguf'
 const IMAGE_MODEL = 'image-runtime-fixture.safetensors'
-// A picture: two colours. BLANK_PNG_BASE64 is what a numerically failed graph decodes to: one colour.
-const PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAD0lEQVR4nGM4ISf34cMHAAtlA9VqFBqkAAAAAElFTkSuQmCC'
-const BLANK_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAD0lEQVR4nGP4jwMwDC0JALoev0Ewkwr8AAAAAElFTkSuQmCC'
 
 let llm: typeof import('../llm').llm
 let generateImage: typeof import('../imagegen').generateImage

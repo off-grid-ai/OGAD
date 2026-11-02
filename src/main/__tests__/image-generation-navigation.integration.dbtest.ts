@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { PICTURE_PNG_BASE64 as PNG_BASE64 } from './harness/fake-picture'
 
 const fixture = (() => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-image-navigation-'))
@@ -36,8 +37,6 @@ const IMAGE_MODEL = 'navigation-image-fixture.safetensors'
 const CONVERSATION_ID = '11111111-1111-4111-8111-111111111111'
 const MESSAGE_ID = '22222222-2222-4222-8222-222222222222'
 const INIT_IMAGE = path.join(fixture.dataDir, 'comic-hero.png')
-const PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
 let jobs: typeof import('../imagegen/job-service').imageGenerationJobs
 
