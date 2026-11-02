@@ -124,6 +124,7 @@ jobs:
     runs-on: macos-15 # Standard arm64 runner; matches the pinned native payload.
     env:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
+      SPEECH_REF: d005e3509e6f608bb4e70abbe9f089120a08e973 # ExecuTorch 1.5.1; the same commit on every platform
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -145,8 +146,30 @@ jobs:
             "https://github.com/off-grid-ai/OGAD/releases/download/$release/$name"
           echo "$sha  $RUNNER_TEMP/mac-native.tar.gz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/mac-native.tar.gz" -C resources/bin
+      # The image engine is built from source for macOS 13, which took about 9 minutes on every
+      # release. It is cached on its pin and on the scripts and patches that build it, so it is
+      # rebuilt only when one of those changes. The pinned archive above carries an sd/ of its own;
+      # it is removed first so the folder holds exactly what this build made, as a fresh build does.
+      - name: Read the image engine pin
+        id: sd_pin
+        run: |
+          echo "commit=$(node -p "require('./resources/engine-pins.json').sd.commit")" >> "$GITHUB_OUTPUT"
+          rm -rf resources/bin/sd
+      - name: Restore the macOS image engine
+        id: sd_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: resources/bin/sd
+          key: sd-macos-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ steps.sd_pin.outputs.commit }}-${{ hashFiles('scripts/build-sd-macos.sh', 'scripts/prepare-image-runtime.mjs', 'scripts/check-macos-minos.mjs', 'scripts/patches/**') }}
       - name: Build macOS image engine for macOS 13
+        if: ${{ steps.sd_cache.outputs.cache-hit != 'true' }}
         run: bash scripts/build-sd-macos.sh
+      - name: Save the macOS image engine
+        if: ${{ steps.sd_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: resources/bin/sd
+          key: ${{ steps.sd_cache.outputs.cache-primary-key }}
       - name: Verify cached macOS engines
         run: |
           for variant in llama llama-prism; do
@@ -294,17 +317,35 @@ jobs:
           npm --prefix ../shared/packages/rag run build
           npm --prefix ../shared/packages/speech run build
           npm --prefix ../shared/packages/ui run build
+      # The speech runtime is checked out with its submodules and LFS voices and built from source,
+      # about 6 minutes on every release. The app takes only the package's shipped files from it
+      # (package.json, dist/, generated/ with the default voices, native/bin/), so those are cached
+      # on the speech commit and the build script, and the checkout and build run only when one of
+      # them changes.
+      - name: Restore the macOS speech runtime
+        id: speech_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ../executorch-speech/package.json
+            ../executorch-speech/dist
+            ../executorch-speech/generated
+            ../executorch-speech/native/bin
+          key: speech-macos-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ env.SPEECH_REF }}-${{ hashFiles('scripts/build-speech-macos.sh') }}
       - name: Check out the private Desktop speech runtime
+        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: d005e3509e6f608bb4e70abbe9f089120a08e973 # ExecuTorch 1.5.1; the same commit on every platform
+          ref: ${{ env.SPEECH_REF }}
           path: _executorch_speech
+          fetch-depth: 1 # one commit, and depth 1 for every submodule
           lfs: true # Mac releases bundle the default English voices for offline first use.
           submodules: recursive
           persist-credentials: false
       - name: Put the speech runtime beside this checkout
+        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
         run: |
           if [ ! -f _executorch_speech/package.json ]; then
             echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
@@ -313,16 +354,18 @@ jobs:
           rm -rf ../executorch-speech
           mv _executorch_speech ../executorch-speech
       - name: Build macOS speech runtime for macOS 13
-        run: |
-          npm --prefix ../executorch-speech ci
-          # Use the bundled Python and its existing torchgen, YAML, and Jinja dependencies.
-          speech_python="$GITHUB_WORKSPACE/resources/bin/kev-runtime/python/bin/python3"
-          "$speech_python" -c 'import torchgen, yaml, jinja2'
-          cmake -S ../executorch-speech/native -B ../executorch-speech/native/build \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
-            -DFLATCC_ALLOW_WERROR=OFF -DPYTHON_EXECUTABLE="$speech_python"
-          cmake --build ../executorch-speech/native/build --config Release --parallel 4 \
-            --target executorch-speech
+        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
+        run: bash scripts/build-speech-macos.sh
+      - name: Save the macOS speech runtime
+        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ../executorch-speech/package.json
+            ../executorch-speech/dist
+            ../executorch-speech/generated
+            ../executorch-speech/native/bin
+          key: ${{ steps.speech_cache.outputs.cache-primary-key }}
       - name: Let npm read the private UI package (core and Pro)
         # @offgrid/operator-ui is a private Wednesday package that core and Pro both render with
         # (skin, primitives, motion). It is listed as optional, so npm would skip it silently
