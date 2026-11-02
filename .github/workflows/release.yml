@@ -326,12 +326,16 @@ jobs:
         id: speech_cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            ../executorch-speech/package.json
-            ../executorch-speech/dist
-            ../executorch-speech/generated
-            ../executorch-speech/native/bin
+          path: ${{ runner.temp }}/speech-runtime.tar
           key: speech-macos-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ env.SPEECH_REF }}-${{ hashFiles('scripts/build-speech-macos.sh') }}
+      # Cached as one archive in the runner's temp folder: actions/cache saved nothing for the same
+      # files listed by their ../executorch-speech paths, outside the workspace.
+      - name: Unpack the cached speech runtime
+        if: ${{ steps.speech_cache.outputs.cache-hit == 'true' }}
+        run: |
+          rm -rf ../executorch-speech
+          mkdir ../executorch-speech
+          tar -xf "$RUNNER_TEMP/speech-runtime.tar" -C ../executorch-speech
       - name: Check out the private Desktop speech runtime
         if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -355,16 +359,14 @@ jobs:
           mv _executorch_speech ../executorch-speech
       - name: Build macOS speech runtime for macOS 13
         if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
-        run: bash scripts/build-speech-macos.sh
+        run: |
+          bash scripts/build-speech-macos.sh
+          tar -cf "$RUNNER_TEMP/speech-runtime.tar" -C ../executorch-speech package.json dist generated native/bin
       - name: Save the macOS speech runtime
         if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            ../executorch-speech/package.json
-            ../executorch-speech/dist
-            ../executorch-speech/generated
-            ../executorch-speech/native/bin
+          path: ${{ runner.temp }}/speech-runtime.tar
           key: ${{ steps.speech_cache.outputs.cache-primary-key }}
       - name: Let npm read the private UI package (core and Pro)
         # @offgrid/operator-ui is a private Wednesday package that core and Pro both render with
