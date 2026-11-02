@@ -24,6 +24,7 @@ const fixture = (() => {
     resourceDir: path.join(root, 'resources'),
     llamaLog: path.join(root, 'llama-starts.log'),
     imageLog: path.join(root, 'image-runs.log'),
+    blankGpuMarker: path.join(root, 'blank-gpu-image'),
     ttsFailureMarker: path.join(root, 'fail-next-tts'),
     ttsInputLog: path.join(root, 'tts-inputs.log')
   }
@@ -46,8 +47,11 @@ vi.mock('electron', () => ({
 
 const CHAT_MODEL = 'chat-runtime-fixture.gguf'
 const IMAGE_MODEL = 'image-runtime-fixture.safetensors'
+// A picture: two colours. BLANK_PNG_BASE64 is what a numerically failed graph decodes to: one colour.
 const PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAD0lEQVR4nGM4ISf34cMHAAtlA9VqFBqkAAAAAElFTkSuQmCC'
+const BLANK_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAD0lEQVR4nGP4jwMwDC0JALoev0Ewkwr8AAAAAElFTkSuQmCC'
 
 let llm: typeof import('../llm').llm
 let generateImage: typeof import('../imagegen').generateImage
@@ -115,7 +119,9 @@ const fs = require('node:fs')
 const args = process.argv.slice(2)
 const value = (flag) => args[args.indexOf(flag) + 1]
 fs.appendFileSync(process.env.OFFGRID_TEST_IMAGE_LOG, JSON.stringify(args) + '\\n')
-fs.writeFileSync(value('-o'), Buffer.from('${PNG_BASE64}', 'base64'))
+const onCpu = args.includes('--backend') && value('--backend') === 'cpu'
+const blank = !onCpu && fs.existsSync(process.env.OFFGRID_TEST_BLANK_GPU_MARKER || '')
+fs.writeFileSync(value('-o'), Buffer.from(blank ? '${BLANK_PNG_BASE64}' : '${PNG_BASE64}', 'base64'))
 `
   )
   fs.chmodSync(executable, 0o755)
@@ -231,6 +237,7 @@ beforeAll(async () => {
   process.env.OFFGRID_RESOURCE_DIR = fixture.resourceDir
   process.env.OFFGRID_TEST_LLAMA_LOG = fixture.llamaLog
   process.env.OFFGRID_TEST_IMAGE_LOG = fixture.imageLog
+  process.env.OFFGRID_TEST_BLANK_GPU_MARKER = fixture.blankGpuMarker
   process.env.OFFGRID_TEST_TTS_FAILURE_MARKER = fixture.ttsFailureMarker
   process.env.OFFGRID_TEST_TTS_INPUT_LOG = fixture.ttsInputLog
 
@@ -292,6 +299,7 @@ afterAll(async () => {
   delete process.env.OFFGRID_RESOURCE_DIR
   delete process.env.OFFGRID_TEST_LLAMA_LOG
   delete process.env.OFFGRID_TEST_IMAGE_LOG
+  delete process.env.OFFGRID_TEST_BLANK_GPU_MARKER
   delete process.env.OFFGRID_TEST_TTS_FAILURE_MARKER
   delete process.env.OFFGRID_TEST_TTS_INPUT_LOG
   fs.rmSync(fixture.root, { recursive: true, force: true })
@@ -314,6 +322,28 @@ describe('multimodal runtime reliability', () => {
 
     expect(await llm.chat('after image')).toBe('chat recovered')
     expect(lineCount(fixture.llamaLog)).toBe(2)
+  })
+
+  it('takes a blank GPU frame as a failed run and renders the picture on the CPU engine', async () => {
+    const runsBefore = lineCount(fixture.imageLog)
+    fs.writeFileSync(fixture.blankGpuMarker, '')
+    try {
+      const image = await generateImage({
+        prompt: 'A red ball on a white table',
+        model: IMAGE_MODEL,
+        seed: 42,
+        width: 512,
+        height: 512,
+        steps: 4
+      })
+      expect(image.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+      expect(image.computeBackend).toBe('SD runtime (CPU only)')
+      const runs = fs.readFileSync(fixture.imageLog, 'utf8').trim().split(/\r?\n/).slice(runsBefore)
+      expect(runs).toHaveLength(2)
+      expect(JSON.parse(runs[1]!)).toEqual(expect.arrayContaining(['--backend', 'cpu']))
+    } finally {
+      fs.rmSync(fixture.blankGpuMarker, { force: true })
+    }
   })
 
   it('refuses an over-budget image before native execution and runs only after explicit override', async () => {
