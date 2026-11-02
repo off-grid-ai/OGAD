@@ -24,7 +24,11 @@ export const createVaultThroughGate = async (page: Page, password: string): Prom
   )
   expect(words).toHaveLength(24)
 
-  await page.getByRole('button', { name: 'I have saved it. Open vault', exact: true }).click()
+  // Opening waits for the person to say they wrote the words down.
+  const open = page.getByRole('button', { name: 'Open vault', exact: true })
+  await expect(open).toBeDisabled()
+  await page.getByLabel('I wrote these 24 words down and keep them somewhere safe').check()
+  await open.click()
   await expect(page.getByRole('button', { name: 'Lock vault', exact: true })).toBeVisible()
   return words
 }
