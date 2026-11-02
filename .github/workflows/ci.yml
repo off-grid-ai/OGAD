@@ -461,7 +461,12 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
               --jq "[.jobs[] | select(.name != \"coverage\" and .name != \"ci\") | select(.status != \"completed\")] | length"
           }
-          while [ "$(jobs)" -ne 0 ]; do sleep 15; done
+          # A failed API call is not "done": wait until it returns a real zero.
+          while true; do
+            pending="$(jobs || true)"
+            if [[ "$pending" =~ ^[0-9]+$ ]] && [ "$pending" -eq 0 ]; then break; fi
+            sleep 15
+          done
       - name: Download the coverage reports
         uses: actions/download-artifact@v4
         with:
