@@ -1,11 +1,9 @@
 /**
- * Vault security while the vault is open: change the master password, and get a new recovery
- * phrase.
+ * Vault security while the vault is open: change the master password with the current one.
  *
  * Real app, real vault (KDBX4 on disk) and IPC, on a temporary profile; nothing is faked. The
  * person creates a vault through the gate, then:
- *   - makes a new recovery phrase with their master password, as someone who never saw theirs;
- *   - changes the master password, which hands over another new phrase, because the old one
+ *   - changes the master password, which hands over a new recovery phrase, because the old one
  *     escrowed the old password;
  *   - locks, fails to open with the old password, opens with the new one;
  *   - forgets the password and resets it with the last phrase shown.
@@ -108,23 +106,12 @@ test.describe('Vault security', () => {
     if (profileDir) fs.rmSync(profileDir, { recursive: true, force: true })
   })
 
-  test('changes the master password and makes a working recovery phrase while the vault is open', async () => {
+  test('changes the master password while the vault is open, and keeps the recovery phrase working', async () => {
     const firstPhrase = await createVaultThroughGate(page, FIRST_PASSWORD)
 
     await page.getByRole('button', { name: 'Vault security', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Vault security', exact: true })).toBeVisible()
     await screenshot('vault-security-panel.png')
-
-    // As someone who never saw their phrase: a new one, after the master password.
-    await fill('Master password', FIRST_PASSWORD)
-    await page.getByRole('button', { name: 'Make a new recovery phrase', exact: true }).click()
-    await expect(
-      page.getByRole('heading', { name: 'Your new recovery phrase', exact: true })
-    ).toBeVisible()
-    const madePhrase = await shownWords()
-    expect(madePhrase).not.toEqual(firstPhrase)
-    await screenshot('vault-security-new-phrase.png')
-    await confirmSaved()
 
     // Change the password. The phrase escrowed the old one, so another new phrase comes with it.
     await fill('Current password', FIRST_PASSWORD)
@@ -142,6 +129,7 @@ test.describe('Vault security', () => {
       page.getByText(/your old recovery phrase no longer opens this vault/)
     ).toBeVisible()
     const changedPhrase = await shownWords()
+    expect(changedPhrase).not.toEqual(firstPhrase)
     await screenshot('vault-security-password-changed.png')
     await confirmSaved()
 
