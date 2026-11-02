@@ -30,7 +30,9 @@ function installedLabels(installed: [string, string][]): string[] {
   return [...byName].flatMap(([name, variants]) =>
     new Set(variants.map(([, version]) => version)).size === 1
       ? [`${name}: ${variants[0]![1]}`]
-      : variants.map(([id, version]) => `${name} (${id.match(/-(cpu|cuda)$/)?.[1] ?? 'GPU'}): ${version}`)
+      : variants.map(
+          ([id, version]) => `${name} (${id.match(/-(cpu|cuda)$/)?.[1] ?? 'GPU'}): ${version}`
+        )
   )
 }
 
@@ -79,15 +81,16 @@ export function EngineUpdatesSection(): React.ReactElement | null {
         title="Keep engines up to date"
         description="Installs newer chat, image and transcription engines in the background, so new models work without an app update."
         className="py-0"
-      >
-        <Switch
-          aria-label="Keep engines up to date"
-          checked={status.enabled}
-          onCheckedChange={() =>
-            void window.api.engineUpdates.setEnabled(!status.enabled).then(setStatus)
-          }
-        />
-      </SettingRow>
+        toggle={
+          <Switch
+            aria-label="Keep engines up to date"
+            checked={status.enabled}
+            onCheckedChange={() =>
+              void window.api.engineUpdates.setEnabled(!status.enabled).then(setStatus)
+            }
+          />
+        }
+      />
       {busy ? (
         <p role="status" aria-busy="true" className="mt-2 text-[11px] text-neutral-500">
           <TextShimmer as="span">{phaseText(status)}</TextShimmer>
