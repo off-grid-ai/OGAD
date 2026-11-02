@@ -70,6 +70,9 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     onMeetingState: eventSubscription,
     onModelProgress: eventSubscription,
     proOn: eventSubscription,
+    // Main answers 'rag:active-streams' with a list, empty when nothing is streaming. The generic
+    // async default answers undefined, which the chat's reattach cannot iterate.
+    getActiveRagStreams: async () => [],
     actions: {
       onGatePending: eventSubscription,
       onOutcome: eventSubscription,
