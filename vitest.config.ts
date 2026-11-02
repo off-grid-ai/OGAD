@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import { defineConfig } from 'vitest/config'
 import { createVitestProjects } from './src/main/__tests__/vitest-projects'
 import { assetPathPlugin } from './scripts/config/vitest-asset-plugin'
+import { DurationSequencer } from './scripts/config/vitest-duration-sequencer'
 
 // The pro/ submodule is present in the working tree when you have access, absent
 // otherwise (and in a fork CI without the cross-repo token). Only enforce the
@@ -77,6 +78,8 @@ export default defineConfig({
     // otherwise coverage workers can starve the build past its timeout even when the
     // cross-process filesystem lock prevents config-file races.
     projects: createVitestProjects(productTestFiles, commonExcludes),
+    // CI's --shard runs are balanced by recorded file run time (scripts/config/vitest-timings.json).
+    sequence: { sequencer: DurationSequencer },
     coverage: {
       provider: 'v8',
       // Write the report even when a test FAILS. Without this, one flaky pro
