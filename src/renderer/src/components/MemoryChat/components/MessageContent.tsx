@@ -36,6 +36,22 @@ function IncomingFileRowsComponent({
   )
 }
 
+/** Files from another device whose message has not landed yet, so the chat shows the wait. */
+function ArrivingFromPeerComponent({
+  files
+}: Readonly<{ files: readonly IncomingSharedFile[] }>): React.JSX.Element {
+  return (
+    <div
+      role="status"
+      data-testid="arriving-from-peer"
+      className="mb-5 flex flex-col items-end gap-1.5"
+    >
+      <span className="text-[11px] text-neutral-400">Still arriving from your other device</span>
+      <IncomingFileRows files={files} />
+    </div>
+  )
+}
+
 function MessageAttachmentsComponent({
   attachments,
   onOpenAttachment,
@@ -56,9 +72,11 @@ function MessageAttachmentsComponent({
               src={source}
               path={attachment.path}
               alt={attachment.name || 'Shared image'}
-              // Thumbnails in a row, the way a chat shows shared screenshots: a few files stay one
-              // line high, and the whole picture is one click away.
-              className="size-24 cursor-zoom-in rounded-md border border-neutral-800 object-cover object-top transition-opacity hover:opacity-90"
+              // The picture is what the message is about, so it takes the bubble's full width, one per
+              // line; a very tall one is capped and cropped from the top, and opens whole on a click.
+              fill
+              spacing="basis-full"
+              className="h-auto max-h-[32rem] w-full cursor-zoom-in rounded-md border border-neutral-800 object-cover object-top transition-opacity hover:opacity-90"
               onOpen={(image) =>
                 onOpenImage({ ...image, title: attachment.name || 'Shared image' })
               }
@@ -158,5 +176,6 @@ function MessageEditorComponent({
 }
 
 export const IncomingFileRows = memo(IncomingFileRowsComponent)
+export const ArrivingFromPeer = memo(ArrivingFromPeerComponent)
 export const MessageAttachments = memo(MessageAttachmentsComponent)
 export const MessageEditor = memo(MessageEditorComponent)

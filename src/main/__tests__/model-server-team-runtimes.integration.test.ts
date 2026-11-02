@@ -17,6 +17,7 @@ import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { createHash } from 'node:crypto'
 import { LLAMA_SERVER_PORT } from '../../shared/ports'
+import { PICTURE_PNG_BASE64 as PNG_BASE64 } from './harness/fake-picture'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-team-runtimes-'))
 const dataDir = path.join(root, 'data')
@@ -37,8 +38,6 @@ vi.mock('electron', () => ({
   }
 }))
 
-const PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 const IMAGE_MODEL = 'team-image-fixture.safetensors'
 
 /** A native-process fake: logs start and end with the run's kind, takes `ms`, then does `finish`. */

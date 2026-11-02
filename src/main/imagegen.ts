@@ -44,6 +44,7 @@ import { binRoots, dataDir, modelsDir, requireModelStorage, resourceDirs } from 
 import { modelEntryNames, resolveModelAsset } from './model-paths'
 import { readDownloaded } from './downloaded-models'
 import { sdServer, type SdServerContext } from './sd-server'
+import { BLANK_IMAGE_MESSAGE, isBlankImage } from './imagegen/blank-image'
 import {
   findSdBinaries,
   findSdBinary,
@@ -1011,14 +1012,23 @@ async function runImageGen(
         onProgress ? (progress) => onProgress({ ...progress, secPerStep: 0 }) : undefined
       )
       generationLifecycle.throwIfCancelled()
-      await fs.promises.writeFile(outPath, png)
-      return {
-        dataUrl: `data:image/png;base64,${png.toString('base64')}`,
-        path: outPath,
-        seed: usedSeed,
-        model: base,
-        computeBackend: `SD runtime (${imageBackendForRuntime(process.platform, residentBinary)} build; device unknown)`
+      // A blank frame is a failed run: the one-shot engine ladder below tries again, down to CPU.
+      if (!(await isBlankImage(png))) {
+        await fs.promises.writeFile(outPath, png)
+        return {
+          dataUrl: `data:image/png;base64,${png.toString('base64')}`,
+          path: outPath,
+          seed: usedSeed,
+          model: base,
+          computeBackend: `SD runtime (${imageBackendForRuntime(process.platform, residentBinary)} build; device unknown)`
+        }
       }
+      console.warn(
+        '[imagegen] resident image engine returned a blank image; retrying through the engine ladder'
+      )
+      // The one-shot engine loads the model itself; two copies would not fit a small machine.
+      await sdServer.stopForFallback()
+      generationLifecycle.throwIfCancelled()
     } finally {
       generationLifecycle.finish()
       currentChild = null
@@ -1318,6 +1328,13 @@ async function runImageGen(
           },
           async () => runNativeCli(runtime, step.cpuOnly, step.backend)
         )
+        // A blank frame is a failed run, so the next engine (down to CPU) gets the prompt.
+        // The blank file is removed first: outPath is in the gallery folder, and a run that failed
+        // must not leave its flat frame there for the Gallery to show.
+        if (!coreml && (await isBlankImage(outPath))) {
+          await fs.promises.rm(outPath, { force: true })
+          throw new Error(BLANK_IMAGE_MESSAGE)
+        }
         completedRuntime = runtime
         completedCpuOnly = step.cpuOnly
         break

@@ -23,10 +23,11 @@ if (!outputPath) {
   process.exit(2)
 }
 
-// A real, checksum-valid PNG. The native diffusion executable is the sole controlled
-// boundary in this test; all Off Grid AI ownership, persistence and rendering remains real.
+// A real, checksum-valid PNG with two colours (green over grey): the app refuses a one-colour frame
+// as a failed render. The native diffusion executable is the sole controlled boundary in this test;
+// all Off Grid AI ownership, persistence and rendering remains real.
 const png = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAv0lEQVR4nO3ZsQnDQADFUDc3rBbKvOkDcRPCd/HgJhD68tm+zivnfIdwoXNuFQEogPplJQwKoBjU/x41JhZAMSgTa3Wh1aAAikGZWBrUM78riHQAxaBMLA1q3mORDqAYlIk1746LYgDFoEyseYC8rAZQDMrE0qDmMRbpAIpBmVjz6LgoBlAMysR6yPFnNYBiUCaWBjXvsUgHUAzKxJp3x0UxgGJQJtY8QF5WAygGZWJpUPMYi3QAxaBMrHl0Ps4bguphafFRYPAAAAAASUVORK5CYII=',
+  'iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAbklEQVR42u3QMQ0AAAjAMCRgGVm4QgIO+Em6TEEju3wcCAABAgQIECBAgAwIECBAgAABAmRAgAABAgQIECADAgQIECBAj4FGZ4AAAQIECBAgQIAECBAgQIAAAQIkQIAAAQIECBAgAQIECBAgQI9bVj464CPtAU8AAAAASUVORK5CYII=',
   'base64'
 )
 

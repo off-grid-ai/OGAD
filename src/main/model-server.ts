@@ -1331,13 +1331,17 @@ async function handleChat(
       const catalog = (await getCatalog()).models as { id: string; kind: string; remoteServerId?: string }[]
       const selected = !!requested && catalog.some((model) => model.id === requested && !model.remoteServerId &&
         (model.kind === 'text' || model.kind === 'vision') && installed.includes(model.id))
+      // A name the catalog does not know ("active", or whatever an OpenAI client sends) is answered by
+      // this Mac's chat model, as llama-server ignores it. It must load that model as an unnamed request
+      // does: after an image job evicted it, forwarding to the stopped server retried for 45s and failed.
+      const unknownName = !!requested && !catalog.some((model) => model.id === requested)
       if (selected && llm.activeModelInfo()?.id !== requested) {
         early?.status('loading', { model: displayModelName(requested) ?? requested })
         const result = await loadLocalChatModelForRequest(requested)
         if (!result.success) { json(res, 400, errBody(result.error ?? 'Model could not be selected.')); return }
       }
       // A request that names no model takes this Mac's chat model, loaded if it is not yet.
-      if ((selected || !requested) && llm.modelsExist()) {
+      if ((selected || !requested || unknownName) && llm.modelsExist()) {
         const active = llm.activeModelInfo()?.id
         if (!llm.isReady() && active) early?.status('loading', { model: displayModelName(active) ?? active })
         await llm.init()
