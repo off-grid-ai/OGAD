@@ -5,9 +5,17 @@
  * Radix primitives remain real; the fake owns no timers or subscriptions, and its
  * lifecycle methods are deliberately inert.
  */
+import { configure } from '@testing-library/react'
 import { vi } from 'vitest'
 // The DOM globals jsdom lacks. One owner, shared with the db suite - see the file.
 import './dom-globals.setup'
+
+// findBy*/waitFor wait for something to APPEAR; they are not a speed check. Their 1s default made
+// every cold <App/> or <MemoryChat/> mount a race against the machine: alone it wins, under the
+// pre-push hook's parallel workers (and other apps building) it loses, and the test fails on a
+// screen that was still mounting. The test timeout already allows for that load; a wait gets a
+// third of it, so a thing that never appears still fails with its own message, not a timeout.
+configure({ asyncUtilTimeout: 5000 })
 
 // motion/react (framer-motion) drives animations off requestAnimationFrame, which
 // jsdom stubs — so an AnimatePresence EXIT animation never completes and the
