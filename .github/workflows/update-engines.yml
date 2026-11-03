@@ -61,9 +61,10 @@ jobs:
           ref: ${{ env.BASE }}
           lfs: false
           token: ${{ secrets.ENGINE_BOT_TOKEN || github.token }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Set up Node
+        uses: ./.github/actions/setup-desktop
         with:
-          node-version: '22'
+          workspace: 'false'
       - id: update
         name: Move the pins to the newest upstream engines
         env:

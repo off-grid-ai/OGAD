@@ -94,127 +94,27 @@ jobs:
         env:
           PRO_BUILD_REF: ${{ inputs.pro_ref }}
         run: bash scripts/resolve-build-pro-ref.sh
-      - uses: actions/checkout@v4
-        if: env.HAS_PRO_TOKEN == 'true'
+      # Node, pro, shared, the speech package and `npm ci`: the release's setup
+      # (.github/actions/setup-desktop), restoring the caches main's CI saved.
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-desktop
         with:
-          repository: off-grid-ai/desktop-pro
-          ref: ${{ steps.pro_source.outputs.ref }}
-          token: ${{ secrets.PRO_REPO_TOKEN }}
-          path: pro
-          fetch-depth: 1
-          persist-credentials: false # keep PRO_REPO_TOKEN out of pro/.git/config
+          cross-repo-token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ui-token: ${{ secrets.OPERATOR_UI_TOKEN }}
+          pro: ${{ env.HAS_PRO_TOKEN }}
+          pro-ref: ${{ steps.pro_source.outputs.ref }}
+          pro-token: ${{ secrets.PRO_REPO_TOKEN }}
+          # The shared ref pinned on dispatch, else the branch that matches the build, else main.
+          branch: ${{ inputs.build_ref || github.ref_name }}
+          shared-ref: ${{ inputs.shared_ref }}
+          speech-ref: d005e3509e6f608bb4e70abbe9f089120a08e973 # the release's ExecuTorch 1.5.1
+          speech-binary: 'false'
+          python-version: '3.12'
+          save-caches: 'false'
       - name: Drop nested .git from pro/
         if: env.HAS_PRO_TOKEN == 'true'
         shell: bash
         run: rm -rf pro/.git # don't nest a repo inside the build tree
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # node-gyp (better-sqlite3-multiple-ciphers) fails on Python 3.13+; pin 3.12.
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Check out the private Desktop speech package
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/executorch-speech
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: _executorch_speech
-          lfs: false # The current native speech engine is macOS-only.
-          persist-credentials: false
-      - name: Put the speech package beside this checkout
-        shell: bash
-        run: |
-          if [ ! -f _executorch_speech/package.json ]; then
-            echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
-            exit 1
-          fi
-          rm -rf ../executorch-speech
-          mv _executorch_speech ../executorch-speech
-
-      # `@offgrid/sync` and `@offgrid/use` are file: dependencies on the shared
-      # monorepo, so it must sit BESIDE this checkout before `npm ci` runs -
-      # mirrors release.yml's build-win. The branch ref decides the shared ref:
-      # a build from an integration branch takes the shared branch of the same
-      # name when one exists, else shared main.
-      - name: Checkout shared at the matching ref
-        id: shared_branch
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: ${{ inputs.shared_ref || inputs.build_ref || github.ref_name }}
-          path: _shared
-          persist-credentials: false
-      - name: Fall back to shared main
-        if: ${{ steps.shared_branch.outcome != 'success' }}
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: _shared
-          persist-credentials: false
-      - name: Put shared beside this checkout
-        shell: bash
-        run: |
-          if [ ! -d _shared ]; then
-            echo "::error::off-grid-ai/shared was not checked out - @offgrid/sync and @offgrid/use cannot resolve. Check CI_CROSS_REPO_TOKEN."
-            exit 1
-          fi
-          rm -rf ../shared
-          mv _shared ../shared
-          npm --prefix ../shared ci
-          npm --prefix ../shared/packages/models run build
-          # @offgrid/rag (the document engine) ships a built dist/ like sync and models.
-          npm --prefix ../shared/packages/rag run build
-          npm --prefix ../shared/packages/sync run build
-          npm --prefix ../shared/packages/use run build
-          npm --prefix ../shared/packages/automation run build
-          npm --prefix ../shared/packages/speech run build
-          npm --prefix ../shared/packages/ui run build
-
-      - name: Let npm read the private UI package (Pro)
-        # @offgrid/operator-ui is a private Wednesday package that only Pro uses. Core lists it as an
-        # optional dependency, so without access npm skips it and core still installs; Pro needs it.
-        shell: bash
-        env:
-          UI_TOKEN_PRIMARY: ${{ secrets.OPERATOR_UI_TOKEN }}
-          UI_TOKEN_FALLBACK: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-        run: |
-          # The library moved to off-grid-ai/ui-library. Use the first token that can read it (a pasted
-          # secret can carry a newline or spaces, which break token authentication). The probes clear the
-          # checkout's GitHub login header for the library, or it would override the probed token.
-          UI_TOKEN=""
-          for candidate in "$UI_TOKEN_PRIMARY" "$UI_TOKEN_FALLBACK"; do
-            candidate="$(printf '%s' "$candidate" | tr -d '[:space:]')"
-            [ -z "$candidate" ] && continue
-            if git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${candidate}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-              UI_TOKEN="$candidate"
-              break
-            fi
-          done
-          if [ -n "$UI_TOKEN" ]; then
-            git config --global url."https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library".insteadOf "ssh://git@github.com/off-grid-ai/ui-library"
-            # actions/checkout saves this repo's own GitHub login as a header for all of github.com,
-            # and it overrides the token above. Clear it for the library only (the most specific
-            # address wins), so everything else keeps the checkout login.
-            if git rev-parse --git-dir >/dev/null 2>&1; then
-              git config --local http.https://github.com/off-grid-ai/ui-library.git.extraheader ""
-            fi
-          fi
-          # Check access before installation so authentication failures are clear.
-          if ! git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-            status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${UI_TOKEN}" https://api.github.com/repos/off-grid-ai/ui-library)"
-            echo "::error::CI cannot read off-grid-ai/ui-library (GitHub answered ${status}: 401 bad token, 403 org policy or IP allow list, 404 no access to the repo). Pro will not build without it."
-          fi
-      - name: Install dependencies
-        run: npm ci
 
       - name: Verify the computer-use input addon (nut.js) shipped for Windows
         shell: pwsh
@@ -289,117 +189,27 @@ jobs:
         env:
           PRO_BUILD_REF: ${{ inputs.pro_ref }}
         run: bash scripts/resolve-build-pro-ref.sh
-      - name: Check out pinned Pro source
-        if: env.HAS_PRO_TOKEN == 'true'
-        uses: actions/checkout@v4
+      # Node, pro, shared, the speech package and `npm ci`: the release's setup
+      # (.github/actions/setup-desktop), restoring the caches main's CI saved.
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-desktop
         with:
-          repository: off-grid-ai/desktop-pro
-          ref: ${{ steps.pro_source.outputs.ref }}
-          token: ${{ secrets.PRO_REPO_TOKEN }}
-          path: pro
-          persist-credentials: false
+          cross-repo-token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ui-token: ${{ secrets.OPERATOR_UI_TOKEN }}
+          pro: ${{ env.HAS_PRO_TOKEN }}
+          pro-ref: ${{ steps.pro_source.outputs.ref }}
+          pro-token: ${{ secrets.PRO_REPO_TOKEN }}
+          # The shared ref pinned on dispatch, else the branch that matches the build, else main.
+          branch: ${{ inputs.build_ref || github.ref_name }}
+          shared-ref: ${{ inputs.shared_ref }}
+          speech-ref: d005e3509e6f608bb4e70abbe9f089120a08e973 # the release's ExecuTorch 1.5.1
+          speech-binary: 'false'
+          python-version: '3.12'
+          save-caches: 'false'
       - name: Drop nested Pro Git metadata
         if: env.HAS_PRO_TOKEN == 'true'
         shell: bash
-        run: rm -rf pro/.git
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Check out shared at the matching ref
-        id: shared_branch_linux
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: ${{ inputs.shared_ref || inputs.build_ref || github.ref_name }}
-          path: _shared
-          persist-credentials: false
-
-      - name: Fall back to shared main
-        if: ${{ steps.shared_branch_linux.outcome != 'success' }}
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: _shared
-          persist-credentials: false
-
-      - name: Build shared packages
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -d _shared || { echo 'Shared source is missing' >&2; exit 1; }
-          rm -rf ../shared
-          mv _shared ../shared
-          npm --prefix ../shared ci
-          for package in models sync use automation speech ui rag design; do
-            npm --prefix "../shared/packages/$package" run build
-          done
-
-      - name: Check out the Desktop speech package
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/executorch-speech
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: e3b471e6ea8504f3877cd9f27a11bfe98ce3b3b5
-          path: _executorch_speech
-          lfs: false
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Put the speech package beside this checkout
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f _executorch_speech/package.json
-          rm -rf ../executorch-speech
-          mv _executorch_speech ../executorch-speech
-
-      - name: Let npm read the private UI package (Pro)
-        # @offgrid/operator-ui is a private Wednesday package that only Pro uses. Core lists it as an
-        # optional dependency, so without access npm skips it and core still installs; Pro needs it.
-        shell: bash
-        env:
-          UI_TOKEN_PRIMARY: ${{ secrets.OPERATOR_UI_TOKEN }}
-          UI_TOKEN_FALLBACK: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-        run: |
-          # The library moved to off-grid-ai/ui-library. Use the first token that can read it (a pasted
-          # secret can carry a newline or spaces, which break token authentication). The probes clear the
-          # checkout's GitHub login header for the library, or it would override the probed token.
-          UI_TOKEN=""
-          for candidate in "$UI_TOKEN_PRIMARY" "$UI_TOKEN_FALLBACK"; do
-            candidate="$(printf '%s' "$candidate" | tr -d '[:space:]')"
-            [ -z "$candidate" ] && continue
-            if git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${candidate}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-              UI_TOKEN="$candidate"
-              break
-            fi
-          done
-          if [ -n "$UI_TOKEN" ]; then
-            git config --global url."https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library".insteadOf "ssh://git@github.com/off-grid-ai/ui-library"
-            # actions/checkout saves this repo's own GitHub login as a header for all of github.com,
-            # and it overrides the token above. Clear it for the library only (the most specific
-            # address wins), so everything else keeps the checkout login.
-            if git rev-parse --git-dir >/dev/null 2>&1; then
-              git config --local http.https://github.com/off-grid-ai/ui-library.git.extraheader ""
-            fi
-          fi
-          # Check access before installation so authentication failures are clear.
-          if ! git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-            status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${UI_TOKEN}" https://api.github.com/repos/off-grid-ai/ui-library)"
-            echo "::error::CI cannot read off-grid-ai/ui-library (GitHub answered ${status}: 401 bad token, 403 org policy or IP allow list, 404 no access to the repo). Pro will not build without it."
-          fi
-      - name: Install dependencies
-        run: npm ci
+        run: rm -rf pro/.git # don't nest a repo inside the build tree
 
       - name: Install Linux build dependencies
         run: |
