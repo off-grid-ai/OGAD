@@ -25,7 +25,9 @@ export const VIEW_MODES = [
   'voice',
   'vault',
   'devices',
-  'video'
+  'video',
+  'scribe',
+  'notes'
 ] as const
 
 export type ViewMode = (typeof VIEW_MODES)[number]

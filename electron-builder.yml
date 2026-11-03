@@ -2,6 +2,12 @@
 # existing Pro installs auto-update into it (bundle id + granted TCC permissions match).
 extends: scripts/config/electron-builder-runtime.yml
 appId: co.getoffgridai.desktop.pro
+# offgrid:// opens or focuses the app (src/main/index.ts). Registers the scheme in Info.plist and the
+# Linux .desktop file; Windows registers it at runtime.
+protocols:
+  - name: Off Grid AI
+    schemes:
+      - offgrid
 productName: Off Grid AI Desktop
 copyright: © Off Grid AI
 # This hook runs before electron-builder emits artifactCreated, which is the event
@@ -184,6 +190,9 @@ deb:
     - x11-utils
     - wtype
     - python3-gi
+    # Pro's Scribe overlay on X11 (python3 + PyGObject: AT-SPI for text positions, GTK 3 for the window).
+    - python3-gi-cairo
+    - gir1.2-gtk-3.0
     - geoclue-2.0
     - gir1.2-atspi-2.0
     - gir1.2-gstreamer-1.0
