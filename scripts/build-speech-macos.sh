@@ -10,8 +10,9 @@ SPEECH="${OFFGRID_SPEECH_ROOT:-$ROOT/../executorch-speech}"
 TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"
 
 npm --prefix "$SPEECH" ci
-# Use the bundled Python and its existing torchgen, YAML, and Jinja dependencies.
-speech_python="$ROOT/resources/bin/kev-runtime/python/bin/python3"
+# Use the Kev runtime's Python and its existing torchgen, YAML, and Jinja dependencies. CI passes the
+# pinned pack it unpacked (resources/kev-runtime-packs.json); a local build uses the bundled copy.
+speech_python="${OFFGRID_SPEECH_PYTHON:-$ROOT/resources/bin/kev-runtime/python/bin/python3}"
 "$speech_python" -c 'import torchgen, yaml, jinja2'
 cmake -S "$SPEECH/native" -B "$SPEECH/native/build" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET="$TARGET" \

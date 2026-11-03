@@ -250,6 +250,7 @@ jobs:
       # The release's Windows Whisper, saved on main's push (see release-caches below).
       - name: Windows Vulkan Whisper
         if: ${{ runner.os == 'Windows' && github.event_name != 'pull_request' }}
+        continue-on-error: true # warming a release cache must not block the recording tests
         uses: ./.github/actions/windows-whisper
         with:
           save: 'true'
