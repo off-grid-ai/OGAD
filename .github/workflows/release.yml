@@ -62,9 +62,10 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Set up Node
+        uses: ./.github/actions/setup-desktop
         with:
-          node-version: '22'
+          workspace: 'false'
       - name: Resolve channel + version
         id: bump
         run: |
@@ -136,6 +137,28 @@ jobs:
             # bandwidth budget and failed the release checkout ("exceeded its LFS budget").
       - name: Pull shipped LFS binaries
         run: git lfs pull --exclude="resources/bin/llama,resources/bin/llama-prism,resources/bin/whisper,resources/bin/kev-runtime,resources/bin/sd"
+      # Private pro source into pro/ → __OFFGRID_PRO__ true, at the commit Core pins.
+      - name: Resolve pinned Pro source
+        id: pro_source
+        shell: bash
+        env:
+          PRO_BUILD_REF: ${{ inputs.pro_ref }}
+        run: bash scripts/resolve-build-pro-ref.sh
+      # Node, pro at the commit Core pins, shared, the speech package and `npm ci`: the same setup as
+      # CI (.github/actions/setup-desktop), so a release restores the caches main's CI saved and
+      # writes none itself.
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-desktop
+        with:
+          cross-repo-token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ui-token: ${{ secrets.OPERATOR_UI_TOKEN }}
+          pro-ref: ${{ steps.pro_source.outputs.ref }}
+          pro-token: ${{ secrets.PRO_REPO_TOKEN }}
+          speech-ref: ${{ env.SPEECH_REF }}
+          speech-binary: 'false'
+          save-caches: 'false'
+      - name: Drop nested .git from pro/
+        run: rm -rf pro/.git # don't nest a repo inside the build tree
       # The archive is built by build-native-engines.yml; its name and hash live in resources/engine-pins.json.
       - name: Stage pinned macOS native engines
         run: |
@@ -146,30 +169,8 @@ jobs:
             "https://github.com/off-grid-ai/OGAD/releases/download/$release/$name"
           echo "$sha  $RUNNER_TEMP/mac-native.tar.gz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/mac-native.tar.gz" -C resources/bin
-      # The image engine is built from source for macOS 13, which took about 9 minutes on every
-      # release. It is cached on its pin and on the scripts and patches that build it, so it is
-      # rebuilt only when one of those changes. The pinned archive above carries an sd/ of its own;
-      # it is removed first so the folder holds exactly what this build made, as a fresh build does.
-      - name: Read the image engine pin
-        id: sd_pin
-        run: |
-          echo "commit=$(node -p "require('./resources/engine-pins.json').sd.commit")" >> "$GITHUB_OUTPUT"
-          rm -rf resources/bin/sd
-      - name: Restore the macOS image engine
-        id: sd_cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: resources/bin/sd
-          key: sd-macos-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ steps.sd_pin.outputs.commit }}-${{ hashFiles('scripts/build-sd-macos.sh', 'scripts/prepare-image-runtime.mjs', 'scripts/check-macos-minos.mjs', 'scripts/patches/**') }}
-      - name: Build macOS image engine for macOS 13
-        if: ${{ steps.sd_cache.outputs.cache-hit != 'true' }}
-        run: bash scripts/build-sd-macos.sh
-      - name: Save the macOS image engine
-        if: ${{ steps.sd_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: resources/bin/sd
-          key: ${{ steps.sd_cache.outputs.cache-primary-key }}
+      - name: macOS image engine
+        uses: ./.github/actions/macos-image-engine
       - name: Verify cached macOS engines
         run: |
           for variant in llama llama-prism; do
@@ -246,169 +247,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/fetch-sherpa.mjs --check
-      # Private pro source into pro/ → __OFFGRID_PRO__ true. The checkout action
-      # injects the token as an http.extraheader (never in a clone URL) and scrubs
-      # it afterwards — safer than embedding ${TOKEN} in a git URL.
-      - name: Resolve pinned Pro source
-        id: pro_source
-        shell: bash
-        env:
-          PRO_BUILD_REF: ${{ inputs.pro_ref }}
-        run: bash scripts/resolve-build-pro-ref.sh
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: macOS speech runtime
+        uses: ./.github/actions/macos-speech-runtime
         with:
-          repository: off-grid-ai/desktop-pro
-          ref: ${{ steps.pro_source.outputs.ref }}
-          token: ${{ secrets.PRO_REPO_TOKEN }}
-          path: pro
-          fetch-depth: 1
-      - name: Drop nested .git from pro/
-        run: rm -rf pro/.git # don't nest a repo inside the build tree
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      # Shared packages are file: dependencies on the shared monorepo, so it must sit BESIDE this
-      # checkout before `npm ci` runs - an install cannot resolve a path that does not exist, and the
-      # bundle then fails on imports from it. `ci.yml` has done this since
-      # the sync work landed; this workflow did not, which is why no release has built since 2026-07-30.
-      #
-      # The release ref decides the shared ref: a release from `main` takes shared `main`, and a release
-      # from an integration branch takes the branch of the same name when one exists.
-      - name: Checkout shared at the matching ref
-        id: shared_branch
-        continue-on-error: true
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: off-grid-ai/shared
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: ${{ github.ref_name }}
-          path: _shared
-          persist-credentials: false
-      - name: Fall back to shared main
-        if: ${{ steps.shared_branch.outcome != 'success' }}
-        continue-on-error: true
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: _shared
-          persist-credentials: false
-      - name: Put shared beside this checkout
-        run: |
-          if [ ! -d _shared ]; then
-            echo "::error::off-grid-ai/shared was not checked out - shared packages cannot resolve. Check CI_CROSS_REPO_TOKEN."
-            exit 1
-          fi
-          rm -rf ../shared
-          mv _shared ../shared
-          # Install at the WORKSPACE ROOT: shared is an npm-workspaces monorepo whose lockfile and
-          # build tool live at the root, and packages/sync declares neither. A locked install, so a
-          # drifted lock stops the release instead of resolving a graph nobody committed.
-          npm --prefix ../shared ci
-          npm --prefix ../shared/packages/sync run build
-          # @offgrid/use (the durable action engine) is consumed the same way as sync
-          # and needs the same explicit build - file-dep prepare alone does not emit
-          # its dist/ output before the app bundle runs.
-          npm --prefix ../shared/packages/use run build
-          npm --prefix ../shared/packages/automation run build
-          npm --prefix ../shared/packages/models run build
-          # @offgrid/rag (the document engine) ships a built dist/ like sync and models.
-          npm --prefix ../shared/packages/rag run build
-          npm --prefix ../shared/packages/speech run build
-          npm --prefix ../shared/packages/ui run build
-          # Scribe and Notes (Pro) import @offgrid/writing and @offgrid/notes: built dist/ like ui.
-          npm --prefix ../shared/packages/writing run build
-          npm --prefix ../shared/packages/notes run build
-      # The speech runtime is checked out with its submodules and LFS voices and built from source,
-      # about 6 minutes on every release. The app takes only the package's shipped files from it
-      # (package.json, dist/, generated/ with the default voices, native/bin/), so those are cached
-      # on the speech commit and the build script, and the checkout and build run only when one of
-      # them changes.
-      - name: Restore the macOS speech runtime
-        id: speech_cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/speech-runtime.tar
-          key: speech-macos-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ env.SPEECH_REF }}-${{ hashFiles('scripts/build-speech-macos.sh') }}
-      # Cached as one archive in the runner's temp folder: actions/cache saved nothing for the same
-      # files listed by their ../executorch-speech paths, outside the workspace.
-      - name: Unpack the cached speech runtime
-        if: ${{ steps.speech_cache.outputs.cache-hit == 'true' }}
-        run: |
-          rm -rf ../executorch-speech
-          mkdir ../executorch-speech
-          tar -xf "$RUNNER_TEMP/speech-runtime.tar" -C ../executorch-speech
-      - name: Check out the private Desktop speech runtime
-        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: off-grid-ai/executorch-speech
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: ${{ env.SPEECH_REF }}
-          path: _executorch_speech
-          fetch-depth: 1 # one commit, and depth 1 for every submodule
-          lfs: true # Mac releases bundle the default English voices for offline first use.
-          submodules: recursive
-          persist-credentials: false
-      - name: Put the speech runtime beside this checkout
-        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
-        run: |
-          if [ ! -f _executorch_speech/package.json ]; then
-            echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
-            exit 1
-          fi
-          rm -rf ../executorch-speech
-          mv _executorch_speech ../executorch-speech
-      - name: Build macOS speech runtime for macOS 13
-        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
-        run: |
-          bash scripts/build-speech-macos.sh
-          tar -cf "$RUNNER_TEMP/speech-runtime.tar" -C ../executorch-speech package.json dist generated native/bin
-      - name: Save the macOS speech runtime
-        if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/speech-runtime.tar
-          key: ${{ steps.speech_cache.outputs.cache-primary-key }}
-      - name: Let npm read the private UI package (core and Pro)
-        # @offgrid/operator-ui is a private Wednesday package that core and Pro both render with
-        # (skin, primitives, motion). It is listed as optional, so npm would skip it silently
-        # without access and the build would fail later; this step makes that failure immediate.
-        shell: bash
-        env:
-          UI_TOKEN_PRIMARY: ${{ secrets.OPERATOR_UI_TOKEN }}
-          UI_TOKEN_FALLBACK: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-        run: |
-          # The library moved to off-grid-ai/ui-library. Use the first token that can read it (a pasted
-          # secret can carry a newline or spaces, which break token authentication). The probes clear the
-          # checkout's GitHub login header for the library, or it would override the probed token.
-          UI_TOKEN=""
-          for candidate in "$UI_TOKEN_PRIMARY" "$UI_TOKEN_FALLBACK"; do
-            candidate="$(printf '%s' "$candidate" | tr -d '[:space:]')"
-            [ -z "$candidate" ] && continue
-            if git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${candidate}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-              UI_TOKEN="$candidate"
-              break
-            fi
-          done
-          if [ -n "$UI_TOKEN" ]; then
-            git config --global url."https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library".insteadOf "ssh://git@github.com/off-grid-ai/ui-library"
-            # actions/checkout saves this repo's own GitHub login as a header for all of github.com,
-            # and it overrides the token above. Clear it for the library only (the most specific
-            # address wins), so everything else keeps the checkout login.
-            if git rev-parse --git-dir >/dev/null 2>&1; then
-              git config --local http.https://github.com/off-grid-ai/ui-library.git.extraheader ""
-            fi
-          fi
-          # Check access before installation so authentication failures are clear.
-          if ! git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-            status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${UI_TOKEN}" https://api.github.com/repos/off-grid-ai/ui-library)"
-            echo "::error::CI cannot read off-grid-ai/ui-library (GitHub answered ${status}: 401 bad token, 403 org policy or IP allow list, 404 no access to the repo). Core and Pro will not build without it."
-            exit 1
-          fi
-      - name: Install dependencies
-        run: npm ci
+          speech-ref: ${{ env.SPEECH_REF }}
       # Stamp the resolved version into package.json so electron-builder picks the
       # right channel. For stable this matches the committed bump (no-op); for beta
       # it applies the -beta.<run> version (no commit needed — this checkout is
@@ -632,8 +475,6 @@ jobs:
     # windows-2022 = VS 2022 toolchain. windows-latest ships VS 2026, which node-gyp 11
     # can't parse, breaking native-module (better-sqlite3) compiles. Pin until it catches up.
     runs-on: windows-2022
-    env:
-      VULKAN_VERSION: '1.4.321.1' # the SDK the Whisper build compiles against
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -655,178 +496,25 @@ jobs:
         env:
           PRO_BUILD_REF: ${{ inputs.pro_ref }}
         run: bash scripts/resolve-build-pro-ref.sh
-      - name: Check out private pro source into pro/
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # Node, pro at the commit Core pins, shared, the speech package and `npm ci`: the same setup as
+      # CI (.github/actions/setup-desktop), so a release restores the caches main's CI saved and
+      # writes none itself.
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-desktop
         with:
-          repository: off-grid-ai/desktop-pro
-          ref: ${{ steps.pro_source.outputs.ref }}
-          token: ${{ secrets.PRO_REPO_TOKEN }}
-          path: pro
-          fetch-depth: 1
-          persist-credentials: false # keep PRO_REPO_TOKEN out of pro/.git/config
+          cross-repo-token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ui-token: ${{ secrets.OPERATOR_UI_TOKEN }}
+          pro-ref: ${{ steps.pro_source.outputs.ref }}
+          pro-token: ${{ secrets.PRO_REPO_TOKEN }}
+          speech-ref: d005e3509e6f608bb4e70abbe9f089120a08e973 # ExecuTorch 1.5.1; the same commit on every platform
+          speech-binary: 'false'
+          python-version: '3.12'
+          save-caches: 'false'
       - name: Drop nested .git from pro/
         shell: bash
         run: rm -rf pro/.git # don't nest a repo inside the build tree
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      # stage-native.mjs builds Pro's Scribe overlay (scribe-overlay-win.exe) with dotnet publish.
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-      # node-gyp (better-sqlite3-multiple-ciphers) fails on Python 3.13+; pin 3.12.
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      # Shared packages are file: dependencies on the shared monorepo, so it must sit BESIDE this
-      # checkout before `npm ci` runs - an install cannot resolve a path that does not exist, and the
-      # bundle then fails on imports from it. `ci.yml` has done this since
-      # the sync work landed; this workflow did not, which is why no release has built since 2026-07-30.
-      #
-      # The release ref decides the shared ref: a release from `main` takes shared `main`, and a release
-      # from an integration branch takes the branch of the same name when one exists.
-      - name: Checkout shared at the matching ref
-        id: shared_branch
-        continue-on-error: true
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: ${{ github.ref_name }}
-          path: _shared
-          persist-credentials: false
-      - name: Fall back to shared main
-        if: ${{ steps.shared_branch.outcome != 'success' }}
-        continue-on-error: true
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: _shared
-          persist-credentials: false
-      - name: Put shared beside this checkout
-        # Git Bash, explicitly: a windows runner runs `run:` under PowerShell, which parsed this
-        # block as a .ps1 and failed before the first command.
-        shell: bash
-        run: |
-          if [ ! -d _shared ]; then
-            echo "::error::off-grid-ai/shared was not checked out - shared packages cannot resolve. Check CI_CROSS_REPO_TOKEN."
-            exit 1
-          fi
-          rm -rf ../shared
-          mv _shared ../shared
-          # Install at the WORKSPACE ROOT: shared is an npm-workspaces monorepo whose lockfile and
-          # build tool live at the root, and packages/sync declares neither. A locked install, so a
-          # drifted lock stops the release instead of resolving a graph nobody committed.
-          npm --prefix ../shared ci
-          npm --prefix ../shared/packages/sync run build
-          # @offgrid/use (the durable action engine) is consumed the same way as sync
-          # and needs the same explicit build - file-dep prepare alone does not emit
-          # its dist/ output before the app bundle runs.
-          npm --prefix ../shared/packages/use run build
-          npm --prefix ../shared/packages/automation run build
-          npm --prefix ../shared/packages/models run build
-          # @offgrid/rag (the document engine) ships a built dist/ like sync and models.
-          npm --prefix ../shared/packages/rag run build
-          npm --prefix ../shared/packages/speech run build
-          npm --prefix ../shared/packages/ui run build
-          # Scribe and Notes (Pro) import @offgrid/writing and @offgrid/notes: built dist/ like ui.
-          npm --prefix ../shared/packages/writing run build
-          npm --prefix ../shared/packages/notes run build
-      - name: Check out the private Desktop speech package
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: off-grid-ai/executorch-speech
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: d005e3509e6f608bb4e70abbe9f089120a08e973 # ExecuTorch 1.5.1; the same commit on every platform
-          path: _executorch_speech
-          lfs: false # The current native speech engine is macOS-only.
-          persist-credentials: false
-      - name: Put the speech package beside this checkout
-        shell: bash
-        run: |
-          if [ ! -f _executorch_speech/package.json ]; then
-            echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
-            exit 1
-          fi
-          rm -rf ../executorch-speech
-          mv _executorch_speech ../executorch-speech
-      - name: Let npm read the private UI package (core and Pro)
-        # @offgrid/operator-ui is a private Wednesday package that core and Pro both render with
-        # (skin, primitives, motion). It is listed as optional, so npm would skip it silently
-        # without access and the build would fail later; this step makes that failure immediate.
-        shell: bash
-        env:
-          UI_TOKEN_PRIMARY: ${{ secrets.OPERATOR_UI_TOKEN }}
-          UI_TOKEN_FALLBACK: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-        run: |
-          # The library moved to off-grid-ai/ui-library. Use the first token that can read it (a pasted
-          # secret can carry a newline or spaces, which break token authentication). The probes clear the
-          # checkout's GitHub login header for the library, or it would override the probed token.
-          UI_TOKEN=""
-          for candidate in "$UI_TOKEN_PRIMARY" "$UI_TOKEN_FALLBACK"; do
-            candidate="$(printf '%s' "$candidate" | tr -d '[:space:]')"
-            [ -z "$candidate" ] && continue
-            if git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${candidate}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-              UI_TOKEN="$candidate"
-              break
-            fi
-          done
-          if [ -n "$UI_TOKEN" ]; then
-            git config --global url."https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library".insteadOf "ssh://git@github.com/off-grid-ai/ui-library"
-            # actions/checkout saves this repo's own GitHub login as a header for all of github.com,
-            # and it overrides the token above. Clear it for the library only (the most specific
-            # address wins), so everything else keeps the checkout login.
-            if git rev-parse --git-dir >/dev/null 2>&1; then
-              git config --local http.https://github.com/off-grid-ai/ui-library.git.extraheader ""
-            fi
-          fi
-          # Check access before installation so authentication failures are clear.
-          if ! git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-            status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${UI_TOKEN}" https://api.github.com/repos/off-grid-ai/ui-library)"
-            echo "::error::CI cannot read off-grid-ai/ui-library (GitHub answered ${status}: 401 bad token, 403 org policy or IP allow list, 404 no access to the repo). Core and Pro will not build without it."
-            exit 1
-          fi
-      - name: Install dependencies
-        run: npm ci
-      # Whisper is built from source with Vulkan on every release (about 5 minutes with the SDK
-      # install). Its pin lives in the build script, so the build is cached on that script and the
-      # runtime config it copies from, and the SDK install and build run only when one changes.
-      - name: Restore the Windows Vulkan Whisper
-        id: whisper_cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: resources/bin/whisper-vulkan
-          key: whisper-vulkan-win-${{ env.VULKAN_VERSION }}-${{ hashFiles('scripts/build-whisper-vulkan-win.ps1', 'scripts/config/windows-vc-runtime.ps1') }}
-      - name: Install Vulkan SDK for Whisper
-        # LunarG's own installer, run silently, as llama.cpp's Windows CI does. In the SDK that
-        # humbletim/install-vulkan-sdk unpacked, CMake's FindVulkan found glslc but not the loader
-        # library or headers, so Whisper's configure failed; the step below checks all three.
-        if: ${{ steps.whisper_cache.outputs.cache-hit != 'true' }}
-        shell: pwsh
-        run: |
-          $installer = Join-Path $env:RUNNER_TEMP 'vulkansdk.exe'
-          curl.exe -fsSL --retry 3 -o $installer "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/vulkansdk-windows-X64-$env:VULKAN_VERSION.exe"
-          if ($LASTEXITCODE -ne 0) { throw 'Vulkan SDK download failed' }
-          $root = "C:\VulkanSDK\$env:VULKAN_VERSION"
-          & $installer --root $root --accept-licenses --default-answer --confirm-command install
-          if ($LASTEXITCODE -ne 0) { throw 'Vulkan SDK install failed' }
-          foreach ($need in @('Lib\vulkan-1.lib', 'Include\vulkan\vulkan.h', 'Bin\glslc.exe')) {
-            if (-not (Test-Path (Join-Path $root $need))) { throw "Vulkan SDK is missing $need" }
-          }
-          "VULKAN_SDK=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "$root\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-      - name: Build Windows Vulkan Whisper
-        if: ${{ steps.whisper_cache.outputs.cache-hit != 'true' }}
-        shell: pwsh
-        run: ./scripts/build-whisper-vulkan-win.ps1
-      - name: Save the Windows Vulkan Whisper
-        if: ${{ steps.whisper_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: resources/bin/whisper-vulkan
-          key: ${{ steps.whisper_cache.outputs.cache-primary-key }}
+      - name: Windows Vulkan Whisper
+        uses: ./.github/actions/windows-whisper
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
         shell: pwsh
         env:
@@ -964,69 +652,23 @@ jobs:
         env:
           PRO_BUILD_REF: ${{ inputs.pro_ref }}
         run: bash scripts/resolve-build-pro-ref.sh
-      - name: Check out pinned Pro source
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # Node, pro at the commit Core pins, shared, the speech package and `npm ci`: the same setup as
+      # CI (.github/actions/setup-desktop), so a release restores the caches main's CI saved and
+      # writes none itself.
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-desktop
         with:
-          repository: off-grid-ai/desktop-pro
-          ref: ${{ steps.pro_source.outputs.ref }}
-          token: ${{ secrets.PRO_REPO_TOKEN }}
-          path: pro
-          persist-credentials: false
+          cross-repo-token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ui-token: ${{ secrets.OPERATOR_UI_TOKEN }}
+          pro-ref: ${{ steps.pro_source.outputs.ref }}
+          pro-token: ${{ secrets.PRO_REPO_TOKEN }}
+          speech-ref: d005e3509e6f608bb4e70abbe9f089120a08e973 # ExecuTorch 1.5.1; the same commit on every platform
+          speech-binary: 'false'
+          python-version: '3.12'
+          save-caches: 'false'
       - name: Drop nested Pro Git metadata
         shell: bash
         run: rm -rf pro/.git
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: '3.12'
-      - name: Check out shared at the matching ref
-        id: shared_branch
-        continue-on-error: true
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: ${{ github.ref_name }}
-          path: _shared
-          persist-credentials: false
-      - name: Fall back to shared main
-        if: ${{ steps.shared_branch.outcome != 'success' }}
-        continue-on-error: true
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: off-grid-ai/shared
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: _shared
-          persist-credentials: false
-      - name: Build shared packages
-        run: |
-          test -d _shared || { echo 'Shared source is missing' >&2; exit 1; }
-          mv _shared ../shared
-          npm --prefix ../shared ci
-          for package in models sync use automation speech ui rag design writing notes; do
-            npm --prefix "../shared/packages/$package" run build
-          done
-      - name: Check out the Desktop speech package
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: off-grid-ai/executorch-speech
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: d005e3509e6f608bb4e70abbe9f089120a08e973
-          path: _executorch_speech
-          # The package's JavaScript only, one commit deep: the Linux executable comes from the
-          # pinned linux-native archive below, so the vendored ExecuTorch submodules and the LFS
-          # files are never read.
-          fetch-depth: 1
-          lfs: false
-          persist-credentials: false
-      - name: Put the speech package beside this checkout
-        run: |
-          test -f _executorch_speech/package.json
-          mv _executorch_speech ../executorch-speech
       - name: Stage pinned Linux native engines
         run: |
           # Built by build-native-engines.yml; name and hash live in resources/engine-pins.json.
@@ -1046,44 +688,6 @@ jobs:
           install -Dm644 resources/bin/kev-local-server.py build/linux-bin/kev-local-server.py
           install -Dm755 build/linux-bin/executorch-speech \
             ../executorch-speech/native/bin/executorch-speech
-      - name: Let npm read the private UI package (core and Pro)
-        # @offgrid/operator-ui is a private Wednesday package that core and Pro both render with
-        # (skin, primitives, motion). It is listed as optional, so npm would skip it silently
-        # without access and the build would fail later; this step makes that failure immediate.
-        shell: bash
-        env:
-          UI_TOKEN_PRIMARY: ${{ secrets.OPERATOR_UI_TOKEN }}
-          UI_TOKEN_FALLBACK: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-        run: |
-          # The library moved to off-grid-ai/ui-library. Use the first token that can read it (a pasted
-          # secret can carry a newline or spaces, which break token authentication). The probes clear the
-          # checkout's GitHub login header for the library, or it would override the probed token.
-          UI_TOKEN=""
-          for candidate in "$UI_TOKEN_PRIMARY" "$UI_TOKEN_FALLBACK"; do
-            candidate="$(printf '%s' "$candidate" | tr -d '[:space:]')"
-            [ -z "$candidate" ] && continue
-            if git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${candidate}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-              UI_TOKEN="$candidate"
-              break
-            fi
-          done
-          if [ -n "$UI_TOKEN" ]; then
-            git config --global url."https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library".insteadOf "ssh://git@github.com/off-grid-ai/ui-library"
-            # actions/checkout saves this repo's own GitHub login as a header for all of github.com,
-            # and it overrides the token above. Clear it for the library only (the most specific
-            # address wins), so everything else keeps the checkout login.
-            if git rev-parse --git-dir >/dev/null 2>&1; then
-              git config --local http.https://github.com/off-grid-ai/ui-library.git.extraheader ""
-            fi
-          fi
-          # Check access before installation so authentication failures are clear.
-          if ! git -c http.https://github.com/off-grid-ai/ui-library.git.extraheader= ls-remote --exit-code "https://x-access-token:${UI_TOKEN}@github.com/off-grid-ai/ui-library.git" HEAD >/dev/null 2>&1; then
-            status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${UI_TOKEN}" https://api.github.com/repos/off-grid-ai/ui-library)"
-            echo "::error::CI cannot read off-grid-ai/ui-library (GitHub answered ${status}: 401 bad token, 403 org policy or IP allow list, 404 no access to the repo). Core and Pro will not build without it."
-            exit 1
-          fi
-      - name: Install dependencies
-        run: npm ci
       - name: Install Linux GPU runtime dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 libvulkan-dev glslc spirv-headers unzip
       - name: Stage Vulkan loaders beside cached Linux engines

@@ -1,70 +1,138 @@
 name: Set up the desktop workspace
 description: >
-  Pro, shared and the speech runtime beside this checkout, the private UI package, Node and
-  `npm ci`: the setup every CI job runs first. One definition, so the parallel jobs cannot drift
-  apart.
+  Node, pro, shared and the speech runtime beside this checkout, the private UI package and
+  `npm ci`: the setup every building job runs first, in CI, release and the engine workflows. One
+  definition, so one Node version and one set of cache keys, and the jobs cannot drift apart.
 
 inputs:
   cross-repo-token:
     description: CI_CROSS_REPO_TOKEN, which reads desktop-pro, shared and executorch-speech.
-    required: true
+    required: false
+    default: ''
   ui-token:
     description: OPERATOR_UI_TOKEN, tried before the cross-repo token for the private UI package.
     required: false
     default: ''
+  workspace:
+    description: >
+      'false' sets up Node only, for jobs that run this repository's scripts without the app's
+      dependencies.
+    required: false
+    default: 'true'
   fetch-depth:
     description: History to fetch for pro. The coverage job measures new code against the base branch, so it needs all of it.
     required: false
     default: '1'
+  pro:
+    description: "'false' builds core alone, where no token reads desktop-pro."
+    required: false
+    default: 'true'
+  pro-ref:
+    description: The pro commit to build. Empty takes the branch that matches this run (CI); a release passes the commit Core pins.
+    required: false
+    default: ''
+  pro-token:
+    description: The token that reads desktop-pro, when it is not the cross-repo token.
+    required: false
+    default: ''
+  branch:
+    description: The branch whose pro and shared to match. Empty takes this run's branch.
+    required: false
+    default: ''
+  shared-ref:
+    description: The shared ref to build against. Empty takes the branch that matches this run, else main.
+    required: false
+    default: ''
+  speech-ref:
+    description: The executorch-speech commit. Empty takes its default branch.
+    required: false
+    default: ''
+  speech-binary:
+    description: Pull the speech runtime's macOS binary from LFS. Jobs that never run it pass 'false'.
+    required: false
+    default: 'true'
+  python-version:
+    description: Python for node-gyp (Windows and Linux builds of the native modules) and the engine scripts. Empty sets up none.
+    required: false
+    default: ''
+  save-caches:
+    description: >
+      'false' only restores. Release runs on dispatch, and writes no cache; main's CI saves every
+      cache a release restores.
+    required: false
+    default: 'true'
 
 runs:
   using: composite
   steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        # Node 22 supports node:sqlite and both native SQLite dependencies. Node 24 aborts while
+        # Vitest unloads the cipher module; Node 26 cannot build better-sqlite3 12.6.
+        node-version: '22'
+
     # Pro and shared on the branch that MATCHES this PR/push, so a coordinated core+pro (or
     # core+shared) change is tested together; the PR base branch otherwise, and shared falls back to
     # main last. Without this, CI tested the core branch against pro `main`: pro's new test files
-    # were absent while pro source was still measured, and coverage cratered (PR #46).
+    # were absent while pro source was still measured, and coverage cratered (PR #46). A release
+    # passes the pro commit Core pins instead, and a release from main takes shared main.
     #
     # A composite step cannot continue on error, so each branch is looked up before the checkout.
     # The lookup clears the login header actions/checkout saved for github.com, which would override
     # the token. `--exit-code` exits 2 when the branch does not exist; any other failure stops the
     # job, so a bad token cannot quietly test against a fallback branch.
     - name: Pick the pro and shared branches
+      if: ${{ inputs.workspace == 'true' }}
       id: refs
       shell: bash
       env:
         TOKEN: ${{ inputs.cross-repo-token }}
-        HEAD_REF: ${{ github.head_ref || github.ref_name }}
+        PRO_TOKEN: ${{ inputs.pro-token || inputs.cross-repo-token }}
+        PRO: ${{ inputs.pro }}
+        PRO_REF: ${{ inputs.pro-ref }}
+        SHARED_REF: ${{ inputs.shared-ref }}
+        HEAD_REF: ${{ inputs.branch || github.head_ref || github.ref_name }}
         BASE_REF: ${{ github.base_ref || 'main' }}
       run: |
         exists() {
           local status=0
           git -c http.https://github.com/.extraheader= ls-remote --exit-code --heads \
-            "https://x-access-token:${TOKEN}@github.com/off-grid-ai/$1.git" "$2" >/dev/null || status=$?
+            "https://x-access-token:$1@github.com/off-grid-ai/$2.git" "$3" >/dev/null || status=$?
           case "$status" in
             0) return 0 ;;
             2) return 1 ;;
-            *) echo "::error::Could not read off-grid-ai/$1 (git exit $status). Check CI_CROSS_REPO_TOKEN." >&2; exit 1 ;;
+            *) echo "::error::Could not read off-grid-ai/$2 (git exit $status). Check its token." >&2; exit 1 ;;
           esac
         }
         pick() {
-          for ref in "${@:2}"; do
-            if exists "$1" "$ref"; then echo "$ref"; return; fi
+          for ref in "${@:3}"; do
+            if exists "$1" "$2" "$ref"; then echo "$ref"; return; fi
           done
-          echo "::error::off-grid-ai/$1 has none of: ${*:2}" >&2
+          echo "::error::off-grid-ai/$2 has none of: ${*:3}" >&2
           exit 1
         }
-        pro=$(pick desktop-pro "$HEAD_REF" "$BASE_REF")
-        shared=$(pick shared "$HEAD_REF" "$BASE_REF" main)
+        # Assigned on their own: `echo "x=$(pick)"` would hide a failed lookup behind echo's success.
+        pro=""
+        if [ -n "$PRO_REF" ]; then
+          pro=$PRO_REF
+        elif [ "$PRO" = true ]; then
+          pro=$(pick "$PRO_TOKEN" desktop-pro "$HEAD_REF" "$BASE_REF")
+        fi
+        if [ -n "$SHARED_REF" ]; then
+          shared=$SHARED_REF
+        else
+          shared=$(pick "$TOKEN" shared "$HEAD_REF" "$BASE_REF" main)
+        fi
         echo "pro=$pro" >> "$GITHUB_OUTPUT"
         echo "shared=$shared" >> "$GITHUB_OUTPUT"
         echo "pro: $pro, shared: $shared"
 
     - name: Check out pro into ./pro
-      uses: actions/checkout@v4
+      if: ${{ inputs.workspace == 'true' && inputs.pro == 'true' }}
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       with:
         repository: off-grid-ai/desktop-pro
-        token: ${{ inputs.cross-repo-token }}
+        token: ${{ inputs.pro-token || inputs.cross-repo-token }}
         path: pro
         ref: ${{ steps.refs.outputs.pro }}
         fetch-depth: ${{ inputs.fetch-depth }}
@@ -75,6 +143,7 @@ runs:
     # pro MUST be present: without it the guarded typecheck/coverage path is skipped and CI would
     # pass core-only with cratered, misleading coverage.
     - name: Require pro
+      if: ${{ inputs.workspace == 'true' && inputs.pro == 'true' }}
       shell: bash
       run: |
         if [ ! -f pro/tsconfig.json ]; then
@@ -82,17 +151,12 @@ runs:
           exit 1
         fi
 
-    - uses: actions/setup-node@v4
-      with:
-        # Node 22 supports node:sqlite and both native SQLite dependencies. Node 24 aborts while
-        # Vitest unloads the cipher module; Node 26 cannot build better-sqlite3 12.6.
-        node-version: '22'
-
     # Shared packages are file: dependencies on the SIBLING shared monorepo. actions/checkout
     # refuses a path outside the workspace, so it lands inside and is moved up one level - exactly
     # where the file: specifiers point.
     - name: Check out the shared monorepo
-      uses: actions/checkout@v4
+      if: ${{ inputs.workspace == 'true' }}
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       with:
         repository: off-grid-ai/shared
         token: ${{ inputs.cross-repo-token }}
@@ -102,15 +166,26 @@ runs:
 
     # npm's download cache (both installs below) and Electron's (the Electron zip and the headers
     # that native modules compile against). npm keys on both lockfiles, Electron on its version.
+    # Shared is installed and built once per shared commit: its node_modules and every package's
+    # dist/ are cached on that commit, so a job on the same commit restores them instead of
+    # rebuilding (1.5 minutes per job). The paths are absolute: actions/cache saved nothing for
+    # ../ paths outside the workspace.
+    #
     # Restored and saved in separate steps, so a red gate later in the job cannot throw them away.
-    - name: Locate the download caches
+    - name: Locate the caches
+      if: ${{ inputs.workspace == 'true' }}
       id: caches
       shell: bash
       run: |
         echo "npm_config_cache=$RUNNER_TEMP/npm-cache" >> "$GITHUB_ENV"
         echo "electron_config_cache=$RUNNER_TEMP/electron-cache" >> "$GITHUB_ENV"
         echo "electron=$(node -p "require('./package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
+        echo "shared_dir=$(node -p "require('path').resolve('..', 'shared').split(require('path').sep).join('/')")" >> "$GITHUB_OUTPUT"
+        echo "shared_sha=$(git -C _shared rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        # Every shared package core or Pro imports; a package this shared commit lacks is skipped.
+        echo "shared_packages=models rag sync use automation speech ui design writing notes" >> "$GITHUB_OUTPUT"
     - name: Restore npm downloads
+      if: ${{ inputs.workspace == 'true' }}
       id: npm_cache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
@@ -118,6 +193,7 @@ runs:
         key: npm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json', '_shared/package-lock.json') }}
         restore-keys: npm-${{ runner.os }}-${{ runner.arch }}-node22-
     - name: Restore Electron downloads
+      if: ${{ inputs.workspace == 'true' }}
       id: electron_cache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
@@ -128,35 +204,63 @@ runs:
         key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.caches.outputs.electron }}-node22
 
     - name: Put shared beside this checkout
+      if: ${{ inputs.workspace == 'true' }}
       shell: bash
       run: |
         rm -rf ../shared
         mv _shared ../shared
+    - name: Restore the built shared packages
+      if: ${{ inputs.workspace == 'true' }}
+      id: shared_cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ steps.caches.outputs.shared_dir }}/node_modules
+          ${{ steps.caches.outputs.shared_dir }}/packages/*/node_modules
+          ${{ steps.caches.outputs.shared_dir }}/packages/*/dist
+        key: shared-${{ runner.os }}-${{ runner.arch }}-node22-${{ steps.caches.outputs.shared_sha }}-${{ hashFiles('.github/actions/setup-desktop/action.yml') }}
+    - name: Build shared
+      if: ${{ inputs.workspace == 'true' && steps.shared_cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      env:
+        PACKAGES: ${{ steps.caches.outputs.shared_packages }}
+      run: |
         # Install at the WORKSPACE ROOT: shared is an npm-workspaces monorepo, and the lockfile and
         # the build tool (tsup) live at the root. A LOCKED install and no fallback: a drifted lock
         # should stop the build, not resolve a graph nobody committed.
         npm --prefix ../shared ci
-        npm --prefix ../shared/packages/sync run build
-        npm --prefix ../shared/packages/models run build
-        # @offgrid/rag (the document engine) ships a built dist/ like sync and models.
-        npm --prefix ../shared/packages/rag run build
-        npm --prefix ../shared/packages/speech run build
-        npm --prefix ../shared/packages/ui run build
-        # Scribe and Notes (Pro) import @offgrid/writing and @offgrid/notes: built dist/ like ui.
-        npm --prefix ../shared/packages/writing run build
-        npm --prefix ../shared/packages/notes run build
+        for package in $PACKAGES; do
+          if [ -f "../shared/packages/$package/package.json" ]; then
+            npm --prefix "../shared/packages/$package" run build
+          fi
+        done
+    - name: Save the built shared packages
+      if: ${{ inputs.workspace == 'true' && inputs.save-caches == 'true' && steps.shared_cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ steps.caches.outputs.shared_dir }}/node_modules
+          ${{ steps.caches.outputs.shared_dir }}/packages/*/node_modules
+          ${{ steps.caches.outputs.shared_dir }}/packages/*/dist
+        key: ${{ steps.shared_cache.outputs.cache-primary-key }}
 
     - name: Check out the private Desktop speech runtime
-      uses: actions/checkout@v4
+      if: ${{ inputs.workspace == 'true' }}
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       with:
         repository: off-grid-ai/executorch-speech
         token: ${{ inputs.cross-repo-token }}
+        ref: ${{ inputs.speech-ref }}
         path: _executorch_speech
+        fetch-depth: 1
         lfs: false
-        # Kept only until the selective LFS pull below, which removes it before any project code runs.
-        persist-credentials: true
+        # Kept only for the selective LFS pull below, which removes it before any project code runs.
+        persist-credentials: ${{ inputs.speech-binary }}
     - name: Put the speech runtime beside this checkout
+      if: ${{ inputs.workspace == 'true' }}
       shell: bash
+      env:
+        BINARY: ${{ inputs.speech-binary }}
       run: |
         if [ ! -f _executorch_speech/package.json ]; then
           echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
@@ -164,8 +268,10 @@ runs:
         fi
         # Tests exercise the real native boundary, but ordinary CI does not need the 350 MB
         # bundled English asset set used only by the Mac release.
-        git -C _executorch_speech lfs pull --include='native/bin/executorch-speech' --exclude=''
-        git -C _executorch_speech config --unset-all http.https://github.com/.extraheader || true
+        if [ "$BINARY" = true ]; then
+          git -C _executorch_speech lfs pull --include='native/bin/executorch-speech' --exclude=''
+          git -C _executorch_speech config --unset-all http.https://github.com/.extraheader || true
+        fi
         rm -rf ../executorch-speech
         mv _executorch_speech ../executorch-speech
 
@@ -173,6 +279,7 @@ runs:
     # optional, so npm would skip it silently without access and the build would fail later; this
     # step makes that failure immediate.
     - name: Let npm read the private UI package (core and Pro)
+      if: ${{ inputs.workspace == 'true' }}
       shell: bash
       env:
         UI_TOKEN_PRIMARY: ${{ inputs.ui-token }}
@@ -203,18 +310,31 @@ runs:
           exit 1
         fi
 
+    # node-gyp (better-sqlite3-multiple-ciphers) fails on Python 3.13+.
+    - if: ${{ inputs.python-version != '' }}
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    # stage-native.mjs builds Pro's Scribe overlay (scribe-overlay-win.exe) with dotnet publish.
+    - if: ${{ runner.os == 'Windows' && inputs.pro == 'true' }}
+      uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+      with:
+        dotnet-version: '8.0.x'
+
     - name: Install dependencies
+      if: ${{ inputs.workspace == 'true' }}
       shell: bash
       run: npm ci
 
     - name: Save npm downloads
-      if: ${{ steps.npm_cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.workspace == 'true' && inputs.save-caches == 'true' && steps.npm_cache.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/npm-cache
         key: ${{ steps.npm_cache.outputs.cache-primary-key }}
     - name: Save Electron downloads
-      if: ${{ steps.electron_cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.workspace == 'true' && inputs.save-caches == 'true' && steps.electron_cache.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |

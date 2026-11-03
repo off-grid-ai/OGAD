@@ -1,0 +1,48 @@
+name: macOS image engine
+description: >
+  stable-diffusion.cpp for macOS 13 in resources/bin/sd: restored from the cache, or built when its
+  pin, build scripts or patches changed. The one definition of its cache key, shared by the release
+  and by main's CI, which saves it.
+
+inputs:
+  save:
+    description: Save a fresh build. Release passes 'false' and only restores.
+    required: false
+    default: 'false'
+  lookup-only:
+    description: Only check the cache, and build when it misses. Main's CI warms the cache this way without downloading it.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    # The image engine is built from source for macOS 13, which took about 9 minutes on every
+    # release. It is cached on its pin and on the scripts and patches that build it, so it is
+    # rebuilt only when one of those changes. The pinned archive carries an sd/ of its own; it is
+    # removed first so the folder holds exactly what this build made, as a fresh build does.
+    - name: Read the image engine pin
+      id: sd_pin
+      shell: bash
+      run: |
+        echo "commit=$(node -p "require('./resources/engine-pins.json').sd.commit")" >> "$GITHUB_OUTPUT"
+        rm -rf resources/bin/sd
+    - name: Restore the macOS image engine
+      id: sd_cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: resources/bin/sd
+        key: sd-macos-13.0-${{ steps.sd_pin.outputs.commit }}-${{ hashFiles('scripts/build-sd-macos.sh', 'scripts/prepare-image-runtime.mjs', 'scripts/check-macos-minos.mjs', 'scripts/patches/**') }}
+        lookup-only: ${{ inputs.lookup-only }}
+    - name: Build macOS image engine for macOS 13
+      if: ${{ steps.sd_cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      env:
+        MACOS_DEPLOYMENT_TARGET: '13.0'
+      run: bash scripts/build-sd-macos.sh
+    - name: Save the macOS image engine
+      if: ${{ inputs.save == 'true' && steps.sd_cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: resources/bin/sd
+        key: ${{ steps.sd_cache.outputs.cache-primary-key }}

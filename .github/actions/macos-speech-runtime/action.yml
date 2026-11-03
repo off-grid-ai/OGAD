@@ -1,0 +1,91 @@
+name: macOS speech runtime
+description: >
+  The ExecuTorch speech runtime built for macOS 13 in ../executorch-speech: restored from the cache,
+  or checked out with its voices and built when its commit or build script changed. The one
+  definition of its cache key, shared by the release and by main's CI, which saves it.
+
+inputs:
+  token:
+    description: CI_CROSS_REPO_TOKEN, which reads executorch-speech.
+    required: true
+  speech-ref:
+    description: The executorch-speech commit.
+    required: true
+  save:
+    description: Save a fresh build. Release passes 'false' and only restores.
+    required: false
+    default: 'false'
+  lookup-only:
+    description: Only check the cache, and build when it misses. Main's CI warms the cache this way without downloading it.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    # The speech runtime is checked out with its submodules and LFS voices and built from source,
+    # about 6 minutes on every release. The app takes only the package's shipped files from it
+    # (package.json, dist/, generated/ with the default voices, native/bin/), so those are cached
+    # on the speech commit and the build script, and the checkout and build run only when one of
+    # them changes. Cached as one archive in the runner's temp folder: actions/cache saved nothing
+    # for the same files listed by their ../executorch-speech paths, outside the workspace.
+    - name: Restore the macOS speech runtime
+      id: speech_cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/speech-runtime.tar
+        key: speech-macos-13.0-${{ inputs.speech-ref }}-${{ hashFiles('scripts/build-speech-macos.sh') }}
+        lookup-only: ${{ inputs.lookup-only }}
+    - name: Unpack the cached speech runtime
+      if: ${{ inputs.lookup-only != 'true' && steps.speech_cache.outputs.cache-hit == 'true' }}
+      shell: bash
+      run: |
+        rm -rf ../executorch-speech
+        mkdir ../executorch-speech
+        tar -xf "$RUNNER_TEMP/speech-runtime.tar" -C ../executorch-speech
+    - name: Check out the private Desktop speech runtime
+      if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      with:
+        repository: off-grid-ai/executorch-speech
+        token: ${{ inputs.token }}
+        ref: ${{ inputs.speech-ref }}
+        path: _executorch_speech
+        fetch-depth: 1 # one commit, and depth 1 for every submodule
+        lfs: true # Mac releases bundle the default English voices for offline first use.
+        submodules: recursive
+        persist-credentials: false
+    # The build runs ExecuTorch's code generators with the Kev runtime's Python (torchgen, YAML,
+    # Jinja). Nothing in the checkout carries that runtime any more, so the pinned pack is fetched
+    # and hash-checked here, outside the workspace.
+    - name: Fetch the pinned Kev runtime for the speech build
+      if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: |
+        url=$(node -p "require('./resources/kev-runtime-packs.json')['darwin-arm64'].url")
+        sha=$(node -p "require('./resources/kev-runtime-packs.json')['darwin-arm64'].sha256")
+        curl -fL --retry 3 -o "$RUNNER_TEMP/kev-runtime.tar.gz" "$url"
+        echo "$sha  $RUNNER_TEMP/kev-runtime.tar.gz" | shasum -a 256 -c -
+        mkdir -p "$RUNNER_TEMP/kev"
+        tar -xzf "$RUNNER_TEMP/kev-runtime.tar.gz" -C "$RUNNER_TEMP/kev"
+        echo "OFFGRID_SPEECH_PYTHON=$RUNNER_TEMP/kev/kev-runtime/python/bin/python3" >> "$GITHUB_ENV"
+    - name: Build macOS speech runtime for macOS 13
+      if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      env:
+        MACOS_DEPLOYMENT_TARGET: '13.0'
+      run: |
+        if [ ! -f _executorch_speech/package.json ]; then
+          echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
+          exit 1
+        fi
+        rm -rf ../executorch-speech
+        mv _executorch_speech ../executorch-speech
+        bash scripts/build-speech-macos.sh
+        tar -cf "$RUNNER_TEMP/speech-runtime.tar" -C ../executorch-speech package.json dist generated native/bin
+    - name: Save the macOS speech runtime
+      if: ${{ inputs.save == 'true' && steps.speech_cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/speech-runtime.tar
+        key: ${{ steps.speech_cache.outputs.cache-primary-key }}
