@@ -55,6 +55,20 @@ runs:
         lfs: true # Mac releases bundle the default English voices for offline first use.
         submodules: recursive
         persist-credentials: false
+    # The build runs ExecuTorch's code generators with the Kev runtime's Python (torchgen, YAML,
+    # Jinja). Nothing in the checkout carries that runtime any more, so the pinned pack is fetched
+    # and hash-checked here, outside the workspace.
+    - name: Fetch the pinned Kev runtime for the speech build
+      if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: |
+        url=$(node -p "require('./resources/kev-runtime-packs.json')['darwin-arm64'].url")
+        sha=$(node -p "require('./resources/kev-runtime-packs.json')['darwin-arm64'].sha256")
+        curl -fL --retry 3 -o "$RUNNER_TEMP/kev-runtime.tar.gz" "$url"
+        echo "$sha  $RUNNER_TEMP/kev-runtime.tar.gz" | shasum -a 256 -c -
+        mkdir -p "$RUNNER_TEMP/kev"
+        tar -xzf "$RUNNER_TEMP/kev-runtime.tar.gz" -C "$RUNNER_TEMP/kev"
+        echo "OFFGRID_SPEECH_PYTHON=$RUNNER_TEMP/kev/kev-runtime/python/bin/python3" >> "$GITHUB_ENV"
     - name: Build macOS speech runtime for macOS 13
       if: ${{ steps.speech_cache.outputs.cache-hit != 'true' }}
       shell: bash
