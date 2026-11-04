@@ -1328,7 +1328,7 @@ async function openLatestCompletedWork(user: ReturnType<typeof userEvent.setup>)
 // turn. With tools on, "draw ..." was hijacked by the renderer's direct generate,
 // so the generate_image TOOL never ran. The terminal artifacts: which IPC the turn
 // actually crosses on (toolChat = agent path, generateImage = direct route).
-describe('<MemoryChat/> chat mode — a typed ask for a picture or a clip skips the text model', () => {
+describe('<MemoryChat/> chat mode — a typed ask for a picture or a clip goes straight to it', () => {
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
@@ -1362,7 +1362,7 @@ describe('<MemoryChat/> chat mode — a typed ask for a picture or a clip skips 
     expect(assistant.getAttribute('aria-pressed')).toBe('false')
   })
 
-  it('with tools OFF, an ask for a picture renders it at once and the text model never runs', async () => {
+  it('with tools OFF, an ask for a picture renders it at once, with Enhance as the person set it', async () => {
     const user = userEvent.setup()
     const { generateImage, toolChat } = installApi({ active: FULL, models: [FULL] })
     renderChat()
@@ -1372,8 +1372,8 @@ describe('<MemoryChat/> chat mode — a typed ask for a picture or a clip skips 
     await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
     expect(generateImage.mock.calls[0]![0]).toMatchObject({
       prompt: 'a red fox in snow',
-      // Enhancement would load the text model.
-      enhancePrompt: false
+      // Routing skips the chat model; Enhance stays the person's own setting (on by default).
+      enhancePrompt: true
     })
     expect(toolChat).not.toHaveBeenCalled()
   })
@@ -1390,7 +1390,7 @@ describe('<MemoryChat/> chat mode — a typed ask for a picture or a clip skips 
     expect(generateImage).not.toHaveBeenCalled()
   })
 
-  it('an ask for a video starts a clip and the text model never runs', async () => {
+  it('an ask for a video starts a clip without a chat turn, and keeps the video Enhance setting', async () => {
     const user = userEvent.setup()
     const { generateImage, toolChat } = installApi({ active: FULL, models: [FULL], isPro: true })
     // Pro's video controller is the boundary core calls; it owns the engine.
@@ -1429,9 +1429,10 @@ describe('<MemoryChat/> chat mode — a typed ask for a picture or a clip skips 
     await waitFor(() => expect(generate).toHaveBeenCalledTimes(1))
     expect(generate.mock.calls[0]![0]).toMatchObject({
       prompt: 'Create a video of a lighthouse at night',
-      storeReply: true,
-      enhancePrompt: false
+      storeReply: true
     })
+    // No override: the engine applies the person's "Enhance video prompts" setting.
+    expect(generate.mock.calls[0]![0]).not.toHaveProperty('enhancePrompt')
     expect(toolChat).not.toHaveBeenCalled()
     expect(generateImage).not.toHaveBeenCalled()
   })
