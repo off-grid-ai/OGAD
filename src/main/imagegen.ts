@@ -777,7 +777,8 @@ async function maybeEnhancePrompt(
   requestOverride?: boolean,
   referenceImages: string[] = []
 ): Promise<string> {
-  const enabled = requestOverride ?? getSetting('enhanceImagePrompts', true)
+  // On when the person turned it on; skipped, not stuck, when there is no text model to run it.
+  const enabled = (requestOverride ?? getSetting('enhanceImagePrompts', true)) && llm.hasTextModel()
   if (enabled) onUpdate?.({ stage: 'enhancing', enhancedPrompt: '' })
   let streamed = ''
   return enhancePrompt(prompt, {

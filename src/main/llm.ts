@@ -2148,6 +2148,12 @@ export class LLMService {
   }
 
   /** Whether text requests go to a remote model server rather than this machine's engine. */
+  /** A text model to run: a remote one, or a local model on disk. Background steps that only
+   *  improve a result (prompt enhancement) skip when there is none instead of waiting on a load. */
+  hasTextModel(): boolean {
+    return this.usesRemoteTextModel() || this.modelsExist()
+  }
+
   usesRemoteTextModel(): boolean {
     const remote = this.activeRemoteTextModel()
     // The local grounder comes through the same seam but runs on this Mac: its jobs need admission.
