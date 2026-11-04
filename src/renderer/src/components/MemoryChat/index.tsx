@@ -43,7 +43,7 @@ import {
   type ProjectedSyncedTool
 } from '@offgrid/sync'
 import type { VoiceTurnMode } from '@offgrid/speech'
-import { modelDisplayName } from '@offgrid/models'
+import { isImageRequest, isVideoRequest, modelDisplayName } from '@offgrid/models'
 import { getSlot, SLOTS } from '@/bootstrap/slotRegistry'
 import { callHook } from '@/bootstrap/hookRegistry'
 import { useRendererEntitlement } from '@/bootstrap/useRendererEntitlement'
@@ -2217,7 +2217,19 @@ export function MemoryChat({
         }
       }
 
-      if (mode === 'video') {
+      // A typed ask for a clip or a picture goes straight to that model, video first, so the text
+      // model never loads for it (the shared rule mobile uses). A question about video or images, an
+      // Assistant turn, an attachment, or no model for it here keeps the turn in chat.
+      const intentMode: ChatMode | null =
+        turnMode !== 'ask' || regen || assistantForTurn || opts?.imageRequest || atts.length > 0
+          ? null
+          : videoAvailable && isVideoRequest(typed)
+            ? 'video'
+            : imageAvailable && isImageRequest(typed)
+              ? 'image'
+              : null
+
+      if (mode === 'video' || intentMode === 'video') {
         setVideoGenConv(convId)
         try {
           // An attached photo is the start image (or, if Pro asks, a person to keep).
@@ -2228,7 +2240,9 @@ export function MemoryChat({
             prompt: trimmed,
             conversationId: convId,
             projectId,
-            ...(startImage?.path ? { initImage: startImage.path } : {})
+            ...(startImage?.path ? { initImage: startImage.path } : {}),
+            // Prompt enhancement runs on the text model, which a typed ask never loads.
+            ...(intentMode === 'video' ? { enhancePrompt: false } : {})
           }
           const controller = requireChatVideo()
           const film = await controller.startFilm?.(request)
@@ -2289,12 +2303,11 @@ export function MemoryChat({
         return
       }
 
-      // Image-generation mode: render a prompt → image instead of a memory answer. Otherwise the
-      // renderer does not decide: every turn goes to the model through toolChat, where MiniLM
-      // offers generate_image when the request is for a picture. A word rule here sent "Create a
-      // 3D starfield in a single HTML file… Render hundreds of stars" to the image model first.
+      // Image-generation mode, or a typed ask for a picture: render a prompt → image instead of a
+      // memory answer. Every other turn goes to the model through toolChat, where MiniLM offers
+      // generate_image when the request is for a picture.
       if (cancelledRef.current.has(convId)) return
-      if (opts?.imageRequest || turnMode === 'image') {
+      if (opts?.imageRequest || turnMode === 'image' || intentMode === 'image') {
         if (regen && opts?.history) setConvMessages(convId, opts.history)
         setShowImageOptions(false)
         setImgProgress(null)
@@ -2314,7 +2327,8 @@ export function MemoryChat({
           cfgScale: imgCfgScale,
           seed: Number.isNaN(seedNum) ? -1 : seedNum,
           model: imgModel || undefined,
-          enhancePrompt: enhanceImg,
+          // Prompt enhancement runs on the text model, which a typed ask never loads.
+          enhancePrompt: intentMode === 'image' ? false : enhanceImg,
           // The kept copy, so the record of what this was made from cannot outlive the file it names.
           initImage: keptInit?.path ?? imgInit ?? undefined,
           strength: imgInit ? imgStrength : undefined
