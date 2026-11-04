@@ -1370,7 +1370,11 @@ describe('<MemoryChat/> chat mode — a typed ask for a picture or a clip skips 
     await sendChat(user, 'draw a red fox in snow')
 
     await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
-    expect(generateImage.mock.calls[0]![0].prompt).toBe('a red fox in snow')
+    expect(generateImage.mock.calls[0]![0]).toMatchObject({
+      prompt: 'a red fox in snow',
+      // Enhancement would load the text model.
+      enhancePrompt: false
+    })
     expect(toolChat).not.toHaveBeenCalled()
   })
 
@@ -1425,7 +1429,8 @@ describe('<MemoryChat/> chat mode — a typed ask for a picture or a clip skips 
     await waitFor(() => expect(generate).toHaveBeenCalledTimes(1))
     expect(generate.mock.calls[0]![0]).toMatchObject({
       prompt: 'Create a video of a lighthouse at night',
-      storeReply: true
+      storeReply: true,
+      enhancePrompt: false
     })
     expect(toolChat).not.toHaveBeenCalled()
     expect(generateImage).not.toHaveBeenCalled()

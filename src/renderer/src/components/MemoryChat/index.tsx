@@ -2240,7 +2240,9 @@ export function MemoryChat({
             prompt: trimmed,
             conversationId: convId,
             projectId,
-            ...(startImage?.path ? { initImage: startImage.path } : {})
+            ...(startImage?.path ? { initImage: startImage.path } : {}),
+            // Prompt enhancement runs on the text model, which a typed ask never loads.
+            ...(intentMode === 'video' ? { enhancePrompt: false } : {})
           }
           const controller = requireChatVideo()
           const film = await controller.startFilm?.(request)
@@ -2325,7 +2327,8 @@ export function MemoryChat({
           cfgScale: imgCfgScale,
           seed: Number.isNaN(seedNum) ? -1 : seedNum,
           model: imgModel || undefined,
-          enhancePrompt: enhanceImg,
+          // Prompt enhancement runs on the text model, which a typed ask never loads.
+          enhancePrompt: intentMode === 'image' ? false : enhanceImg,
           // The kept copy, so the record of what this was made from cannot outlive the file it names.
           initImage: keptInit?.path ?? imgInit ?? undefined,
           strength: imgInit ? imgStrength : undefined
