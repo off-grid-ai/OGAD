@@ -263,7 +263,7 @@ iOS stays intents-only for driving other apps (App Intents / Shortcuts) - Apple 
 
 ## 11. Build guidelines (binding, all surfaces)
 
-- **Design** - `off-grid-ai/brand` `DESIGN_PHILOSOPHY.md`: brutalist/terminal, Menlo, emerald as the only accent, black/white base, hierarchy by size and weight not color, no gradients, no emojis. All values from `@offgrid/design` tokens (`off-grid-ai/shared`) - no hardcoded hex. Desktop density per this repo's `docs/DESIGN.md`.
+- **Design** - [`brand/DESIGN_PHILOSOPHY.md`](../../brand/DESIGN_PHILOSOPHY.md) is binding. All values from `@offgrid/design` tokens (`off-grid-ai/shared`) - no hardcoded hex. Desktop mechanics per this repo's `docs/DESIGN.md`.
 - **Copy** - `off-grid-ai/brand` `brand_tone_voice.md` + the outcomes-first rule: lead with what the user gets, mechanism as proof; no em dashes, no curly quotes, no exclamation marks, banned-word list applies. Applies to every approval card, suggestion, and notification.
 
 ## 12. Open-core placement

@@ -1,7 +1,8 @@
 # Off Grid AI Desktop — Conversational UX Spec
 
-> **This is one application of the app-wide design philosophy in
-> `docs/DESIGN_PHILOSOPHY.md` (read that first — it is binding for the whole app).**
+> **This is one application of the design philosophy in
+> [`brand/DESIGN_PHILOSOPHY.md`](../../brand/DESIGN_PHILOSOPHY.md) (read that first — it is binding
+> for the whole app).**
 > This doc applies that philosophy to the chat/conversational surface specifically.
 
 The north star for the chat surface. Decided 2026-06-23. Pairs with `docs/DESIGN.md` (brand).

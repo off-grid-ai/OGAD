@@ -17,7 +17,7 @@ Companion to `COMPUTER_USE.md` (the product model), `ASSISTANT_ARCHITECTURE.md` 
 
 ## Build guidelines (standing, all releases)
 
-- **Design** - `off-grid-ai/brand` `DESIGN_PHILOSOPHY.md`: brutalist/terminal, Menlo, emerald-only accent, black/white base, hierarchy by size and weight not color, no gradients, no emojis. All values from `@offgrid/design` tokens. Desktop density per `docs/DESIGN.md`.
+- **Design** - [`brand/DESIGN_PHILOSOPHY.md`](../../brand/DESIGN_PHILOSOPHY.md) is binding. All values from `@offgrid/design` tokens (`off-grid-ai/shared`) - no hardcoded hex. Desktop mechanics per this repo's `docs/DESIGN.md`.
 - **Copy** - `off-grid-ai/brand` `brand_tone_voice.md` + outcomes-first: no em dashes, no curly quotes, no exclamation marks, banned-word list applies.
 - **Cross-platform from the seam.** Callers depend on the `DeviceController` port and the shared engine, never on a concrete OS.
 - **Port before writing.** Check `PORTING_MAP.md` / `COMPUTER_USE.md` Section 9 first; verify the license at the point of adoption; honor the AGPL / source-available avoid-list.
