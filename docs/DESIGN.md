@@ -1,27 +1,10 @@
 # Off Grid AI Desktop — Design
 
-> Replaces OGAD `docs/DESIGN.md`. New direction: premium, alive and luminous, replacing flat
-> terminal brutalism.
-
-Read [DESIGN_PHILOSOPHY.md](DESIGN_PHILOSOPHY.md) before any Desktop UI change. It is
-synchronized from the canonical `brand/DESIGN_PHILOSOPHY.md`. Shared principles come from there;
-this document gives Desktop layout, implementation and interaction details.
-
----
-
-## Soul
-
-**Calm, luminous, alive. Lean, never bulky.** Every surface responds to the person using it, and
-the parts respond together. Depth comes from layers of light, not from heavy boxes.
-
-- **Type:** Geist for reading text, controls and titles; Geist Mono for small uppercase labels,
-  numbers, timestamps, keys and code. Weights 300–500.
-- **Single accent: emerald** — `#34D399` (dark) / `#059669` (light). It is the light source:
-  primary actions glow, focus and active states glow, everything else is monochrome.
-- **Base:** near-black `#0A0A0A` (dark) / white (light), with a living background behind
-  translucent surfaces.
-- **Hierarchy through size, weight, tone and space**, never colour.
-- **Lean:** 32px controls, hairline borders, 9–12px radius (pills fully round), soft wide shadows.
+Read [`brand/DESIGN_PHILOSOPHY.md`](../../brand/DESIGN_PHILOSOPHY.md) before any Desktop UI change.
+It is the one design philosophy for every Off Grid AI surface: the disposition, type, accent,
+depth, tokens, hierarchy, motion and the Desktop profile. When this document and brand disagree,
+brand wins. This document gives only how Desktop builds that: implementation, layout and
+interaction mechanics.
 
 ---
 
@@ -53,6 +36,9 @@ wired once in the renderer (see the library's `docs/HOST_INTEGRATION.md`):
 3. **Motion** — `@offgrid/operator-ui/alive.css` plus `AliveProvider` (and `LivingField` for the
    background) give every primitive and surface its reactions.
 
+Tokens come from `@offgrid/design` (`../shared/packages/design`), the one source Desktop and
+Mobile share.
+
 ```
 Base        bg-neutral-950            translucent base over the living background
 Surface     bg-neutral-900/40–60      glass layer, hairline edge, faint top highlight
@@ -60,8 +46,9 @@ Surface+    bg-neutral-800            active pills, badges, inputs (a slightly b
 Borders     border-neutral-800        hairline · hover border-neutral-700 · focus border-green-500 (glows)
 Accent      text-green-500 / bg-green-500   emerald; bg fills glow
 Text tiers  text-white → text-neutral-300 → text-neutral-500 → text-neutral-600
-Radius      rounded-md (9px) · rounded-lg / rounded-2xl for cards · rounded-full pills
+Radius      rounded-md · rounded-lg / rounded-2xl for cards · rounded-full pills
 Font        body is Geist; `uppercase`, `tabular-nums`, code, kbd, pre and time are Geist Mono
+Controls    32px default height, hairline borders
 ```
 
 Never hard-code hex or shadows in components; the skin and tokens own them.
@@ -124,45 +111,34 @@ Use these rules across the product, including panels and settings:
 
 ---
 
-## Interaction and motion
+## Interaction mechanics
 
-**Nothing pops. Every state change animates, and the parts move together.**
+Motion rules and timings are brand's (Motion, and the Desktop profile). How Desktop wires them:
 
 - **Pointer:** surfaces near the pointer catch its light; a press sends a soft wave through
   nearby surfaces. This is automatic once `AliveProvider` is mounted.
-- **Hover:** lift slightly, brighten borders and text, reveal secondary actions
-  (`opacity-0 group-hover:opacity-100`).
-- **Press:** give way (scale ~0.96) and spring back.
+- **Hover:** reveal secondary actions with `opacity-0 group-hover:opacity-100`.
 - **Focus:** the field's edge glows emerald; keyboard focus shows a soft ring.
 - **Loading:** mark busy regions `aria-busy` or use the Button `loading` prop; the page's busy
   signal quickens the primary glow. Skeletons share one sweep. Keep old content visible while
   refreshing.
 - **Results:** status lines use `role="status"`; when one changes it settles with a soft flash.
-- **Panels and dialogs:** rise from 0.94 with blur; the page recedes; exits animate. Never animate
-  `translate` on centred overlays (Tailwind centres them with it).
-- **Timings:** micro 90–180ms, hover and spring 300–460ms, reveal 420–760ms; use
-  `--og-ease-out` and `--og-ease-spring`.
-- **Reduced motion:** always honoured, by the library layers and by `main.css`.
+- **Easing:** use `--og-ease-out` and `--og-ease-spring`.
+- **Reduced motion:** honoured by the library layers and by `main.css`.
 
 ---
 
-## Anti-patterns
+## Desktop anti-patterns
 
-❌ Flat dead surfaces · things that pop or snap · thick borders and boxes inside boxes · hard dark
-shadows · a second accent or rainbow gradients · colour-coded status · decorative motion ·
-emojis in the UI.
-❌ **Desktop-specific:** a phone-width column on a wide screen · ignoring hover · cramming detail
-inline instead of using panels.
+A phone-width column on a wide screen · ignoring hover · cramming detail inline instead of using
+panels. Brand lists the anti-patterns for every surface.
 
 ---
 
 ## Checklist
 
-- [ ] Geist for text, Geist Mono for labels, numbers and code.
-- [ ] Emerald is the only accent and the light source.
+- [ ] Read brand's design philosophy for the change you are making.
 - [ ] Uses the full width where it helps.
-- [ ] Hierarchy from size, weight and space.
-- [ ] Every interactive state animates; overlays exit smoothly; reduced motion respected.
 - [ ] Results in `role="status"`, loading in `aria-busy`.
 - [ ] Primitives from `ui/*`; no hard-coded colours or shadows.
 - [ ] Clear actions are icon buttons with an `aria-label` and tooltip, not text labels.
