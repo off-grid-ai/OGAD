@@ -1,6 +1,6 @@
 # What's new: Off Grid AI Desktop stops working so hard to look alive
 
-Every screen looks the way it did, but your Mac does far less work to draw it.
+Every screen looks the way it did, but your computer does far less work to draw it.
 
 ## Settings
 
@@ -9,7 +9,7 @@ Every screen looks the way it did, but your Mac does far less work to draw it.
 
 ## The look, everywhere
 
-**Moving your pointer no longer keeps your Mac busy.**
+**Moving your pointer no longer keeps your computer busy.**
 - On Models, a moving pointer used to cost about 950 ms of work every second. Now it's about 200.
 - At rest, the glowing grid behind every page uses 3 to 5 ms of work a second. It used 7 to 12.
 
