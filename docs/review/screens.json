@@ -8,7 +8,7 @@
   },
   {
     "id": "onboarding-local",
-    "name": "Choose what runs on your Mac",
+    "name": "Choose what runs locally",
     "group": "First run",
     "what": "Local models for chat, images, video, voice and Computer Use",
     "file": "screens/onboarding-local.jpg"
@@ -142,7 +142,7 @@
     "id": "tasks",
     "name": "Tasks",
     "group": "Work",
-    "what": "Things Off Grid AI does on your Mac",
+    "what": "Things Off Grid AI does on your computer",
     "file": "screens/tasks.jpg"
   },
   {
@@ -163,7 +163,7 @@
     "id": "vault",
     "name": "Vault",
     "group": "Private data",
-    "what": "Passwords, cards and notes, encrypted on this Mac",
+    "what": "Passwords, cards and notes, encrypted on this computer",
     "file": "screens/vault.jpg"
   },
   {
@@ -184,7 +184,7 @@
     "id": "models",
     "name": "Models",
     "group": "Models",
-    "what": "Every model for this Mac",
+    "what": "Every model for this computer",
     "file": "screens/models.jpg",
     "before": "screens/before/models.jpg"
   },
@@ -223,7 +223,7 @@
     "id": "gateway",
     "name": "Gateway",
     "group": "System",
-    "what": "Your Mac as a model server for other apps",
+    "what": "Your computer as a model server for other apps",
     "file": "screens/gateway.jpg"
   },
   {
@@ -267,7 +267,7 @@
     "id": "settings-health",
     "name": "Setup & health",
     "group": "Settings",
-    "what": "Pick models for this Mac and check what's running",
+    "what": "Pick models for this computer and check what's running",
     "file": "screens/settings-health.jpg",
     "before": "screens/before/settings-health.jpg"
   },
