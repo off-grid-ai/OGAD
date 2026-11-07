@@ -61,8 +61,28 @@ button, textarea { font: inherit; color: inherit; }
 .pane .cap { color: var(--muted); font: 11px/1.4 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
 .shots.split .pane { flex: 1 1 0; }
 .shots.split .shot img { max-height: calc(100vh - 150px); }
+.pin.later { opacity: 0; pointer-events: none; }
 .shot { position: relative; max-width: 100%; max-height: 100%; cursor: crosshair; line-height: 0; }
-.shot img { max-width: 100%; max-height: calc(100vh - 120px); border-radius: 6px; display: block; user-select: none; -webkit-user-drag: none; }
+.shot img, .shot video { max-width: 100%; max-height: calc(100vh - 150px); border-radius: 6px; display: block; user-select: none; -webkit-user-drag: none; }
+.shots.split .shot video { max-height: calc(100vh - 180px); }
+.play { display: flex; align-items: center; gap: 10px; font: 11px/1.4 var(--mono); color: var(--muted); }
+/* Clip controls: play, time, a seek bar with a frame preview on hover, and speed. */
+.play { flex-wrap: wrap; margin-top: 8px; width: 100%; min-width: 380px; box-sizing: border-box; }
+/* Room under a clip for its controls. */
+.shot video { max-height: calc(100vh - 240px); }
+.shots.split .shot video { max-height: calc(100vh - 270px); }
+.seek { position: relative; flex: 1; min-width: 160px; display: flex; align-items: center; }
+.seek input[type=range] { width: 100%; accent-color: var(--gold); cursor: pointer; }
+.seek .ticks { position: absolute; left: 0; right: 0; top: -6px; height: 4px; pointer-events: none; }
+.seek .ticks i { position: absolute; width: 3px; height: 4px; margin-left: -1px; background: var(--gold); border-radius: 1px; }
+.seek .peek { position: absolute; bottom: 26px; transform: translateX(-50%); display: none; pointer-events: none;
+  background: var(--panel, #111); border: 1px solid var(--line); border-radius: 6px; padding: 3px; z-index: 5; }
+.seek .peek canvas { display: block; width: 120px; border-radius: 4px; }
+.seek .peek span { display: block; text-align: center; font: 10px/1.4 var(--mono); color: var(--fg); }
+.play select { background: var(--glass); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; color: var(--fg); font: 11px var(--mono); }
+.play button { background: var(--glass); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; color: var(--fg); }
+.play button:hover { border-color: var(--gold); }
+.screens .clipmark { font: 10px/1 var(--mono); color: var(--gold); }
 .hint { color: var(--muted); font-size: 12px; padding: 0 18px 12px; }
 .empty { color: var(--muted); padding: 40px; text-align: center; line-height: 1.5; }
 /* pins: a numbered gold drop, tip on the clicked point */
@@ -133,7 +153,7 @@ button, textarea { font: inherit; color: inherit; }
       </div>
     </div>
     <div class="canvas"><div class="shots" id="shot"></div></div>
-    <div class="hint">Click anywhere on the screen to pin a note there. Arrow keys change screens · ⌘ Enter pins the note · Esc clears.</div>
+    <div class="hint">Click anywhere on the screen to pin a note there; on a clip, the click pauses it and the note keeps that moment. Arrow keys change screens · ⌘ Enter pins the note · Esc clears.</div>
   </main>
 
   <aside class="notes">
@@ -172,6 +192,12 @@ function shownView(s) { return s?.before ? view : "after"; }
 // The shots on the stage: one, or Before and After side by side.
 function panes(s) { const v = shownView(s); return v === "both" ? ["before", "after"] : [v]; }
 function fileFor(s, v) { return v === "before" ? s.before : s.file; }
+// A screen can carry a short clip for anything that moves (a bar draining, a
+// number counting, a card arriving): it plays on a loop, and a note on it keeps
+// the moment it points at.
+function clipFor(s, v) { return v === "before" ? s.beforeClip : s.clip; }
+const players = {};    // view -> its <video>, while a clip is on the stage
+function fmt(t) { return (Math.round(t * 10) / 10).toFixed(1) + "s"; }
 function inView(id, v) {
   return notes.filter((n) => n.screen === id && noteView(n) === v).sort((a, b) => a.created - b.created);
 }
@@ -201,6 +227,7 @@ function renderList() {
     const nm = document.createElement("span"); nm.className = "name"; nm.textContent = s.name;
     const gp = document.createElement("span"); gp.className = "group"; gp.textContent = s.group || "";
     label.append(nm, gp);
+    if (s.clip) { const m = document.createElement("span"); m.className = "clipmark"; m.textContent = " ▶ clip"; gp.append(m); }
     const c = document.createElement("span"); c.className = "count";
     const open = allOnScreen(s.id).filter((n) => !n.done).length;
     c.textContent = open ? String(open) : "";
@@ -223,25 +250,93 @@ function renderStage() {
   $("views").hidden = !s.before;
   for (const v of ["before", "after", "both"]) $("view-" + v).setAttribute("aria-pressed", String(shownView(s) === v));
   const list = panes(s);
+  for (const k of Object.keys(players)) delete players[k];
   stage.classList.toggle("split", list.length > 1);
   for (const v of list) {
     const pane = document.createElement("div"); pane.className = "pane";
     if (list.length > 1) { const c = document.createElement("div"); c.className = "cap"; c.textContent = v === "before" ? "Before" : "After"; pane.append(c); }
     const shot = document.createElement("div"); shot.className = "shot"; shot.dataset.view = v;
-    const img = document.createElement("img");
-    img.src = fileFor(s, v); img.alt = `${s.name} (${v})`; img.draggable = false;
-    shot.append(img);
-    img.addEventListener("click", (e) => {
-      const r = img.getBoundingClientRect();
+    const clip = clipFor(s, v);
+    let media;
+    if (clip) {
+      media = document.createElement("video");
+      media.src = clip; media.poster = fileFor(s, v) || ""; media.muted = true; media.loop = true;
+      media.autoplay = true; media.playsInline = true; media.setAttribute("aria-label", `${s.name} (${v}), clip`);
+      players[v] = media;
+      media.addEventListener("timeupdate", renderPins);
+    } else {
+      media = document.createElement("img");
+      media.src = fileFor(s, v); media.alt = `${s.name} (${v})`; media.draggable = false;
+      delete players[v];
+    }
+    shot.append(media);
+    // Click to pin: on a clip, it pauses there, and the note keeps that moment.
+    media.addEventListener("click", (e) => {
+      const r = media.getBoundingClientRect();
       draft = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, on: v };
+      if (clip) { media.pause(); draft.t = +media.currentTime.toFixed(2); }
       lit = null;
-      renderPins(); renderCompose();
+      renderPins(); renderCompose(); playLabel();
       $("text").focus();
     });
     pane.append(shot);
+    if (clip) {
+      const bar = document.createElement("div"); bar.className = "play";
+      const b = document.createElement("button"); b.type = "button"; b.dataset.view = v;
+      b.onclick = () => { media.paused ? media.play() : media.pause(); draft = null; renderPins(); renderCompose(); };
+      const time = document.createElement("span"); time.className = "time";
+      media.addEventListener("play", playLabel); media.addEventListener("pause", playLabel);
+      const showTime = () => { time.textContent = `${fmt(media.currentTime)} / ${fmt(media.duration || 0)}`; };
+      media.addEventListener("timeupdate", showTime); media.addEventListener("loadedmetadata", showTime);
+      // Seek bar: drag to any moment (it pauses there); notes on this clip show as ticks above it.
+      const seekWrap = document.createElement("div"); seekWrap.className = "seek";
+      const range = document.createElement("input"); range.type = "range"; range.min = 0; range.step = 0.01; range.value = 0;
+      range.setAttribute("aria-label", "Seek");
+      const ticks = document.createElement("div"); ticks.className = "ticks";
+      const drawTicks = () => {
+        ticks.textContent = "";
+        const d = media.duration || 0; if (!d) return;
+        onScreen(s.id).filter((n) => n.t != null && (n.on || (s.before ? "before" : "after")) === v).forEach((n) => {
+          const i = document.createElement("i"); i.style.left = (n.t / d * 100) + "%"; ticks.append(i);
+        });
+      };
+      media.addEventListener("loadedmetadata", () => { range.max = media.duration || 0; drawTicks(); });
+      media.addEventListener("timeupdate", () => { if (document.activeElement !== range) range.value = media.currentTime; });
+      range.addEventListener("input", () => { media.pause(); media.currentTime = +range.value; showTime(); renderPins(); });
+      // Hover preview: a small frame of the moment under the pointer, drawn from a second copy of the clip.
+      const peek = document.createElement("div"); peek.className = "peek";
+      const cv = document.createElement("canvas"); const pt = document.createElement("span"); peek.append(cv, pt);
+      const ghost = document.createElement("video"); ghost.src = clip; ghost.muted = true; ghost.preload = "auto"; ghost.playsInline = true;
+      ghost.addEventListener("seeked", () => {
+        const w = 240, h = Math.round(w * (ghost.videoHeight || 16) / (ghost.videoWidth || 9));
+        cv.width = w; cv.height = h; cv.getContext("2d").drawImage(ghost, 0, 0, w, h);
+      });
+      // The copy may still be loading on the first hover: remember the moment and draw it once it can.
+      let wanted = 0;
+      ghost.addEventListener("loadeddata", () => { ghost.currentTime = wanted; });
+      range.addEventListener("mousemove", (e) => {
+        const r = range.getBoundingClientRect(), f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+        const t = f * (media.duration || 0);
+        peek.style.display = "block"; peek.style.left = (f * 100) + "%"; pt.textContent = fmt(t);
+        wanted = t;
+        if (ghost.readyState >= 2 && Math.abs((ghost.currentTime || 0) - t) > 0.05) ghost.currentTime = t;
+      });
+      range.addEventListener("mouseleave", () => { peek.style.display = "none"; });
+      seekWrap.append(ticks, range, peek);
+      // Speed: watch the whole clip fast, or slow a moment down.
+      const speed = document.createElement("select"); speed.setAttribute("aria-label", "Playback speed");
+      [0.25, 0.5, 1, 1.5, 2, 4].forEach((r) => { const o = document.createElement("option"); o.value = r; o.textContent = r + "×"; if (r === 1) o.selected = true; speed.append(o); });
+      speed.onchange = () => { media.playbackRate = +speed.value; };
+      bar.append(b, time, seekWrap, speed);
+      pane.append(bar);
+    }
     stage.append(pane);
   }
-  renderPins();
+  renderPins(); playLabel();
+}
+
+function playLabel() {
+  document.querySelectorAll(".play button").forEach((b) => { const m = players[b.dataset.view]; b.textContent = m && !m.paused ? "Pause" : "Play"; });
 }
 
 function pinAt(x, y, label, cls, onclick) {
@@ -259,13 +354,21 @@ function renderPins() {
   $("shot").querySelectorAll(".shot").forEach((shot) => {
     const v = shot.dataset.view;
     shot.querySelectorAll(".pin").forEach((p) => p.remove());
+    const m = players[v];
     inView(screenId(), v).forEach((n) => {
-      const p = pinAt(n.x, n.y, label(n), (n.done ? "done" : "") + (lit === n.id ? " lit" : ""), () => { lit = n.id; renderPins(); renderThread(); });
+      const away = m && n.t != null && Math.abs(m.currentTime - n.t) > 0.75;
+      const p = pinAt(n.x, n.y, label(n), (n.done ? "done" : "") + (lit === n.id ? " lit" : "") + (away ? " later" : ""), () => { lit = n.id; seek(n); renderPins(); renderThread(); });
       p.setAttribute("aria-label", `Note ${label(n)}`);
       shot.append(p);
     });
     if (draft && draft.on === v) shot.append(pinAt(draft.x, draft.y, "+", "draft"));
   });
+}
+
+// A note on a clip takes the clip back to its moment.
+function seek(n) {
+  const m = players[noteView(n)];
+  if (m && n.t != null) { m.pause(); m.currentTime = n.t; playLabel(); }
 }
 
 function when(t) {
@@ -306,7 +409,7 @@ async function renderThread() {
     }
     const meta = document.createElement("div"); meta.className = "meta";
     const who = document.createElement("span"); who.textContent = n.author === "claude" ? "Claude" : ((names[n.author]?.name) || "Someone");
-    const at = document.createElement("span"); at.textContent = `${Math.round(n.x * 100)}%, ${Math.round(n.y * 100)}% · ${when(n.created)}`;
+    const at = document.createElement("span"); at.textContent = `${n.t != null ? "at " + fmt(n.t) + " · " : ""}${Math.round(n.x * 100)}%, ${Math.round(n.y * 100)}% · ${when(n.created)}`;
     const toggle = document.createElement("button"); toggle.type = "button"; toggle.textContent = n.done ? "Reopen" : "Mark done";
     toggle.onclick = () => write(n.id, { done: !n.done });
     const del = document.createElement("button"); del.type = "button"; del.textContent = "Delete";
@@ -314,14 +417,14 @@ async function renderThread() {
     meta.append(who, at, toggle, del);
     body.append(...parts, meta);
     row.append(num, body);
-    row.onclick = (e) => { if (e.target.tagName === "BUTTON") return; lit = n.id; renderPins(); renderThread(); };
+    row.onclick = (e) => { if (e.target.tagName === "BUTTON") return; lit = n.id; seek(n); renderPins(); renderThread(); };
     box.append(row);
   });
 }
 
 function renderCompose() {
   $("where").textContent = draft
-    ? `Pinned at ${Math.round(draft.x * 100)}% across, ${Math.round(draft.y * 100)}% down`
+    ? `Pinned at ${Math.round(draft.x * 100)}% across, ${Math.round(draft.y * 100)}% down${draft.t != null ? ", at " + fmt(draft.t) + " in the clip" : ""}`
     : "Click the screen to choose where this note points.";
   $("save").disabled = !db;
 }
@@ -358,6 +461,7 @@ $("compose").addEventListener("submit", async (e) => {
   if (!text) { status("Write the note first."); return; }
   const s = screens[current];
   const doc = { screen: s.id, screenName: s.name, x: +draft.x.toFixed(4), y: +draft.y.toFixed(4), text, created: Date.now(), done: false, on: s.before ? draft.on : "after" };
+  if (draft.t != null) doc.t = draft.t;
   if (me) doc.author = me;
   const sent = draft;
   $("save").disabled = true;
