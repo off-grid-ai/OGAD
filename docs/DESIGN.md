@@ -1,6 +1,6 @@
 # Off Grid AI Desktop — Design
 
-Read [`brand/DESIGN_PHILOSOPHY.md`](../../brand/DESIGN_PHILOSOPHY.md) before any Desktop UI change.
+Read [`brand/DESIGN_PHILOSOPHY.md`](https://github.com/off-grid-ai/brand/blob/main/DESIGN_PHILOSOPHY.md) before any Desktop UI change.
 It is the one design philosophy for every Off Grid AI surface: the disposition, type, accent,
 depth, tokens, hierarchy, motion and the Desktop profile. When this document and brand disagree,
 brand wins. This document gives only how Desktop builds that: implementation, layout and

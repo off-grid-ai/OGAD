@@ -1,7 +1,7 @@
 # Off Grid AI Desktop — Conversational UX Spec
 
 > **This is one application of the design philosophy in
-> [`brand/DESIGN_PHILOSOPHY.md`](../../brand/DESIGN_PHILOSOPHY.md) (read that first — it is binding
+> [`brand/DESIGN_PHILOSOPHY.md`](https://github.com/off-grid-ai/brand/blob/main/DESIGN_PHILOSOPHY.md) (read that first — it is binding
 > for the whole app).**
 > This doc applies that philosophy to the chat/conversational surface specifically.
 
