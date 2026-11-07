@@ -339,10 +339,14 @@ button:disabled,
 
 /* Settings > UI > Hover and click animations, switched off (data-ui-animations on <html>, set by
    ui-animations.ts). Nothing lifts, presses in, tilts, glows or fades under the pointer, and a
-   click flashes no card or button (the LivingField canvas ring is drawn in JS, outside CSS).
+   click flashes no card or button (the LivingField's own lattice still answers).
    Colours, borders and focus rings still change, so a control still shows it is live.
    Scoped to the controls and hover/press utilities that move, so a hovered dialog or popover that
-   is centred with a translate keeps its place. */
+   is centred with a translate keeps its place. Surface light is a layer the conductor moves
+   (--og-surface-light) on most surfaces and custom properties (--og-lp) on the rest. */
+:root[data-ui-animations='off'] {
+  --og-surface-light: 0;
+}
 :root[data-ui-animations='off'] * {
   --og-lp: 0 !important;
   --og-wave-a: 0 !important;
