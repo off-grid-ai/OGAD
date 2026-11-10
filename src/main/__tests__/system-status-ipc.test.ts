@@ -202,6 +202,28 @@ describe('the system health record the renderer is handed', () => {
   })
 })
 
+describe('a native step that closed the app', () => {
+  it('shows as down with a retry, and leaves the record once retried', async () => {
+    grant(GRANTED)
+    const { NativeStepGuard, nativeSteps } = await import('../native-step-guard')
+    const { getRenderedSystemHealth } = await import('../system-status-ipc')
+    // The last launch died inside screen capture.
+    void new NativeStepGuard(path.join(profile, 'native-steps')).run(
+      'screen-capture',
+      () => new Promise<never>(() => {}),
+      () => undefined
+    )
+    nativeSteps().recoverInterrupted()
+
+    const blocked = (await getRenderedSystemHealth()).components.at(-1)!
+    expect(blocked).toMatchObject({ label: 'Screen capture', status: 'down', canRestart: true })
+
+    nativeSteps().retry('screen-capture')
+    const ids = (await getRenderedSystemHealth()).components.map(({ id }) => id)
+    expect(ids).not.toContain(blocked.id)
+  })
+})
+
 describe('registering the status channels', () => {
   beforeEach(() => {
     grant(GRANTED)

@@ -27,7 +27,8 @@ import userEvent from '@testing-library/user-event'
 import { modelDisplayName } from '@offgrid/models'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
-import { registerHook } from '../../bootstrap/hookRegistry'
+import { clearRegisteredHooks, registerHook } from '../../bootstrap/hookRegistry'
+import { CHAT_VIDEO_HOOK, type ChatVideoController } from '../../lib/chat-video'
 import { SYNC_SUBSCRIBE_INCOMING_FILES_HOOK, type IncomingSharedFile } from '../../lib/sync-hooks'
 import {
   imageMemoryGuardErrorMessage,
@@ -1327,10 +1328,11 @@ async function openLatestCompletedWork(user: ReturnType<typeof userEvent.setup>)
 // turn. With tools on, "draw ..." was hijacked by the renderer's direct generate,
 // so the generate_image TOOL never ran. The terminal artifacts: which IPC the turn
 // actually crosses on (toolChat = agent path, generateImage = direct route).
-describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () => {
+describe('<MemoryChat/> chat mode — a typed ask for a picture or a clip goes straight to it', () => {
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
+    clearRegisteredHooks()
     ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
       observe(): void {}
@@ -1360,17 +1362,89 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     expect(assistant.getAttribute('aria-pressed')).toBe('false')
   })
 
-  it('with tools OFF, the same "draw ..." turn also goes to the model, not a renderer keyword route', async () => {
+  it('with tools OFF, an ask for a picture renders it at once, with Enhance as the person set it', async () => {
     const user = userEvent.setup()
     const { generateImage, toolChat } = installApi({ active: FULL, models: [FULL] })
     renderChat()
 
-    await sendChat(user, 'draw a dog')
+    await sendChat(user, 'draw a red fox in snow')
 
-    // Every chat turn reaches the model through toolChat; MiniLM offers generate_image when the
-    // request is for a picture and the model calls it. The renderer does not pre-decide by keyword.
+    await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
+    expect(generateImage.mock.calls[0]![0]).toMatchObject({
+      prompt: 'a red fox in snow',
+      // Routing skips the chat model; Enhance stays the person's own setting (on by default).
+      enhancePrompt: true
+    })
+    expect(toolChat).not.toHaveBeenCalled()
+  })
+
+  it('a question about images, or an HTML task that says "render", still goes to the model', async () => {
+    const user = userEvent.setup()
+    const { generateImage, toolChat } = installApi({ active: FULL, models: [FULL] })
+    renderChat()
+
+    await sendChat(user, 'How do I make an image smaller?')
     await waitFor(() => expect(toolChat).toHaveBeenCalledTimes(1))
-    expect(toolChat.mock.calls[0]![0]).toBe('draw a dog')
+    await sendChat(user, 'Create a 3D starfield in a single HTML file. Render hundreds of stars')
+    await waitFor(() => expect(toolChat).toHaveBeenCalledTimes(2))
+    expect(generateImage).not.toHaveBeenCalled()
+  })
+
+  it('an ask for a video starts a clip without a chat turn, and keeps the video Enhance setting', async () => {
+    const user = userEvent.setup()
+    const { generateImage, toolChat } = installApi({ active: FULL, models: [FULL], isPro: true })
+    // Pro's video controller is the boundary core calls; it owns the engine.
+    const state = { available: true, startImage: false, job: null }
+    const generate = vi.fn<ChatVideoController['generate']>(async () => ({
+      path: '/videos/lighthouse.mp4',
+      prompt: 'Create a video of a lighthouse at night',
+      negativePrompt: '',
+      steps: 8,
+      guidance: 5,
+      seed: 1,
+      syncId: 'video-sync-1',
+      width: 832,
+      height: 480,
+      durationSeconds: 2,
+      fps: 16,
+      frames: 33,
+      model: 'wan2.1-t2v-1.3b',
+      durationMs: 1000,
+      messageId: 'stored-video-reply'
+    }))
+    const controller: ChatVideoController = {
+      getState: () => state,
+      subscribe: () => () => {},
+      refresh: () => {},
+      generate,
+      cancel: async () => true,
+      acknowledge: async () => true,
+      onConversationUpdated: () => () => {}
+    }
+    registerHook(CHAT_VIDEO_HOOK, () => controller)
+    renderChat()
+
+    await sendChat(user, 'Create a video of a lighthouse at night')
+
+    await waitFor(() => expect(generate).toHaveBeenCalledTimes(1))
+    expect(generate.mock.calls[0]![0]).toMatchObject({
+      prompt: 'Create a video of a lighthouse at night',
+      storeReply: true
+    })
+    // No override: the engine applies the person's "Enhance video prompts" setting.
+    expect(generate.mock.calls[0]![0]).not.toHaveProperty('enhancePrompt')
+    expect(toolChat).not.toHaveBeenCalled()
+    expect(generateImage).not.toHaveBeenCalled()
+  })
+
+  it('without a video model (the free build), an ask for a video stays a chat turn', async () => {
+    const user = userEvent.setup()
+    const { generateImage, toolChat } = installApi({ active: FULL, models: [FULL] })
+    renderChat()
+
+    await sendChat(user, 'Create a video of a lighthouse at night')
+
+    await waitFor(() => expect(toolChat).toHaveBeenCalledTimes(1))
     expect(generateImage).not.toHaveBeenCalled()
   })
 

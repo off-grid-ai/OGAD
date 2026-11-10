@@ -2,6 +2,7 @@ import { runtimeBackendSnapshot } from './runtime-backends'
 import type { PermissionStatusContract, SystemHealthContract } from '../shared/ipc-contracts'
 import { llm } from './llm'
 import { getPermissionStatus } from './permissions'
+import { NATIVE_STEP_LABELS, nativeSteps, type NativeStep } from './native-step-guard'
 
 interface IpcStatusRegistrar {
   handle: (channel: string, listener: (event: unknown, ...args: unknown[]) => unknown) => unknown
@@ -70,6 +71,24 @@ async function readPermissionComponents(): Promise<SystemHealthContract['compone
   }
 }
 
+/** The health row id for a native step, which `system:restart` takes to try the step again. */
+export function nativeStepComponentId(step: NativeStep): string {
+  return `native-step:${step}`
+}
+
+/** A step that crashed the app stays off; its row says so and offers a retry. */
+function blockedNativeStepComponents(): SystemHealthContract['components'] {
+  return nativeSteps()
+    .blockedSteps()
+    .map((step) => ({
+      id: nativeStepComponentId(step),
+      label: NATIVE_STEP_LABELS[step],
+      status: 'down' as const,
+      detail: 'Off since it closed the app. Restart to try again.',
+      canRestart: true
+    }))
+}
+
 /** Compose the runtime snapshot with the production TCC owner before it crosses
  * IPC. The renderer receives one immutable truth record and does no platform or
  * permission interpretation of its own. */
@@ -78,7 +97,10 @@ export async function getRenderedSystemHealth(): Promise<SystemHealthContract> {
     import('./setup').then((module) => module.getSystemHealth()),
     readPermissionComponents()
   ])
-  return { ...health, components: [...health.components, ...permissions] }
+  return {
+    ...health,
+    components: [...health.components, ...permissions, ...blockedNativeStepComponents()]
+  }
 }
 
 /** Narrow registration seam shared by Electron and the in-process integration

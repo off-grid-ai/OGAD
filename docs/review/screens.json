@@ -1,0 +1,296 @@
+[
+  {
+    "id": "onboarding-welcome",
+    "name": "Welcome",
+    "group": "First run",
+    "what": "The first thing you see",
+    "file": "screens/onboarding-welcome.jpg"
+  },
+  {
+    "id": "onboarding-local",
+    "name": "Choose what runs locally",
+    "group": "First run",
+    "what": "Local models for chat, images, video, voice and Computer Use",
+    "file": "screens/onboarding-local.jpg"
+  },
+  {
+    "id": "onboarding-pro",
+    "name": "What Pro adds",
+    "group": "First run",
+    "what": "Capture and memory, on-device",
+    "file": "screens/onboarding-pro.jpg"
+  },
+  {
+    "id": "onboarding-devices",
+    "name": "Your devices work as one",
+    "group": "First run",
+    "what": "Sync between up to five devices",
+    "file": "screens/onboarding-devices.jpg"
+  },
+  {
+    "id": "onboarding-connect",
+    "name": "Connect your work",
+    "group": "First run",
+    "what": "Accounts and tools, all optional",
+    "file": "screens/onboarding-connect.jpg"
+  },
+  {
+    "id": "home",
+    "name": "Today",
+    "group": "Home",
+    "what": "Your day: to-dos, meetings, suggestions, timeline",
+    "file": "screens/home.jpg",
+    "before": "screens/before/home.jpg"
+  },
+  {
+    "id": "light-home",
+    "name": "Today, light",
+    "group": "Home",
+    "what": "The same day in light mode",
+    "file": "screens/light-home.jpg",
+    "before": "screens/before/light-home.jpg"
+  },
+  {
+    "id": "search",
+    "name": "Search",
+    "group": "Discover",
+    "what": "Everything you've seen, said and saved",
+    "file": "screens/search.jpg"
+  },
+  {
+    "id": "replay",
+    "name": "Replay",
+    "group": "Discover",
+    "what": "Scrub back through what was on screen",
+    "file": "screens/replay.jpg"
+  },
+  {
+    "id": "reflect",
+    "name": "Reflect",
+    "group": "Discover",
+    "what": "Where your time went",
+    "file": "screens/reflect.jpg"
+  },
+  {
+    "id": "chat",
+    "name": "A chat",
+    "group": "Chat",
+    "what": "A conversation with a reply",
+    "file": "screens/chat.jpg",
+    "before": "screens/before/chat.jpg"
+  },
+  {
+    "id": "light-chat",
+    "name": "A chat, light",
+    "group": "Chat",
+    "what": "A chat with an artifact, light mode",
+    "file": "screens/light-chat.jpg",
+    "before": "screens/before/light-chat.jpg"
+  },
+  {
+    "id": "chat-artifact",
+    "name": "A chat that made something",
+    "group": "Chat",
+    "what": "A reply with a React hero you can open",
+    "file": "screens/chat-artifact.jpg",
+    "before": "screens/before/chat-artifact.jpg"
+  },
+  {
+    "id": "chat-model-picker",
+    "name": "Active models",
+    "group": "Chat",
+    "what": "The panel that opens from the model chip",
+    "file": "screens/chat-model-picker.jpg",
+    "before": "screens/before/chat-model-picker.jpg"
+  },
+  {
+    "id": "god",
+    "name": "God",
+    "group": "Chat",
+    "what": "Your assistant across apps",
+    "file": "screens/god.jpg"
+  },
+  {
+    "id": "project",
+    "name": "A project",
+    "group": "Work",
+    "what": "One project's chats and files",
+    "file": "screens/project.jpg"
+  },
+  {
+    "id": "meetings",
+    "name": "Meetings",
+    "group": "Work",
+    "what": "Recorded meetings and their notes",
+    "file": "screens/meetings.jpg"
+  },
+  {
+    "id": "actions",
+    "name": "Actions",
+    "group": "Work",
+    "what": "What Off Grid AI wants to do, waiting for your OK",
+    "file": "screens/actions.jpg"
+  },
+  {
+    "id": "entities",
+    "name": "Entities",
+    "group": "Work",
+    "what": "People, companies and topics it knows",
+    "file": "screens/entities.jpg"
+  },
+  {
+    "id": "tasks",
+    "name": "Tasks",
+    "group": "Work",
+    "what": "Things Off Grid AI does on your computer",
+    "file": "screens/tasks.jpg"
+  },
+  {
+    "id": "voice",
+    "name": "Voice",
+    "group": "Make",
+    "what": "Dictation and voice notes",
+    "file": "screens/voice.jpg"
+  },
+  {
+    "id": "video",
+    "name": "Video",
+    "group": "Make",
+    "what": "Turn a line or a photo into a clip",
+    "file": "screens/video.jpg"
+  },
+  {
+    "id": "vault",
+    "name": "Vault",
+    "group": "Private data",
+    "what": "Passwords, cards and notes, encrypted on this computer",
+    "file": "screens/vault.jpg"
+  },
+  {
+    "id": "clipboard",
+    "name": "Clipboard",
+    "group": "Private data",
+    "what": "Everything you copied",
+    "file": "screens/clipboard.jpg"
+  },
+  {
+    "id": "pro-upsell",
+    "name": "Off Grid AI Pro",
+    "group": "Private data",
+    "what": "What you get with Pro",
+    "file": "screens/pro-upsell.jpg"
+  },
+  {
+    "id": "models",
+    "name": "Models",
+    "group": "Models",
+    "what": "Every model for this computer",
+    "file": "screens/models.jpg",
+    "before": "screens/before/models.jpg"
+  },
+  {
+    "id": "models-hover",
+    "name": "Models, pointer on a card",
+    "group": "Models",
+    "what": "The light that follows your pointer",
+    "file": "screens/models-hover.jpg",
+    "before": "screens/before/models-hover.jpg"
+  },
+  {
+    "id": "light-models",
+    "name": "Models, light",
+    "group": "Models",
+    "what": "Models in light mode",
+    "file": "screens/light-models.jpg",
+    "before": "screens/before/light-models.jpg"
+  },
+  {
+    "id": "light-models-hover",
+    "name": "Models, light, pointer moving",
+    "group": "Models",
+    "what": "The pointer light in light mode",
+    "file": "screens/light-models-hover.jpg",
+    "before": "screens/before/light-models-hover.jpg"
+  },
+  {
+    "id": "models-hover-animations-off",
+    "name": "Models, animations off",
+    "group": "Models",
+    "what": "Pointer on a card with Hover and click animations turned off",
+    "file": "screens/models-hover-animations-off.jpg"
+  },
+  {
+    "id": "gateway",
+    "name": "Gateway",
+    "group": "System",
+    "what": "Your computer as a model server for other apps",
+    "file": "screens/gateway.jpg"
+  },
+  {
+    "id": "devices",
+    "name": "Devices",
+    "group": "System",
+    "what": "Paired devices and the mobile app",
+    "file": "screens/devices.jpg"
+  },
+  {
+    "id": "integrations",
+    "name": "Integrations",
+    "group": "System",
+    "what": "Accounts and tools you've connected",
+    "file": "screens/integrations.jpg"
+  },
+  {
+    "id": "notifications",
+    "name": "Notifications",
+    "group": "System",
+    "what": "What needs your attention",
+    "file": "screens/notifications.jpg"
+  },
+  {
+    "id": "settings",
+    "name": "Settings",
+    "group": "Settings",
+    "what": "Every setting, one card each",
+    "file": "screens/settings.jpg",
+    "before": "screens/before/settings.jpg"
+  },
+  {
+    "id": "light-settings",
+    "name": "Settings, light",
+    "group": "Settings",
+    "what": "Settings in light mode",
+    "file": "screens/light-settings.jpg",
+    "before": "screens/before/light-settings.jpg"
+  },
+  {
+    "id": "settings-health",
+    "name": "Setup & health",
+    "group": "Settings",
+    "what": "Pick models for this computer and check what's running",
+    "file": "screens/settings-health.jpg",
+    "before": "screens/before/settings-health.jpg"
+  },
+  {
+    "id": "settings-ui",
+    "name": "UI",
+    "group": "Settings",
+    "what": "Hover and click animations on or off",
+    "file": "screens/settings-ui.jpg",
+    "before": "screens/before/settings-ui.jpg"
+  },
+  {
+    "id": "settings-engines",
+    "name": "Engines",
+    "group": "Settings",
+    "what": "Chat, image, video and speech engines",
+    "file": "screens/settings-engines.jpg"
+  },
+  {
+    "id": "settings-pro-plan",
+    "name": "Your Pro plan",
+    "group": "Settings",
+    "what": "Your subscription and devices",
+    "file": "screens/settings-pro-plan.jpg"
+  }
+]
