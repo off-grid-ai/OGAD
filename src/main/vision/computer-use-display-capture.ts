@@ -5,10 +5,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { desktopCapturer } from 'electron'
 import sharp from 'sharp'
 import { binRoots, exe } from '../runtime-env'
 import { existing } from '../transcription/bin-resolution'
+import { getCaptureSources } from './capture-sources'
 
 const execFileAsync = promisify(execFile)
 const CAPTURE_TIMEOUT_MS = 10_000
@@ -59,7 +59,7 @@ async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDispla
 }
 
 async function captureElectronDisplay(input: CaptureInput): Promise<ComputerUseDisplayCapture> {
-  const sources = await desktopCapturer.getSources({
+  const sources = await getCaptureSources({
     types: ['screen'],
     thumbnailSize: { width: input.width, height: input.height }
   })

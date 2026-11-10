@@ -83,8 +83,16 @@ export async function prepareLinuxCapture(): Promise<void> {
 
 export async function readFocusedWindow(): Promise<FocusedWindow | undefined> {
   if (!isWaylandSession()) {
-    const { activeWindow } = await import('get-windows')
-    return activeWindow({ screenRecordingPermission: false, accessibilityPermission: false })
+    // The get-windows addon runs in this process: a fault in it must not end every launch.
+    const { nativeSteps } = await import('./native-step-guard')
+    return nativeSteps().run(
+      'active-window',
+      async () => {
+        const { activeWindow } = await import('get-windows')
+        return activeWindow({ screenRecordingPermission: false, accessibilityPermission: false })
+      },
+      () => undefined
+    )
   }
   try {
     return (await desktopCall<FocusedWindow | null>('focus')) ?? undefined

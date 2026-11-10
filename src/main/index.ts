@@ -7,8 +7,8 @@ import {
   Menu,
   protocol,
   session,
-  desktopCapturer,
-  screen
+  screen,
+  crashReporter
 } from 'electron'
 import { tmpdir } from 'os'
 
@@ -111,6 +111,8 @@ import {
   reportAppOpened
 } from './analytics'
 import { registerCoreAnalyticsSources } from './analytics-sources'
+import { nativeSteps } from './native-step-guard'
+import { startLocalCrashEvidence } from './bootstrap/crash-evidence'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
@@ -123,6 +125,7 @@ writeDiagnosticLog('app', 'bootstrap.started', {
   platform: process.platform,
   arch: process.arch
 })
+startLocalCrashEvidence(crashReporter, nativeSteps(), app.getPath('crashDumps'))
 
 installApplicationShutdown(app, applicationShutdown, ({ owner, error }) =>
   console.error(`[shutdown] ${owner} failed`, error)
@@ -133,6 +136,8 @@ registerCoreShutdownOwners(applicationShutdown, {
   stopModelRuntimes: shutdownRuntimes,
   stopModelDownloads: shutdownModelDownloads
 })
+// A clean quit is not a crash: no step that is mid-run now may stay blocked next launch.
+applicationShutdown.register({ name: 'core:native-steps', shutdown: () => nativeSteps().settle() })
 
 async function createWindow(): Promise<void> {
   // Open filling the screen, because this is a desktop-first, dense app: multi-column grids, master
@@ -506,7 +511,8 @@ app.whenReady().then(async () => {
     session.defaultSession.setDisplayMediaRequestHandler(
       async (_request, callback) => {
         try {
-          const sources = await desktopCapturer.getSources({ types: ['screen'] })
+          const { getCaptureSources } = await import('./vision/capture-sources')
+          const sources = await getCaptureSources({ types: ['screen'] })
           // Multi-monitor: record the display the user is actually on (cursor),
           // not an arbitrary sources[0].
           let pick = sources[0]
@@ -517,6 +523,7 @@ app.whenReady().then(async () => {
           } catch {
             /* single display */
           }
+          if (!pick) return callback({})
           callback({ video: pick, audio: 'loopback' })
         } catch {
           callback({})
