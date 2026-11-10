@@ -77,10 +77,21 @@ function stageScribeOverlay() {
   if (process.platform === 'win32') {
     const script = path.join(scripts, 'build-scribe-overlay-win.ps1')
     if (!fs.existsSync(script)) return
-    const result = spawnSync('pwsh', ['-NoProfile', '-File', script, '-StageDir', stageDir], {
-      cwd: root,
-      stdio: 'inherit'
-    })
+    // PowerShell 7 when installed, else the Windows PowerShell every Windows ships (the script
+    // runs on both), so a fresh source checkout builds without installing pwsh first.
+    const shell = spawnSync('pwsh', ['-NoProfile', '-Command', 'exit 0']).error
+      ? 'powershell.exe'
+      : 'pwsh'
+    const args = [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      script,
+      '-StageDir',
+      stageDir
+    ]
+    const result = spawnSync(shell, args, { cwd: root, stdio: 'inherit' })
     if (result.error) throw result.error
     if (result.status !== 0) process.exit(result.status ?? 1)
   } else if (process.platform === 'linux') {

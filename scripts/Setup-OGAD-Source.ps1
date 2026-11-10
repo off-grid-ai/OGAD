@@ -273,6 +273,18 @@ try {
         }
     }
 
+    # Pro's Scribe overlay (Scribe in other apps) builds with the .NET 8 SDK; without it the
+    # build skips the overlay and Scribe stays inside Off Grid AI.
+    function Test-DotNet8 {
+        if (-not (Get-Command dotnet.exe -ErrorAction SilentlyContinue)) { return $false }
+        return [bool](& dotnet.exe --list-sdks 2>$null | Where-Object { $_ -match '^8\.' })
+    }
+    if (-not (Test-DotNet8)) {
+        $installer = Get-Installer 'https://aka.ms/dotnet/8.0/dotnet-sdk-win-x64.exe' 'dotnet-sdk-8-win-x64.exe' 'Microsoft Corporation'
+        Install-Gui $installer '/install /quiet /norestart'
+        if (-not (Test-DotNet8)) { throw 'The .NET 8 SDK is still missing. Complete its installation, then run this script again.' }
+    }
+
     $sdkHeaders = "${env:ProgramFiles(x86)}\Windows Kits\10\Include"
     $sdkReady = @(Get-ChildItem $sdkHeaders -Directory -ErrorAction SilentlyContinue | Where-Object {
         (Test-Path (Join-Path $_.FullName 'um\Windows.h')) -and (Test-Path (Join-Path $_.FullName 'ucrt\stdio.h'))
