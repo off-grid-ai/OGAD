@@ -1,0 +1,396 @@
+[
+ {
+  "id": "scribe-overview",
+  "name": "Scribe overview",
+  "group": "Scribe",
+  "what": "Where it runs, models, learned words, style guides and Try it, as cards on the shared surface. The switches now lead each row, as in Settings.",
+  "file": "screens/scribe-overview.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/scribe-overview.jpg",
+    "clip": "screens/scribe-overview.mp4"
+   }
+  ],
+  "clip": "screens/scribe-overview.mp4"
+ },
+ {
+  "id": "scribe-overview-lower",
+  "name": "Scribe overview, lower half",
+  "group": "Scribe",
+  "what": "Keys, Today and Recent fixes.",
+  "file": "screens/scribe-overview-lower.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/scribe-overview-lower.jpg"
+   }
+  ]
+ },
+ {
+  "id": "scribe-fix-card",
+  "name": "Fix card on hover",
+  "group": "Scribe",
+  "what": "Hover an underline in Try it: the shared fix card with the suggestions.",
+  "file": "screens/scribe-fix-card.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/scribe-fix-card.jpg"
+   }
+  ]
+ },
+ {
+  "id": "scribe-fix",
+  "name": "Taking fixes with Tab",
+  "group": "Scribe",
+  "what": "Focus Try it, hover 'teh', press Tab, then the next one.",
+  "file": "screens/scribe-fix.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/scribe-fix.jpg",
+    "clip": "screens/scribe-fix.mp4"
+   }
+  ],
+  "clip": "screens/scribe-fix.mp4"
+ },
+ {
+  "id": "scribe-improve",
+  "name": "Improve a paragraph",
+  "group": "Scribe",
+  "what": "⌥Enter streams a rewrite from Gemma 4 E4B on this computer; Replace puts it in.",
+  "file": "screens/scribe-improve.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/scribe-improve.jpg",
+    "clip": "screens/scribe-improve.mp4"
+   }
+  ],
+  "clip": "screens/scribe-improve.mp4"
+ },
+ {
+  "id": "scribe-improve-done",
+  "name": "After Improve",
+  "group": "Scribe",
+  "what": "The paragraph after Replace.",
+  "file": "screens/scribe-improve-done.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/scribe-improve-done.jpg"
+   }
+  ]
+ },
+ {
+  "id": "scribe-learned",
+  "name": "Learned",
+  "group": "Scribe",
+  "what": "Words Scribe learned, fixes turned off, and your style.",
+  "file": "screens/scribe-learned.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/scribe-learned.jpg",
+    "clip": "screens/scribe-learned.mp4"
+   }
+  ],
+  "clip": "screens/scribe-learned.mp4"
+ },
+ {
+  "id": "scribe-guides",
+  "name": "Style guides",
+  "group": "Scribe",
+  "what": "Add a .md guide that shapes every rewrite.",
+  "file": "screens/scribe-guides.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/scribe-guides.jpg",
+    "clip": "screens/scribe-guides.mp4"
+   }
+  ],
+  "clip": "screens/scribe-guides.mp4"
+ },
+ {
+  "id": "scribe-dictation",
+  "name": "Dictation",
+  "group": "Scribe",
+  "what": "Snippets, and which apps get Markdown.",
+  "file": "screens/scribe-dictation.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/scribe-dictation.jpg",
+    "clip": "screens/scribe-dictation.mp4"
+   }
+  ],
+  "clip": "screens/scribe-dictation.mp4"
+ },
+ {
+  "id": "notes-open",
+  "name": "Open a note",
+  "group": "Notes",
+  "what": "Go to Notes and open Welcome from the file tree. A click in a link places the caret; ⌘-click follows it.",
+  "file": "screens/notes-open.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-open.jpg",
+    "clip": "screens/notes-open.mp4"
+   }
+  ],
+  "clip": "screens/notes-open.mp4"
+ },
+ {
+  "id": "notes-modes",
+  "name": "Page, Markdown and Split",
+  "group": "Notes",
+  "what": "Switching the three views.",
+  "file": "screens/notes-modes.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-modes.jpg",
+    "clip": "screens/notes-modes.mp4"
+   }
+  ],
+  "clip": "screens/notes-modes.mp4"
+ },
+ {
+  "id": "notes-split",
+  "name": "Split view",
+  "group": "Notes",
+  "what": "Markdown on the left, the page on the right.",
+  "file": "screens/notes-split.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-split.jpg"
+   }
+  ]
+ },
+ {
+  "id": "notes-link-suggest",
+  "name": "[[ link picker",
+  "group": "Notes",
+  "what": "Typing [[ lists the notes to link.",
+  "file": "screens/notes-link-suggest.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-link-suggest.jpg"
+   }
+  ]
+ },
+ {
+  "id": "notes-edit",
+  "name": "Write and link a note",
+  "group": "Notes",
+  "what": "Type a line, pick Field notes from [[, and the link lands.",
+  "file": "screens/notes-edit.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-edit.jpg",
+    "clip": "screens/notes-edit.mp4"
+   }
+  ],
+  "clip": "screens/notes-edit.mp4"
+ },
+ {
+  "id": "notes-quick-open",
+  "name": "Quick open (⌘O)",
+  "group": "Notes",
+  "what": "Find a file by name and open it.",
+  "file": "screens/notes-quick-open.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-quick-open.jpg",
+    "clip": "screens/notes-quick-open.mp4"
+   }
+  ],
+  "clip": "screens/notes-quick-open.mp4"
+ },
+ {
+  "id": "notes-find",
+  "name": "Find in note (⌘F)",
+  "group": "Notes",
+  "what": "Find and replace in the open note.",
+  "file": "screens/notes-find.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-find.jpg",
+    "clip": "screens/notes-find.mp4"
+   }
+  ],
+  "clip": "screens/notes-find.mp4"
+ },
+ {
+  "id": "notes-scribe-marks",
+  "name": "Scribe in a note",
+  "group": "Notes",
+  "what": "Scribe underlines and its badge inside the Notes page.",
+  "file": "screens/notes-scribe-marks.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-scribe-marks.jpg"
+   }
+  ]
+ },
+ {
+  "id": "notes-improve",
+  "name": "Improve a paragraph in Notes",
+  "group": "Notes",
+  "what": "⌥Enter in a note streams a rewrite; Replace puts it in.",
+  "file": "screens/notes-improve.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-improve.jpg",
+    "clip": "screens/notes-improve.mp4"
+   }
+  ],
+  "clip": "screens/notes-improve.mp4"
+ },
+ {
+  "id": "notes-improve-done",
+  "name": "After Improve in Notes",
+  "group": "Notes",
+  "what": "The paragraph after Replace.",
+  "file": "screens/notes-improve-done.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-improve-done.jpg"
+   }
+  ]
+ },
+ {
+  "id": "notes-outline",
+  "name": "Outline",
+  "group": "Notes",
+  "what": "The note's headings in the side panel.",
+  "file": "screens/notes-outline.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-outline.jpg",
+    "clip": "screens/notes-outline.mp4"
+   }
+  ],
+  "clip": "screens/notes-outline.mp4"
+ },
+ {
+  "id": "notes-backlinks",
+  "name": "Backlinks",
+  "group": "Notes",
+  "what": "Notes that link here.",
+  "file": "screens/notes-backlinks.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-backlinks.jpg",
+    "clip": "screens/notes-backlinks.mp4"
+   }
+  ],
+  "clip": "screens/notes-backlinks.mp4"
+ },
+ {
+  "id": "notes-history",
+  "name": "History",
+  "group": "Notes",
+  "what": "Every save is kept; restore any version.",
+  "file": "screens/notes-history.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-history.jpg",
+    "clip": "screens/notes-history.mp4"
+   }
+  ],
+  "clip": "screens/notes-history.mp4"
+ },
+ {
+  "id": "notes-graph",
+  "name": "Graph",
+  "group": "Notes",
+  "what": "How the notes link to each other.",
+  "file": "screens/notes-graph.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-graph.jpg",
+    "clip": "screens/notes-graph.mp4"
+   }
+  ],
+  "clip": "screens/notes-graph.mp4"
+ },
+ {
+  "id": "notes-settings",
+  "name": "Notes settings",
+  "group": "Notes",
+  "what": "Where the library is, and folders added to the sidebar, on the shared card.",
+  "file": "screens/notes-settings.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Merged with main's redesign",
+    "at": "2026-11-10T17:09:17Z",
+    "file": "screens/notes-settings.jpg",
+    "clip": "screens/notes-settings.mp4"
+   }
+  ],
+  "clip": "screens/notes-settings.mp4"
+ }
+]
