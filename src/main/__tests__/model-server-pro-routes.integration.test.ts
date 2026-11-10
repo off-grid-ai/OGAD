@@ -63,7 +63,7 @@ beforeAll(async () => {
   process.env.OFFGRID_DATA_DIR = PROFILE_DIR
   server = await import('../model-server')
   port = await freePort()
-  server.startModelServer(port)
+  await server.startModelServer(port)
 })
 
 afterAll(() => {
