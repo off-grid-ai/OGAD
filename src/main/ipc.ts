@@ -53,7 +53,8 @@ import {
   openLocalNetworkSettings,
   openFilesAndFoldersSettings
 } from './permissions'
-import { setupSystemStatusIpc } from './system-status-ipc'
+import { nativeStepComponentId, setupSystemStatusIpc } from './system-status-ipc'
+import { NATIVE_STEPS, nativeSteps } from './native-step-guard'
 import { CACHE_CLEANUP_CHANNEL } from '../shared/ipc-contracts'
 import { toResponseGenerationResult, type ResponseGenerationResult } from './llm/response-result'
 import { getAllPromptDefs } from './prompts'
@@ -1206,6 +1207,11 @@ export function setupIPC(): void {
         console.error('[model-server] restart failed', error)
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
+    }
+    const step = NATIVE_STEPS.find((candidate) => nativeStepComponentId(candidate) === id)
+    if (step) {
+      nativeSteps().retry(step)
+      return { success: true }
     }
     return { success: false, error: `cannot restart "${id}"` }
   })

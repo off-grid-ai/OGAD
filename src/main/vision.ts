@@ -1,8 +1,9 @@
-import { desktopCapturer, app, screen } from 'electron'
+import { app, screen } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import { isWaylandSession, captureWaylandWindow } from './linux-desktop'
 import { captureComputerUseDisplay } from './vision/computer-use-display-capture'
+import { getCaptureSources } from './vision/capture-sources'
 
 export interface CapturedDisplayFrame {
   path: string
@@ -40,7 +41,7 @@ class VisionService {
       // Native IDs identify the focused window even when its title is empty or
       // another window has the same title. Electron's source id is window:ID:0.
       if (windowId || (windowTitle && windowTitle.trim())) {
-        const windows = await desktopCapturer.getSources({
+        const windows = await getCaptureSources({
           types: ['window'],
           thumbnailSize: { width: 1920, height: 1080 }
         })
@@ -114,7 +115,7 @@ class VisionService {
           displayBounds: display.bounds
         }
       }
-      const sources = await desktopCapturer.getSources({
+      const sources = await getCaptureSources({
         types: ['screen'],
         thumbnailSize: { width: 1920, height: 1080 }
       })
