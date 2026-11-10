@@ -7,7 +7,8 @@ import {
   Menu,
   protocol,
   session,
-  screen
+  screen,
+  crashReporter
 } from 'electron'
 import { tmpdir } from 'os'
 
@@ -111,6 +112,7 @@ import {
 } from './analytics'
 import { registerCoreAnalyticsSources } from './analytics-sources'
 import { nativeSteps } from './native-step-guard'
+import { startLocalCrashEvidence } from './bootstrap/crash-evidence'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
@@ -123,6 +125,7 @@ writeDiagnosticLog('app', 'bootstrap.started', {
   platform: process.platform,
   arch: process.arch
 })
+startLocalCrashEvidence(crashReporter, nativeSteps(), app.getPath('crashDumps'))
 
 installApplicationShutdown(app, applicationShutdown, ({ owner, error }) =>
   console.error(`[shutdown] ${owner} failed`, error)
