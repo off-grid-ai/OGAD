@@ -38,6 +38,13 @@ const folders =
         'kev-runtime',
         'onnx-cuda'
       ]
+// nvrtc ships its builtins as libnvrtc-builtins.so.<major>.<minor> of the pinned wheel. The name
+// is read from the same pin the workflow installs, so a CUDA update cannot leave it behind (a fixed
+// .so.13.2 failed every Linux pack once the pin moved to 13.4, then 13.5).
+const nvrtcPin = JSON.parse(
+  fs.readFileSync(new URL('../resources/engine-pins.json', import.meta.url), 'utf8')
+).nvidia.linux['nvidia-cuda-nvrtc']
+const nvrtcBuiltins = `libnvrtc-builtins.so.${nvrtcPin.split('.').slice(0, 2).join('.')}`
 const required =
   platform === 'win32'
     ? [
@@ -65,7 +72,7 @@ const required =
         'onnx-cuda/libcufft.so.12',
         'onnx-cuda/libcufftw.so.12',
         'onnx-cuda/libnvrtc.so.13',
-        'onnx-cuda/libnvrtc-builtins.so.13.2'
+        `onnx-cuda/${nvrtcBuiltins}`
       ]
 for (const relative of required) {
   if (!fs.statSync(path.join(binRoot, relative)).isFile())
