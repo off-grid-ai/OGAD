@@ -45,7 +45,7 @@ import { registerNativeActionTools } from './tools/nativeActionToolExtension'
 import { setupDesktopBackupIPC } from './backup/ipc'
 import { preloadPath } from './preload-path'
 import { rendererHtmlPath } from './renderer-path'
-import { setMainWindow } from './main-window'
+import { getMainWindow, setMainWindow } from './main-window'
 import { setGatewayPowerBlocker, startModelServer, stopModelServer } from './model-server'
 import { parseGatewayLaunchOverride } from '@offgrid/models'
 import { startMediaServer, stopMediaServer, mediaUrlFor } from './media-server'
@@ -355,11 +355,18 @@ const isolatedEvidenceInstance = mayUseIsolatedEvidenceInstance(process.env, tmp
 if (!isolatedEvidenceInstance && !app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  // The main window, never another one (a hidden computer-use supervisor stays alive after its
+  // task). With the main window closed, a link or a second launch opens it again.
   const focusExistingWindow = (): void => {
-    const win = BrowserWindow.getAllWindows()[0]
-    if (win) {
-      if (win.isMinimized()) win.restore()
-      if (windowPresentation.showWindow) win.focus()
+    const win = getMainWindow()
+    if (!win) {
+      if (app.isReady()) void createWindow()
+      return
+    }
+    if (win.isMinimized()) win.restore()
+    if (windowPresentation.showWindow) {
+      if (!win.isVisible()) win.show()
+      win.focus()
     }
   }
   // Windows and Linux deliver an offgrid:// link to the running app as a second instance.
