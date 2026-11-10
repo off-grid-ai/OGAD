@@ -243,9 +243,16 @@ export async function useModelBrain(
         if (turn.reasoning) res.write(frame({ reasoning_content: turn.reasoning }))
         for (const delta of turn.contentDeltas ?? []) res.write(frame({ content: delta }))
         if (turn.stream) {
-          await turn.stream((delta) => {
-            if (!res.writableEnded && !res.destroyed) res.write(frame({ content: delta }))
-          }, controller.signal)
+          try {
+            await turn.stream((delta) => {
+              if (!res.writableEnded && !res.destroyed) res.write(frame({ content: delta }))
+            }, controller.signal)
+          } catch (error) {
+            // A stream that stops because the client hung up is the expected cancellation; any
+            // other failure ends the response, as a crashed engine would.
+            if (!controller.signal.aborted) res.destroy(error as Error)
+            return
+          }
           if (controller.signal.aborted || res.destroyed) return
         }
         if (turn.content) res.write(frame({ content: turn.content }))
