@@ -36,13 +36,20 @@
   "name": "Fix card on hover",
   "group": "Scribe",
   "what": "Hover an underline in Try it: the shared fix card with the suggestions.",
-  "file": "screens/scribe-fix-card.jpg",
+  "file": "screens/v/scribe-fix-card-2.jpg",
   "versions": [
    {
     "v": 1,
     "label": "Merged with main's redesign",
     "at": "2026-11-10T17:09:17Z",
-    "file": "screens/scribe-fix-card.jpg"
+    "file": "screens/v/scribe-fix-card-1.jpg"
+   },
+   {
+    "v": 2,
+    "label": "Scribe card follows the app theme",
+    "at": "2026-11-10T17:41:29Z",
+    "file": "screens/v/scribe-fix-card-2.jpg",
+    "what": "ui-library 67cca08: the fix card and the badge use the app's dark theme, not the computer's light setting."
    }
   ]
  },
@@ -51,17 +58,25 @@
   "name": "Taking fixes with Tab",
   "group": "Scribe",
   "what": "Focus Try it, hover 'teh', press Tab, then the next one.",
-  "file": "screens/scribe-fix.jpg",
+  "file": "screens/v/scribe-fix-2.jpg",
   "versions": [
    {
     "v": 1,
     "label": "Merged with main's redesign",
     "at": "2026-11-10T17:09:17Z",
-    "file": "screens/scribe-fix.jpg",
-    "clip": "screens/scribe-fix.mp4"
+    "file": "screens/v/scribe-fix-1.jpg",
+    "clip": "screens/v/scribe-fix-1.mp4"
+   },
+   {
+    "v": 2,
+    "label": "Scribe card follows the app theme",
+    "at": "2026-11-10T17:41:29Z",
+    "file": "screens/v/scribe-fix-2.jpg",
+    "what": "ui-library 67cca08: the fix card and the badge use the app's dark theme, not the computer's light setting.",
+    "clip": "screens/v/scribe-fix-2.mp4"
    }
   ],
-  "clip": "screens/scribe-fix.mp4"
+  "clip": "screens/v/scribe-fix-2.mp4"
  },
  {
   "id": "scribe-improve",
