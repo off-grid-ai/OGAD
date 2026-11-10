@@ -183,7 +183,7 @@ runs:
         echo "shared_dir=$(node -p "require('path').resolve('..', 'shared').split(require('path').sep).join('/')")" >> "$GITHUB_OUTPUT"
         echo "shared_sha=$(git -C _shared rev-parse HEAD)" >> "$GITHUB_OUTPUT"
         # Every shared package core or Pro imports; a package this shared commit lacks is skipped.
-        echo "shared_packages=models rag sync use automation speech ui design writing notes" >> "$GITHUB_OUTPUT"
+        echo "shared_packages=models rag sync use automation speech ui design writing notes notes-editor" >> "$GITHUB_OUTPUT"
     - name: Restore npm downloads
       if: ${{ inputs.workspace == 'true' }}
       id: npm_cache
