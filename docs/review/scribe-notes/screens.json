@@ -149,7 +149,7 @@
   "name": "Dictation",
   "group": "Scribe",
   "what": "Snippets, and which apps get Markdown.",
-  "file": "screens/scribe-dictation.jpg",
+  "file": "screens/v/scribe-dictation-2.jpg",
   "versions": [
    {
     "v": 1,
@@ -157,9 +157,17 @@
     "at": "2026-11-10T17:09:17Z",
     "file": "screens/scribe-dictation.jpg",
     "clip": "screens/scribe-dictation.mp4"
+   },
+   {
+    "v": 2,
+    "label": "App names, added by name",
+    "at": "2026-11-11T04:14:55Z",
+    "file": "screens/v/scribe-dictation-2.jpg",
+    "clip": "screens/v/scribe-dictation-2.mp4",
+    "what": "Markdown apps show their names, not bundle ids. Type an app name, like Safari, to add it; a name no app has says so."
    }
   ],
-  "clip": "screens/scribe-dictation.mp4"
+  "clip": "screens/v/scribe-dictation-2.mp4"
  },
  {
   "id": "notes-open",
@@ -379,7 +387,7 @@
   "name": "Graph",
   "group": "Notes",
   "what": "How the notes link to each other.",
-  "file": "screens/notes-graph.jpg",
+  "file": "screens/v/notes-graph-2.jpg",
   "versions": [
    {
     "v": 1,
@@ -387,9 +395,17 @@
     "at": "2026-11-10T17:09:17Z",
     "file": "screens/notes-graph.jpg",
     "clip": "screens/notes-graph.mp4"
+   },
+   {
+    "v": 2,
+    "label": "Note names, fitted view",
+    "at": "2026-11-11T04:14:55Z",
+    "file": "screens/v/notes-graph-2.jpg",
+    "clip": "screens/v/notes-graph-2.mp4",
+    "what": "Every note is named in a small library, and the graph opens fitted to its notes. A large library names its most-linked notes until you zoom in."
    }
   ],
-  "clip": "screens/notes-graph.mp4"
+  "clip": "screens/v/notes-graph-2.mp4"
  },
  {
   "id": "notes-settings",
