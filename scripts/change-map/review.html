@@ -473,7 +473,7 @@ function renderFor() {
   if (!s) { box.textContent = ""; return; }
   box.innerHTML = (s.calls || []).map((c) => {
     const d = decided[c.id];
-    const why = [["What it is", c.what], ["What goes wrong", c.risk], ["What I'd do", c.rec]].filter(([, t]) => t)
+    const why = [["What it is", c.what], ["What goes wrong", c.risk], ["What I'd do", c.rec], ["Learned", c.standing]].filter(([, t]) => t)
       .map(([h, t]) => `<p><b>${h}.</b> ${esc(t)}</p>`).join("");
     return `<div class="call${d ? " decided" : ""}"><span class="k">${esc(d ? "Decided: " + d.choice : c.kind || "Your call")}</span>`
       + `<p class="ct">${esc(c.title || c.text)}</p>${why}`

@@ -169,11 +169,21 @@ def main(spec_path, out):
                 calls.append({'surface': 'desktop', 'group': f['name'], 'kind': f"{names[c['lens']]} · NO GO", 'text': c['line'], 'options': ['Fix it', 'Keep for now']})
     # The heuristics only find suspects. Once Claude has read the code, the spec's own `calls` (with what it is,
     # what goes wrong and what to do) replace them, and `cleared` names the suspects that turned out fine.
+    # What earlier rounds taught (learned.json, kept by the graph-engineering-loop skill): suspects already judged
+    # fine never come back, and a kind of call Mac always answers the same way carries that answer as a standing rule.
+    learned = json.load(open(HERE / 'learned.json')) if (HERE / 'learned.json').exists() else {}
+    known_fine = [x['match'] for x in learned.get('cleared', [])]
+    calls = [c for c in calls if not any(m in c['text'] for m in known_fine)]
     if spec.get('calls'):
         print('Suspects (spec calls used instead):')
         for c in calls:
             print(f"  {c['kind']}: {c['text']}")
         calls = [dict(c) for c in spec['calls']]
+    for c in calls:
+        rule = next((r for r in learned.get('standing', []) if c.get('kind', '').startswith(r['kind'])), None)
+        if rule and rule['choice'] in c.get('options', []):
+            c['recommended'] = rule['choice']
+            c['standing'] = f"Standing rule: {rule['choice']}. {rule['why']}"
     proven += [f'Checked, not a copy: {x}' for x in spec.get('cleared', [])]
     group_of = {'writing': 'Scribe', 'notes': 'Notes'}
     for i, c in enumerate(calls):
@@ -182,7 +192,7 @@ def main(spec_path, out):
         target = next((s for s in screens if s['id'] == c.get('screen')), None) \
             or next((s for s in pool if want and s.get('group', '').startswith(want)), pool[0])
         c['id'] = c.get('id') or f"call-{i}-{re.sub('[^a-z0-9]+', '-', (c.get('title') or c['text']).lower())[:40]}"
-        target.setdefault('calls', []).append({k: c[k] for k in ('id', 'kind', 'title', 'text', 'what', 'risk', 'rec', 'recommended', 'files', 'options') if k in c})
+        target.setdefault('calls', []).append({k: c[k] for k in ('id', 'kind', 'title', 'text', 'what', 'risk', 'rec', 'recommended', 'standing', 'files', 'options') if k in c})
 
     for s in screens:
         x = repos.get(dirmap.get(s['surface'], ''), {})

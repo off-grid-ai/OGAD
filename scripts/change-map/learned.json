@@ -1,0 +1,10 @@
+{
+  "_about": "What change reviews have taught. Kept by the graph-engineering-loop skill. cleared: suspects Claude read and judged fine, shown to Mac, never raised again (match = text in the suspect); Mac can strike any. standing: a kind of call Mac always answers the same way; the page shows it as the default and Claude acts on it unless he says no. patterns: change-map fixes already made in scan.py, for the record.",
+  "cleared": [
+    {"match": "fields, writing-sync", "why": "Scribe field rules and Scribe sync are thin adapters over @offgrid/writing and @offgrid/sync.", "at": "2026-11-12"},
+    {"match": "note-file-transfer", "why": "Each Pro app adapts the shared sync engine to its own files; the decisions are in @offgrid/sync.", "at": "2026-11-12"},
+    {"match": "notes-screen", "why": "One Notes screen per platform is by design.", "at": "2026-11-12"}
+  ],
+  "standing": [],
+  "patterns": []
+}
