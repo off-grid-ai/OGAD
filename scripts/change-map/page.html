@@ -1,0 +1,239 @@
+<title>Off Grid Change Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap">
+<style>
+/* Layout: a change planner. Pick a concept -> ripple grid (surfaces x layers, in run order) with the plan beside it -> whole map -> how it works. */
+:root{
+  --bg:#f4f6f4; --paper:#ffffff; --fg:#17201c; --muted:#5b6b64; --line:#d5ddd8; --soft:#eef2ef;
+  --accent:#0f6e66; --accent-bg:#e1f0ec; --heat:15,110,102;
+  --bad:#c2410c; --bad-bg:#fdece3; --warn:#a16207; --warn-bg:#fbf1dc; --ok:#2f7d3a;
+  --display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#111715; --paper:#18201d; --fg:#e4ebe7; --muted:#93a39c; --line:#2c3833; --soft:#1d2622;
+  --accent:#4fc1b3; --accent-bg:#163430; --heat:79,193,179;
+  --bad:#fb8a55; --bad-bg:#3a1e12; --warn:#e0b04a; --warn-bg:#33270f; --ok:#6cc47a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111715; --paper:#18201d; --fg:#e4ebe7; --muted:#93a39c; --line:#2c3833; --soft:#1d2622;
+  --accent:#4fc1b3; --accent-bg:#163430; --heat:79,193,179;
+  --bad:#fb8a55; --bad-bg:#3a1e12; --warn:#e0b04a; --warn-bg:#33270f; --ok:#6cc47a; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.5}
+.wrap{max-width:1360px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 64px;display:grid;gap:30px}
+h1{font-family:var(--display);font-size:clamp(28px,4.4vw,42px);font-weight:600;letter-spacing:-.01em;margin:0;text-wrap:balance}
+h2{font-family:var(--display);font-size:23px;font-weight:600;margin:0;text-wrap:balance}
+h3{font-size:15px;margin:0}
+p{margin:0}
+.lede{color:var(--muted);max-width:70ch;font-size:16px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+header{display:grid;gap:8px}
+.sheet{background:var(--paper);border:1px solid var(--line);border-radius:6px;min-width:0}
+/* picker */
+.picker{display:grid;gap:10px}
+.group{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.group .eyebrow{width:64px;flex:none}
+.chip{font:inherit;font-size:14px;padding:5px 12px;border-radius:99px;border:1px solid var(--line);background:var(--paper);color:var(--fg);cursor:pointer}
+.chip:hover{border-color:var(--accent)}
+.chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--paper)}
+.chip small{font-family:var(--mono);font-size:11px;opacity:.75;margin-left:4px}
+/* stage */
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;align-items:start}
+@media (max-width:1080px){.stage{grid-template-columns:minmax(0,1fr)}}
+.ripple{padding:18px;display:grid;gap:14px}
+.ctitle{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
+.ctitle h2{font-size:28px}
+.ctitle .does{color:var(--muted)}
+.gridwrap{overflow-x:auto}
+.rg{display:grid;grid-template-columns:118px repeat(8,minmax(78px,1fr));gap:4px;min-width:800px}
+.rg .hd{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:4px 6px;display:flex;flex-direction:column;gap:2px}
+.rg .hd b{font-weight:500;color:var(--fg);font-size:11.5px}
+.rg .hd i{font-style:normal;color:var(--accent)}
+.rg .sf{font-family:var(--mono);font-size:12.5px;padding:10px 6px;display:flex;align-items:center}
+.cell{font:inherit;border:1px solid transparent;border-radius:4px;min-height:44px;padding:6px 8px;text-align:left;display:flex;flex-direction:column;justify-content:center;gap:1px;background:var(--soft);color:var(--muted);font-family:var(--mono);font-size:12px}
+.cell.has{cursor:pointer;color:var(--fg)}
+.cell.has strong{font-size:16px;font-weight:500;font-variant-numeric:tabular-nums}
+.cell.has:hover,.cell.sel{border-color:var(--accent)}
+.cell.sel{box-shadow:0 0 0 1px var(--accent) inset}
+.cell:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.cell.gap{background:var(--warn-bg);color:var(--warn)}
+.cell span{font-size:10.5px;opacity:.8}
+.files{border-top:1px solid var(--line);padding-top:12px;display:grid;gap:6px;min-height:40px}
+.files ul{list-style:none;margin:0;padding:0;display:grid;gap:3px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.files li{word-break:break-all}
+.hint{font-size:13px;color:var(--muted)}
+/* plan */
+aside{padding:18px;display:grid;gap:16px}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:0;counter-reset:s}
+.steps li{display:grid;grid-template-columns:26px 1fr;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);counter-increment:s}
+.steps li:last-child{border-bottom:0}
+.steps li::before{content:counter(s);font-family:var(--mono);font-size:12px;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--accent-bg);color:var(--accent)}
+.steps .what{font-size:14px}
+.steps .gate{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.steps .gate.no{color:var(--bad)}
+.box{border-radius:4px;padding:10px 12px;display:grid;gap:6px;font-size:13.5px}
+.box.warn{background:var(--warn-bg)} .box.warn strong{color:var(--warn)}
+.box.bad{background:var(--bad-bg)} .box.bad strong{color:var(--bad)}
+.box ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.col{display:flex;flex-wrap:wrap;gap:6px}
+.col button{font:inherit;font-size:12.5px;font-family:var(--mono);border:1px dashed var(--bad);color:var(--bad);background:none;border-radius:4px;padding:2px 8px;cursor:pointer}
+/* map */
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:820px}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-family:var(--mono);font-size:11.5px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px;text-align:right}
+td.n div{border-radius:3px;padding:3px 6px}
+tbody tr{cursor:pointer}
+tbody tr:hover td{background:var(--soft)}
+tbody tr.on td{background:var(--accent-bg)}
+td.places{font-family:var(--mono);font-size:12.5px}
+.how{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:14px}
+.how .sheet{padding:16px;display:grid;gap:6px;align-content:start}
+.how p{font-size:14px;color:var(--muted)}
+.how .k{font-family:var(--mono);font-size:11.5px;color:var(--accent);letter-spacing:.06em;text-transform:uppercase}
+.note{font-size:13px;color:var(--muted);max-width:86ch}
+code{font-family:var(--mono);font-size:.92em}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Off Grid AI · consumer product · built from the code 12 Nov 2026</div>
+    <h1>Off Grid change map</h1>
+    <p class="lede">Name the thing you want to change. The map shows every place it lives, the order to change them in, the check that proves each step done, and what you must not change at the same time.</p>
+  </header>
+
+  <div class="picker" id="picker" aria-label="Pick what you want to change"></div>
+
+  <div class="stage">
+    <div class="sheet ripple">
+      <div class="ctitle"><h2 id="cname"></h2><span class="does" id="cdoes"></span></div>
+      <div class="gridwrap"><div class="rg" id="rg" role="grid"></div></div>
+      <div class="files" id="files"><p class="hint">Click a cell to see its files. Amber cells ship to users but have no proof there.</p></div>
+    </div>
+    <aside class="sheet" id="plan" aria-live="polite"></aside>
+  </div>
+
+  <section style="display:grid;gap:14px">
+    <h2>The whole map</h2>
+    <p class="note">Each row is one concept from <code>@offgrid/features</code>, plus two pieces of plumbing. Numbers are files that build it (proof excluded). "Places" is how many surfaces you touch to change it. Click a row to plan that change.</p>
+    <div class="sheet tbl"><table><thead id="mh"></thead><tbody id="mb"></tbody></table></div>
+  </section>
+
+  <section style="display:grid;gap:14px">
+    <h2>How it makes changes easier</h2>
+    <div class="how">
+      <div class="sheet"><span class="k">Before you edit</span><h3>See the whole ripple</h3><p>"Change Scribe tone" lists the shared rule, three app ports, two Pro tiers, the extension, the website pages and the tests. Nothing is found late.</p></div>
+      <div class="sheet"><span class="k">Needs</span><h3>Change in one order</h3><p>Owner, then engine, then logic, then view, then data and copy, then proof. Each step waits for the step before it to pass its check.</p></div>
+      <div class="sheet"><span class="k">Gate</span><h3>Every step has a check</h3><p>The tests on that surface run, then the hand-test rows on device. A step with no check shows red, so you write the check first.</p></div>
+      <div class="sheet"><span class="k">Excludes</span><h3>Know what collides</h3><p>Concepts that share files cannot change in parallel. Everything else can go to a separate session safely.</p></div>
+      <div class="sheet"><span class="k">Keeps itself current</span><h3>A commit hook updates the map</h3><p>Each commit rescans the changed files. A new file joins its concept, and a new surface for a concept shows up in the next plan.</p></div>
+      <div class="sheet"><span class="k">Gets cheaper</span><h3>Fewer places, smaller ripple</h3><p>When a concept moves its logic into one shared owner, "places" drops and every later change gets shorter.</p></div>
+    </div>
+    <p class="note">How this was built: every git-tracked file in shared, desktop, desktop/pro, mobile, mobile/pro, browser-extension and website was placed in a layer by its folder, and in a concept by its path name. Hand-test rows come from the desktop and mobile <code>RELEASE_TEST_CHECKLIST.csv</code>. Path names miss some files and catch a few wrong ones. The next pass should add imports and symbol names, so the map follows the code as well as the folders.</p>
+  </section>
+</div>
+
+<script>
+const D=__DATA__;
+const SURF=[['shared','shared'],['desktop','desktop'],['desktop-pro','desktop/pro'],['mobile','mobile'],['mobile-pro','mobile/pro'],['extension','extension'],['website','website']];
+const LAY=[['owner','Owner','shared rule'],['engine','Engine','native code'],['logic','Logic','app port'],['view','View','screens'],['data','Data','catalog rows'],['copy','Copy','web pages'],['proof','Tests','automated'],['checklist','Hand-test','device rows']];
+const SHIP=['desktop','desktop-pro','mobile','mobile-pro','extension'];
+const ROOTS={'desktop-pro':'desktop','mobile-pro':'mobile'};
+const keys=Object.keys(D.c);
+const n=(k,s,l)=>(D.c[k].cells[s+'|'+l]||{n:0}).n;
+const cellOf=(k,s,l)=>D.c[k].cells[s+'|'+l];
+function builds(k,s){return ['owner','engine','logic','view'].reduce((a,l)=>a+n(k,s,l),0)}
+function places(k){return SURF.filter(([s])=>s!=='website'&&builds(k,s)>0).length}
+function proofFor(k,s){const base=ROOTS[s]||s;return {tests:n(k,s,'proof'),rows:(cellOf(k,base,'checklist')||{n:0}).n}}
+let cur=null,selCell=null;
+
+// picker
+const groups=[['models','Models'],['work','Work'],['infra','Plumbing']];
+document.getElementById('picker').innerHTML=groups.map(([g,l])=>`<div class="group"><span class="eyebrow">${l}</span>${keys.filter(k=>(D.c[k].kind==='infra'?'infra':D.c[k].group)===g).map(k=>`<button class="chip" type="button" data-k="${k}" aria-pressed="false">${D.c[k].name}<small>${places(k)}</small></button>`).join('')}</div>`).join('');
+document.getElementById('picker').addEventListener('click',e=>{const b=e.target.closest('[data-k]');if(b)go(b.dataset.k)});
+
+function go(k,noHash){
+  cur=k;selCell=null;
+  if(!noHash){try{history.replaceState(null,'','#'+k)}catch(e){}}
+  document.querySelectorAll('.chip').forEach(b=>b.setAttribute('aria-pressed',b.dataset.k===k));
+  document.querySelectorAll('#mb tr').forEach(r=>r.classList.toggle('on',r.dataset.k===k));
+  const c=D.c[k];
+  document.getElementById('cname').textContent=c.name;
+  document.getElementById('cdoes').textContent=c.does||(c.kind==='infra'?'Plumbing many features depend on. Not in the feature list.':'');
+  // grid
+  const max=Math.max(1,...SURF.flatMap(([s])=>LAY.map(([l])=>n(k,s,l))));
+  let h=`<div class="hd"></div>`+LAY.map(([l,t,sub],i)=>`<div class="hd"><b><i>${i+1}</i> ${t}</b>${sub}</div>`).join('');
+  SURF.forEach(([s,label])=>{
+    h+=`<div class="sf">${label}</div>`;
+    LAY.forEach(([l])=>{
+      const v=n(k,s,l);
+      const ships=SHIP.includes(s)&&builds(k,s)>0;
+      const gap=ships&&((l==='proof'&&v===0)||(l==='checklist'&&!ROOTS[s]&&v===0));
+      if(v>0){const a=.08+.5*Math.sqrt(v/max);h+=`<button class="cell has" type="button" data-s="${s}" data-l="${l}" style="background:rgba(var(--heat),${a.toFixed(2)})"><strong>${v}</strong><span>${l==='checklist'?'rows':'files'}</span></button>`}
+      else h+=`<div class="cell${gap?' gap':''}">${gap?'none':'·'}</div>`;
+    });
+  });
+  const rg=document.getElementById('rg');rg.innerHTML=h;
+  document.getElementById('files').innerHTML=`<p class="hint">Click a cell to see its files. Amber cells ship to users but have no proof there.</p>`;
+  plan(k);
+}
+document.getElementById('rg').addEventListener('click',e=>{
+  const b=e.target.closest('.cell.has');if(!b)return;
+  document.querySelectorAll('.cell.sel').forEach(x=>x.classList.remove('sel'));b.classList.add('sel');
+  const c=cellOf(cur,b.dataset.s,b.dataset.l);const lab=LAY.find(x=>x[0]===b.dataset.l)[1];
+  document.getElementById('files').innerHTML=`<div class="eyebrow">${SURF.find(x=>x[0]===b.dataset.s)[1]} · ${lab} · ${c.n}${c.n>c.f.length?` (showing ${c.f.length})`:''}</div><ul>${c.f.map(f=>`<li>${f.replace(/^(desktop\/pro|mobile\/pro|desktop|mobile|shared|browser-extension|website|executorch-speech)\//,'$1/ ')}</li>`).join('')}</ul>`;
+});
+
+function plan(k){
+  const steps=[];
+  const S=s=>SURF.find(x=>x[0]===s)[1];
+  const gate=(s)=>{const p=proofFor(k,s);if(!p.tests&&!p.rows)return `<span class="gate no">no check yet: write one first</span>`;return `<span class="gate">check: ${p.tests} test files${p.rows?` + ${p.rows} hand-test rows`:''}</span>`};
+  if(n(k,'shared','owner'))steps.push([`Change the shared rule (${n(k,'shared','owner')} files)`,`<span class="gate">check: ${n(k,'shared','proof')} shared test files</span>`]);
+  const eng=SURF.filter(([s])=>s!=='shared'&&n(k,s,'engine')>0).map(([s])=>S(s));
+  if(n(k,'shared','engine'))eng.unshift('executorch-speech');
+  if(eng.length)steps.push([`Update native engines: ${eng.join(', ')}`,`<span class="gate">check: device build + hand-test rows</span>`]);
+  ['desktop','mobile','extension','desktop-pro','mobile-pro'].forEach(s=>{
+    const lg=n(k,s,'logic'),vw=n(k,s,'view')+(s==='desktop'?n(k,s,'owner'):0);
+    if(lg+vw)steps.push([`Adapt ${S(s)}: ${lg?lg+' logic':''}${lg&&vw?' + ':''}${vw?vw+' view':''} files`,gate(s)]);
+  });
+  const data=SURF.filter(([s])=>n(k,s,'data')).map(([s])=>S(s));
+  if(data.length)steps.push([`Update catalog rows: ${data.join(', ')}`,`<span class="gate">check: catalog tests</span>`]);
+  if(n(k,'website','copy'))steps.push([`Review website copy (${n(k,'website','copy')} pages and articles)`,`<span class="gate">check: page build</span>`]);
+  const rowsD=n(k,'desktop','checklist'),rowsM=n(k,'mobile','checklist');
+  steps.push([`Hand-test on devices`,rowsD+rowsM?`<span class="gate">${rowsD} Mac rows · ${rowsM} phone rows</span>`:`<span class="gate no">no hand-test rows: add them first</span>`]);
+  // collisions
+  const col=Object.entries(D.col).filter(([p])=>p.split('|').includes(k)).map(([p,v])=>[p.split('|').find(x=>x!==k),v.n]).sort((a,b)=>b[1]-a[1]);
+  // seams that make this change harder
+  const seams=[];
+  const writers=['desktop','mobile','extension','desktop-pro','mobile-pro'].filter(s=>n(k,s,'logic')>=3);
+  if(!n(k,'shared','owner')&&writers.length>=2)seams.push(`No shared owner, and logic lives in ${writers.length} places (${writers.map(S).join(', ')}). You make the same change ${writers.length} times.`);
+  else if(n(k,'shared','owner')&&writers.length>=3)seams.push(`Logic still lives in ${writers.length} app places beside the shared owner. Check each one copies nothing from the owner.`);
+  const noTest=SHIP.filter(s=>builds(k,s)>0&&n(k,s,'proof')===0).map(S);
+  if(noTest.length)seams.push(`No automated tests on ${noTest.join(', ')}.`);
+  const noRows=['desktop','mobile'].filter(s=>(builds(k,s)+builds(k,s+'-pro'))>0&&n(k,s,'checklist')===0).map(S);
+  if(noRows.length)seams.push(`No hand-test rows on ${noRows.join(' or ')}.`);
+  if(n(k,'desktop-pro','logic')+n(k,'mobile-pro','logic')>0)seams.push(`Pro code imports the open app's internals through <code>@offgrid/core</code>. A change in the open app can break Pro without warning.`);
+  if(D.c[k].kind==='feature'&&!n(k,'website','copy'))seams.push(`No website page names it.`);
+  document.getElementById('plan').innerHTML=`<span class="eyebrow">The change plan</span>
+  <ol class="steps">${steps.map(([w,g])=>`<li><div><div class="what">${w}</div>${g}</div></li>`).join('')}</ol>
+  ${col.length?`<div class="box bad"><strong>Don't change at the same time</strong><span>These share files with ${D.c[k].name}. Run them one after another.</span><div class="col">${col.slice(0,8).map(([o,c])=>`<button type="button" data-k="${o}">${D.c[o].name} · ${c}</button>`).join('')}</div></div>`:`<div class="box" style="background:var(--accent-bg)"><strong style="color:var(--accent)">Safe to run in parallel</strong><span>No other concept shares its files.</span></div>`}
+  ${seams.length?`<div class="box warn"><strong>What makes this change harder</strong><ul>${seams.map(s=>`<li>${s}</li>`).join('')}</ul></div>`:''}`;
+}
+document.getElementById('plan').addEventListener('click',e=>{const b=e.target.closest('[data-k]');if(b)go(b.dataset.k)});
+
+// whole map
+const MS=SURF.filter(([s])=>s!=='website');
+document.getElementById('mh').innerHTML=`<tr><th>Concept</th>${MS.map(([,l])=>`<th style="text-align:right">${l}</th>`).join('')}<th style="text-align:right">Web</th><th style="text-align:right">Tests</th><th style="text-align:right">Hand rows</th><th>Places</th></tr>`;
+const mx=Math.max(...keys.flatMap(k=>MS.map(([s])=>builds(k,s))));
+document.getElementById('mb').innerHTML=keys.slice().sort((a,b)=>places(b)-places(a)).map(k=>{
+  const t=SURF.reduce((a,[s])=>a+n(k,s,'proof'),0),r=n(k,'desktop','checklist')+n(k,'mobile','checklist');
+  return `<tr data-k="${k}" tabindex="0"><td>${D.c[k].name}</td>${MS.map(([s])=>{const v=builds(k,s);return `<td class="n"><div style="${v?`background:rgba(var(--heat),${(.06+.5*Math.sqrt(v/mx)).toFixed(2)})`:''}">${v||'·'}</div></td>`}).join('')}<td class="n">${n(k,'website','copy')||'·'}</td><td class="n">${t}</td><td class="n" style="${r?'':'color:var(--bad)'}">${r}</td><td class="places">${'●'.repeat(places(k))}<span style="opacity:.25">${'●'.repeat(6-places(k))}</span> ${places(k)}</td></tr>`}).join('');
+document.getElementById('mb').addEventListener('click',e=>{const r=e.target.closest('tr');if(r){go(r.dataset.k);document.querySelector('.stage').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'})}});
+document.getElementById('mb').addEventListener('keydown',e=>{if(e.key==='Enter'){const r=e.target.closest('tr');if(r)go(r.dataset.k)}});
+
+const start=(location.hash||'').slice(1);
+go(D.c[start]?start:'writing',true);
+window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(D.c[h]&&h!==cur)go(h,true)});
+</script>
