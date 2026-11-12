@@ -13,5 +13,8 @@ python3 scripts/change-map/scan.py --html map.html   # the interactive page
 - **Layers, in change order:** shared owner → native engine → app logic → view → catalog data → website copy → tests →
   hand-test rows from each `docs/RELEASE_TEST_CHECKLIST.csv`.
 - **Collisions:** concepts that share files. Change them one after another, never in parallel.
+- **Change review page:** `python3 scripts/change-map/review.py <spec.json> <out-dir>` joins a change's existing
+  screen-review shots, Argus Next release and this map into one review page (`review.html`). See the
+  `graph-engineering` skill for the spec and the publish step.
 - **Limits:** a file joins a concept by its path name, so some files are missed. To fix a miss, change the concept's
   pattern in `CONCEPTS` in `scan.py`.
