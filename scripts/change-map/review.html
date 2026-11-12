@@ -61,7 +61,9 @@ body > .app { flex: 1 1 auto; min-height: 0; height: auto; }
 .forscreen { padding: 12px 16px 4px; display: grid; gap: 8px; }
 .call { background: var(--warn-bg); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; }
 .call .k { font: 600 11px/1.2 var(--mono); color: var(--warn); text-transform: uppercase; letter-spacing: .05em; }
-.call p { margin: 0; }
+.call p { margin: 0; font-size: 13px; color: var(--muted); }
+.call p b { color: var(--fg); font-weight: 600; }
+.call p.ct { font-size: 14px; font-weight: 600; color: var(--fg); }
 .call .files { font: 11px/1.5 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 .call .opts { display: flex; gap: 8px; flex-wrap: wrap; }
 .call .opts .btn[aria-pressed="true"] { background: var(--gold); color: var(--gold-ink); border-color: var(--gold); }
@@ -471,9 +473,12 @@ function renderFor() {
   if (!s) { box.textContent = ""; return; }
   box.innerHTML = (s.calls || []).map((c) => {
     const d = decided[c.id];
-    return `<div class="call${d ? " decided" : ""}"><span class="k">${esc(d ? "Decided: " + d.choice : c.kind || "Your call")}</span><p>${esc(c.text)}</p>`
+    const why = [["What it is", c.what], ["What goes wrong", c.risk], ["What I'd do", c.rec]].filter(([, t]) => t)
+      .map(([h, t]) => `<p><b>${h}.</b> ${esc(t)}</p>`).join("");
+    return `<div class="call${d ? " decided" : ""}"><span class="k">${esc(d ? "Decided: " + d.choice : c.kind || "Your call")}</span>`
+      + `<p class="ct">${esc(c.title || c.text)}</p>${why}`
       + (c.files?.length ? `<details class="files"><summary>${c.files.length} file${c.files.length === 1 ? "" : "s"}</summary>${c.files.map(esc).join("<br>")}</details>` : "")
-      + `<div class="opts">${(c.options || []).map((o) => `<button type="button" class="btn" data-call="${esc(c.id)}" data-choice="${esc(o)}" aria-pressed="${d?.choice === o}">${esc(o)}</button>`).join("")}</div></div>`;
+      + `<div class="opts">${(c.options || []).map((o) => `<button type="button" class="btn${!d && o === c.recommended ? " primary" : ""}" data-call="${esc(c.id)}" data-choice="${esc(o)}" aria-pressed="${d?.choice === o}">${esc(o)}</button>`).join("")}</div></div>`;
   }).join("") + (s.checks ? `<div class="checks">${esc(s.checks)}</div>` : "");
 }
 $("forscreen").addEventListener("click", async (e) => {
