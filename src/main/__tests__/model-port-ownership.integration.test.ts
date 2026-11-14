@@ -7,7 +7,9 @@
  * the preferred port is taken - scans upward for a free port and starts its own engine there, so
  * the app works even when something else holds :8439. Real lsof/ps parent ownership, loopback
  * HTTP, GGUF validation, model resolution, free-port fallback, and chat-health presentation
- * remain real. Cleanup only owns processes this test spawned.
+ * remain real. Cleanup only owns processes this test spawned. The "production port" here is a free
+ * port this test takes at setup and hands the service as its preferred port (OFFGRID_LLAMA_PORT), so
+ * an app running on this machine, with its engine on 8439, is never probed, adopted or reaped.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { execSync, spawn, type ChildProcess } from 'node:child_process'
@@ -15,7 +17,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseWindowsListenerPids, sysTool } from '../kill-orphan-port'
-import { LLAMA_SERVER_PORT } from '../../shared/ports'
+import net from 'node:net'
 
 const fixture = (() => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-port-owner-'))
@@ -45,9 +47,24 @@ vi.mock('electron', () => ({
   }
 }))
 
+/** The preferred model port for this run: free when taken, never the installed app's 8439. */
+let preferred = 0
+const previousLlamaPort = process.env.OFFGRID_LLAMA_PORT
+
+function takeFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as net.AddressInfo
+      server.close(() => resolve(port))
+    })
+  })
+}
+
 let liveOwner: ChildProcess | null = null
 let enginePid = 0
-let expectedModelId: string | null = 'first-owner'
+const EXPECTED_MODEL_ID = 'first-owner'
 
 function createValidGguf(filePath: string): void {
   const bytes = Buffer.alloc(2_048)
@@ -125,10 +142,10 @@ function processIsAlive(pid: number): boolean {
 
 async function engineIsReady(): Promise<boolean> {
   try {
-    const response = await fetch(`http://127.0.0.1:${String(LLAMA_SERVER_PORT)}/v1/models`)
+    const response = await fetch(`http://127.0.0.1:${String(preferred)}/v1/models`)
     const body = (await response.json()) as { data?: { id?: string }[] }
     const modelId = body.data?.[0]?.id
-    return response.ok && !!modelId && (!expectedModelId || modelId === expectedModelId)
+    return response.ok && modelId === EXPECTED_MODEL_ID
   } catch {
     return false
   }
@@ -139,10 +156,10 @@ function listenerPids(): number[] {
     if (process.platform === 'win32') {
       return parseWindowsListenerPids(
         execSync(`"${sysTool('netstat')}" -ano -p tcp`, { encoding: 'utf-8' }),
-        LLAMA_SERVER_PORT
+        preferred
       ).map(Number)
     }
-    return execSync(`"${sysTool('lsof')}" -tiTCP:${String(LLAMA_SERVER_PORT)} -sTCP:LISTEN`, {
+    return execSync(`"${sysTool('lsof')}" -tiTCP:${String(preferred)} -sTCP:LISTEN`, {
       encoding: 'utf-8'
     })
       .trim()
@@ -154,21 +171,9 @@ function listenerPids(): number[] {
   }
 }
 
-function processCommand(pid: number): string {
-  try {
-    return process.platform === 'win32'
-      ? execSync(`"${sysTool('tasklist')}" /FI "PID eq ${String(pid)}" /FO CSV /NH`, {
-          encoding: 'utf-8'
-        })
-      : execSync(`"${sysTool('ps')}" -p ${String(pid)} -o command=`, {
-          encoding: 'utf-8'
-        }).trim()
-  } catch {
-    return ''
-  }
-}
-
 beforeAll(async () => {
+  preferred = await takeFreePort()
+  process.env.OFFGRID_LLAMA_PORT = String(preferred)
   const modelsDir = path.join(fixture.dataDir, 'models')
   fs.mkdirSync(modelsDir, { recursive: true })
   const modelName = 'port-owner-fixture.gguf'
@@ -179,19 +184,8 @@ beforeAll(async () => {
   )
   const executable = installNativeBoundary()
 
-  const listeners = listenerPids()
-  if (listeners.length > 0) {
-    const llamaOwner = listeners.find((pid) => /llama-server/i.test(processCommand(pid)))
-    if (!llamaOwner) {
-      throw new Error(
-        `Production model port ${String(LLAMA_SERVER_PORT)} is occupied by an unrecognized process.`
-      )
-    }
-    enginePid = llamaOwner
-    expectedModelId = null
-    await waitFor(engineIsReady, 'existing healthy model engine owner', 5_000)
-    return
-  }
+  // Nothing else may hold the port this test owns; a stray listener would be a bug in the setup.
+  expect(listenerPids()).toEqual([])
 
   const ownerSource = `
 const { spawn } = require('node:child_process')
@@ -220,7 +214,7 @@ setInterval(() => {}, 1000)
       ...process.env,
       OFFGRID_TEST_ENGINE: executable,
       OFFGRID_TEST_ENGINE_LOG: fixture.engineLog,
-      OFFGRID_TEST_PORT: String(LLAMA_SERVER_PORT)
+      OFFGRID_TEST_PORT: String(preferred)
     },
     stdio: 'ignore'
   })
@@ -232,7 +226,7 @@ setInterval(() => {}, 1000)
   )
   const [pidText, portText] = fs.readFileSync(fixture.engineLog, 'utf8').trim().split(':')
   enginePid = Number(pidText)
-  expect(Number(portText)).toBe(LLAMA_SERVER_PORT)
+  expect(Number(portText)).toBe(preferred)
   await waitFor(engineIsReady, 'first model engine owner', 20_000)
 }, 25_000)
 
@@ -241,6 +235,8 @@ afterAll(async () => {
     liveOwner.kill('SIGTERM')
     await waitFor(() => !processIsAlive(enginePid), 'first model engine to exit')
   }
+  if (previousLlamaPort === undefined) delete process.env.OFFGRID_LLAMA_PORT
+  else process.env.OFFGRID_LLAMA_PORT = previousLlamaPort
   if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = previousDataDir
   if (previousBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
@@ -255,7 +251,7 @@ describe('model port ownership', () => {
       import('../setup'),
       import('../llama-error')
     ])
-    const conflict = modelPortConflictReason(LLAMA_SERVER_PORT)
+    const conflict = modelPortConflictReason(preferred)
     const lifecycle: Array<{ ready: boolean; starting: boolean }> = []
     const offHealth = llm.onHealthInvalidated(() =>
       lifecycle.push({ ready: llm.isReady(), starting: llm.isStarting() })
@@ -266,7 +262,7 @@ describe('model port ownership', () => {
     // free port — the app just works even when something else holds :8439.
     await llm.init()
     expect(llm.isReady()).toBe(true)
-    expect(llm.getPort()).not.toBe(LLAMA_SERVER_PORT)
+    expect(llm.getPort()).not.toBe(preferred)
     // The conflict reason is NOT surfaced — we moved instead of refusing.
     expect(llm.lastError()).not.toBe(conflict)
     expect(lifecycle).toContainEqual({ ready: false, starting: true })
@@ -277,7 +273,7 @@ describe('model port ownership', () => {
     expect(await engineIsReady()).toBe(true)
     if (liveOwner) {
       expect(fs.readFileSync(fixture.engineLog, 'utf8').trim().split(/\r?\n/)).toEqual([
-        `${String(enginePid)}:${String(LLAMA_SERVER_PORT)}`
+        `${String(enginePid)}:${String(preferred)}`
       ])
     }
 

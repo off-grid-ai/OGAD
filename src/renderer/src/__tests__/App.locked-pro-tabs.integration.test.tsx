@@ -202,6 +202,42 @@ describe('<App/> locked Pro navigation integration', () => {
     expect(screen.queryByText(/coming soon to Linux/i)).toBeNull()
   }, 30_000)
 
+  it('opens a note deep link on the Notes upgrade screen for a free user', async () => {
+    window.history.replaceState(null, '', '/notes/Work/Plan.md')
+    installAppBoundary({ isPro: false })
+
+    // Wrapped as main.tsx wraps the app.
+    render(
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Notes', level: 1 })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Get Pro/ })).toBeTruthy()
+    expect(window.location.pathname).toBe('/notes/Work/Plan.md')
+  }, 30_000)
+
+  it('hands a note deep link to the Pro Notes screen as its subroute', async () => {
+    window.history.replaceState(null, '', '/notes/Work/Plan.md')
+    installAppBoundary({ isPro: true })
+    registerProView((view, context) => (
+      <h1>
+        Paid {view} {context.navigationSubroute}
+      </h1>
+    ))
+
+    // Wrapped as main.tsx wraps the app.
+    render(
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Paid notes Work/Plan.md' })).toBeTruthy()
+    expect(window.location.pathname).toBe('/notes/Work/Plan.md')
+  }, 30_000)
+
   it('unlocks the ported routes for an entitled Linux user', async () => {
     const user = userEvent.setup()
     installAppBoundary({ platform: 'linux', isPro: true })

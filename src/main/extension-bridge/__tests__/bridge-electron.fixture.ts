@@ -149,6 +149,28 @@ app
     )
     assert.ok(!(await call('conversations.delete', { id: conversation.id })).body.error)
     assert.ok(!(await call('tools.list')).body.error)
+    // Scribe: Pro is on, but until Pro's Scribe registers, writing is unavailable (never "upgrade").
+    const scribe = { op: 'grammar', text: 'Their going home.' }
+    assert.equal((await call('writing', { request: scribe })).body.error, 'writing_unavailable')
+    const { registerHook, unregisterHook, HOOKS } = await import('../../bootstrap/hookRegistry')
+    const seen: unknown[] = []
+    const scribeHook = async (request: unknown, browser: unknown): Promise<unknown> => {
+      seen.push({ request, browser })
+      return { issues: [] }
+    }
+    registerHook(HOOKS.extensionWritingRequest, scribeHook)
+    const stateWithScribe = await call('state')
+    assert.equal(
+      (stateWithScribe.body.result as { features: { writing?: boolean } }).features.writing,
+      true
+    )
+    const written = await call('writing', { request: scribe })
+    assert.ok(!written.body.error, JSON.stringify(written))
+    assert.deepEqual(written.body.result, { issues: [] })
+    assert.deepEqual(seen, [
+      { request: scribe, browser: { deviceName: 'Synthetic browser', deviceId: device } }
+    ])
+    unregisterHook(HOOKS.extensionWritingRequest, scribeHook)
     assert.ok((await call('settings.get', { section: 'invalid' })).body.error)
     const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/extension/socket?d=${device}`, { origin })
     await once(ws, 'open')

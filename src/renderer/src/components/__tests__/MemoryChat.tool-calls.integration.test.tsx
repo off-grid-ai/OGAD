@@ -18,6 +18,7 @@ import {
 const LONG_RESULT =
   'GitHub — off-grid-ai/OGAD: Off Grid AI Desktop, a local-first on-device AI runtime.'
 
+/** "Work done" is drawn from the saved turn, once the chat has read the conversation. */
 async function openCompletedWork(): Promise<void> {
   await userEvent.click(await screen.findByRole('button', { name: 'Work done' }))
 }
@@ -248,7 +249,9 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     cleanup()
     renderChat({ conversationId: 'conversation-b' })
     await openCompletedWork()
-    expect((await screen.findByRole('list', { name: 'Thinking and tool calls' })).children).toHaveLength(4)
+    expect(
+      (await screen.findByRole('list', { name: 'Thinking and tool calls' })).children
+    ).toHaveLength(4)
   })
 
   it('explains a persisted proposal run as one ordered customer timeline', async () => {

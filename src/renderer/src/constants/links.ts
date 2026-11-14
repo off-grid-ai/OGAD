@@ -12,6 +12,10 @@ export const OFF_GRID_DESKTOP_RELEASES_URL = 'https://github.com/off-grid-ai/OGA
  *  Mirrors mobile's link to getoffgridai.co/desktop. */
 export const OFF_GRID_MOBILE_URL = 'https://getoffgridai.co/mobile'
 
+/** The Off Grid AI browser extension on the Chrome Web Store, as the website links it. */
+export const OFF_GRID_EXTENSION_URL =
+  'https://chromewebstore.google.com/detail/off-grid-ai/mohdjadebdkpineabaglhbeepcehahkd'
+
 /** Open a URL in the user's default browser (falls back to window.open). */
 export function openExternal(url: string): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

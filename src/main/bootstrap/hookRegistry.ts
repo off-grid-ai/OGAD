@@ -110,6 +110,10 @@ export const HOOKS = {
    */
   extensionChatRequest: 'chat.extensionRequest',
   extensionVaultRequest: 'vault.extensionRequest',
+  /** (request: unknown, browser: { deviceName: string; deviceId: string }) => Promise<unknown> -
+   * one Scribe request (grammar, rewrite, tone, review, feedback) from a paired browser
+   * extension. Pro registers it; free builds report writing as unavailable (pro_required). */
+  extensionWritingRequest: 'writing.extensionRequest',
   /** (options?: { localOnly?: boolean }) => VideoGenerationStatus - whether this computer can
    * generate video now. Pro registers it; free builds report video as unavailable. */
   videoStatus: 'video:status',

@@ -33,7 +33,7 @@ export function rpcHandlers(
   const requireFeature = (feature: keyof BridgeFeatures): void => {
     const features = deps.data.features()
     if (features[feature]) return
-    const proOnly = feature === 'vault' || feature === 'tools'
+    const proOnly = feature === 'vault' || feature === 'tools' || feature === 'writing'
     throw new Error(proOnly && !features.pro ? 'pro_required' : `${feature}_unavailable`)
   }
 
@@ -139,6 +139,11 @@ export function rpcHandlers(
         ? p.kinds.filter((kind): kind is string => typeof kind === 'string').slice(0, 16)
         : undefined
       return deps.data.vault(p.request, browser, kinds)
+    },
+    writing: async (p, browser) => {
+      requireFeature('writing')
+      if (!deps.data.writing) throw new Error('writing_unavailable')
+      return deps.data.writing(p.request, browser)
     },
     'settings.get': async (p) => {
       if (!isSettingsSection(p.section)) {

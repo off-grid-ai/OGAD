@@ -2,11 +2,15 @@ import { callHook, HOOKS } from './bootstrap/hookRegistry'
 import {
   ACTION_APPROVAL_ENTITY,
   KNOWLEDGE_DOCUMENT_ENTITY,
+  NOTE_FILE_ENTITY,
   SHARED_FILE_ENTITY,
   TASK_CONTROL_ENTITY,
   TASK_LAUNCH_ENTITY,
   TASK_RUN_ENTITY,
-  TASK_VISUAL_STEP_ENTITY
+  TASK_VISUAL_STEP_ENTITY,
+  WRITING_LEARNED_ENTITY,
+  WRITING_PREFERENCE_ENTITY,
+  WRITING_STYLE_GUIDE_ENTITY
 } from '@offgrid/sync'
 
 /**
@@ -19,12 +23,20 @@ export const CORE_SYNC_ENTITIES = {
   project: 'project',
   knowledgeDocument: KNOWLEDGE_DOCUMENT_ENTITY,
   sharedFile: SHARED_FILE_ENTITY,
+  /** A Notes vault file (Pro). */
+  noteFile: NOTE_FILE_ENTITY,
   modelSetting: 'model_setting',
   actionApproval: ACTION_APPROVAL_ENTITY,
   taskLaunch: TASK_LAUNCH_ENTITY,
   taskRun: TASK_RUN_ENTITY,
   taskControl: TASK_CONTROL_ENTITY,
-  taskVisualStep: TASK_VISUAL_STEP_ENTITY
+  taskVisualStep: TASK_VISUAL_STEP_ENTITY,
+  /** Scribe (Pro): a learned word or a muted rule, one record each. */
+  writingLearned: WRITING_LEARNED_ENTITY,
+  /** Scribe (Pro): one Scribe-wide preference per record. */
+  writingPreference: WRITING_PREFERENCE_ENTITY,
+  /** Scribe (Pro): a style guide, as a note-file revision. */
+  writingStyleGuide: WRITING_STYLE_GUIDE_ENTITY
 } as const
 
 export type CoreSyncEntity = (typeof CORE_SYNC_ENTITIES)[keyof typeof CORE_SYNC_ENTITIES]
