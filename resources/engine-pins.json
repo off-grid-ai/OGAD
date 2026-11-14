@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "llama": {
     "repo": "ggml-org/llama.cpp",
-    "ref": "b12345",
+    "ref": "b12375",
     "sha256": {
-      "linux-cuda": "f939fc5d0efe919d75d4784b5861fb3cacac0135e8fd879dd2a57a0565473ac8",
-      "linux-cudart": "3645c6e9282109c4b237e220196fa06f76fc7d79964e354e4d4ad3713fcfb07f",
-      "linux-vulkan": "d2e3b22a82043bedc96d4df0edd39c13786f4c52b358a34344f7e9fc630bf8cc",
-      "linux-cpu": "a52339d1c8b6c04dcdf04ccfe92db0d3aee06a5bd8201474d232256bc790c308",
-      "win-cuda": "724c5be43f02b2f908b47e509ffd76eae68416095aeae9959f6712839e8b8e00",
+      "linux-cuda": "36ad425cb846ec831ec48b7789b032e43e6df931f95eed7fcbd7fabdbd521225",
+      "linux-cudart": "85e106462d96a5506383a3833c607607196669e65c736964dcb4c76e84e6db67",
+      "linux-vulkan": "e5144c8499399c115c7f5319421942252e9e84bf7d78b46f968cd5dbc769df72",
+      "linux-cpu": "89fdf5a4066170fa408a5ebe1510b50bd8a5bab750e49ae531bb1d4cdbae65e3",
+      "win-cuda": "8b7bf8f3b5269531cbf00c52e4ee5d8b0c77cb4ea7af694ed3da3a34e47a7099",
       "win-cudart": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
-      "win-vulkan": "f9bb0fc734a9731d22f7106e3961e8a5ed83d1a905295ca4759c78ba82e6997e",
-      "win-cpu": "e941d57beeae813d1720b24d9679629c4c13e141f42f7201da8acca27144c1d9"
+      "win-vulkan": "8990615f25d4fa12a7f1d8fc9da995538ce739fec01838f003fa9ff099d643f0",
+      "win-cpu": "3aa7046f1b310c404418625d4e7e7b057c2d0e0eef5557925561381373d8f026"
     }
   },
   "prism": {
