@@ -30,7 +30,7 @@ This is a measured development run, not a device benchmark.
 All source builds use `scripts/prepare-image-runtime.mjs` for the pinned runtime
 above and the same decode progress and first-frame preview patches.
 
-- Linux Vulkan: `OFFGRID_BUILD_IMAGE_FROM_SOURCE=1 bash scripts/fetch-image-linux.sh`.
+- Linux Vulkan: `bash scripts/fetch-image-linux.sh` (always from source).
   The build host needs CMake, a C++ compiler, and Vulkan development tools.
 - Linux CUDA: `OFFGRID_BUILD_IMAGE_CUDA_FROM_SOURCE=1 bash scripts/build-image-cuda-linux.sh`.
   This uses the script's pinned CUDA build container.

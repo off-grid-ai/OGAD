@@ -54,6 +54,9 @@ const server = http.createServer((req, res) => {
   if (fs.existsSync(brain)) {
     const upstream = http.request(fs.readFileSync(brain, 'utf8') + req.url, { method: req.method, headers: req.headers }, (answer) => {
       res.writeHead(answer.statusCode || 500, answer.headers)
+      // The model's reply dying mid-way reaches the client as the engine dying mid-way.
+      answer.on('aborted', () => res.destroy())
+      answer.on('error', () => res.destroy())
       answer.pipe(res)
     })
     upstream.on('error', () => res.destroy())
@@ -72,6 +75,7 @@ const server = http.createServer((req, res) => {
 server.listen(Number(valueAfter('--port')), '127.0.0.1')
 const stop = () => {
   clearInterval(progress)
+  server.closeAllConnections()
   server.close(() => process.exit(0))
 }
 process.on('SIGTERM', stop)
@@ -149,9 +153,16 @@ export type BrainReply =
   | { json: unknown }
   | {
       content?: string
+      /** Content as these exact stream frames, the way the engine sends tokens. */
+      contentDeltas?: string[]
       reasoning?: string
       toolCalls?: Array<{ id?: string; name: string; arguments: unknown }>
       finishReason?: string
+      /** Stream the content, then drop the connection: the engine went away mid-reply. */
+      dropAfterContent?: boolean
+      /** Write content frames as the test produces them (a slow model); the reply ends when it
+       *  resolves. `signal` aborts when the client hangs up. */
+      stream?: (write: (delta: string) => void, signal: AbortSignal) => Promise<void>
     }
 
 export interface ModelBrain {
@@ -212,7 +223,8 @@ export async function useModelBrain(
         res.end(JSON.stringify(reply.json))
         return
       }
-      const turn = typeof reply === 'string' ? { content: reply } : reply
+      const turn: Exclude<BrainReply, string | { json: unknown }> =
+        typeof reply === 'string' ? { content: reply } : reply
       const toolCalls = (turn.toolCalls ?? []).map((call, index) => ({
         index,
         id: call.id ?? `call_${index}`,
@@ -229,7 +241,26 @@ export async function useModelBrain(
           `data: ${JSON.stringify({ choices: [{ delta, finish_reason: reason }] })}\n\n`
         res.writeHead(200, { 'Content-Type': 'text/event-stream' })
         if (turn.reasoning) res.write(frame({ reasoning_content: turn.reasoning }))
+        for (const delta of turn.contentDeltas ?? []) res.write(frame({ content: delta }))
+        if (turn.stream) {
+          try {
+            await turn.stream((delta) => {
+              if (!res.writableEnded && !res.destroyed) res.write(frame({ content: delta }))
+            }, controller.signal)
+          } catch (error) {
+            // A stream that stops because the client hung up is the expected cancellation; any
+            // other failure ends the response, as a crashed engine would.
+            if (!controller.signal.aborted) res.destroy(error as Error)
+            return
+          }
+          if (controller.signal.aborted || res.destroyed) return
+        }
         if (turn.content) res.write(frame({ content: turn.content }))
+        if (turn.dropAfterContent) {
+          // The frames reach the client first; then the engine is gone.
+          setTimeout(() => res.destroy(), 50)
+          return
+        }
         if (toolCalls.length) res.write(frame({ tool_calls: toolCalls }))
         res.write(frame({}, finish))
         res.end('data: [DONE]\n\n')

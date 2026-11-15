@@ -9,19 +9,19 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const VERSION = '0.27.22'
+const VERSION = '0.27.23'
 const ASSETS = {
   darwin: {
     file: `c2patool-v${VERSION}-universal-apple-darwin.zip`,
-    sha256: 'd064ca72e599c74e5fdc2ed04b47d6cb62210a2b14db589d078c2ec27c98d3df'
+    sha256: '380647e657ed16bb7e61982bd52f6c0b49a1cd92f09dbef49febd0f4c439a673'
   },
   win32: {
     file: `c2patool-v${VERSION}-x86_64-pc-windows-msvc.zip`,
-    sha256: '2e6808719b5610f9ab096857f600f16938fda3c7388de3829f0dea1c2a345011'
+    sha256: 'b3fba7bdfb6f9c0b43d47e50d1db66785404f3e4b687e7127991157852b29cb5'
   },
   linux: {
     file: `c2patool-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz`,
-    sha256: '6f138ad53da1a62f1cd6ee71c60727efa27d13b811f4c0ea8c2a8528968b358b'
+    sha256: '7b8a09f85eeb4c8fe96ce00ffb6985209ebbb05fc39d6c13224a8b33547ba2a4'
   }
 }
 

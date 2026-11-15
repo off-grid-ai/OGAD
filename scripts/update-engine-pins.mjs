@@ -137,7 +137,6 @@ async function updateSd() {
   const ref = release.tag_name
   const short = ref.split('-').at(-1)
   const { sha256, missing } = digests(release, {
-    'linux-vulkan': `sd-master-${short}-bin-Linux-Ubuntu-24.04-x86_64-vulkan.zip`,
     'win-cuda': `sd-master-${short}-bin-win-cuda12-x64.zip`,
     'win-vulkan': `sd-master-${short}-bin-win-vulkan-x64.zip`,
     'win-cpu': `sd-master-${short}-bin-win-cpu-x64.zip`

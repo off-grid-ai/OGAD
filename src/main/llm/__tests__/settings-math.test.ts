@@ -38,6 +38,22 @@ describe('buildLaunchArgs context checkpoints', () => {
   })
 })
 
+describe('buildLaunchArgs flash attention', () => {
+  const flash = (args: string[]): string | undefined => {
+    const i = args.indexOf('--flash-attn')
+    return i === -1 ? undefined : args[i + 1]
+  }
+  it('a preset off sends nothing, so llama.cpp stays on auto', () => {
+    expect(flash(buildLaunchArgs(baseArgs()))).toBeUndefined()
+  })
+  it('off chosen by the person is sent, since auto would turn it on', () => {
+    expect(flash(buildLaunchArgs(baseArgs({ flashAttnOff: true })))).toBe('off')
+  })
+  it('a quantized KV cache still needs it on, whatever was chosen', () => {
+    expect(flash(buildLaunchArgs(baseArgs({ flashAttnOff: true, kvCacheType: 'q8_0' })))).toBe('on')
+  })
+})
+
 describe('buildLaunchArgs image-min-tokens', () => {
   it('adds --image-min-tokens only with a projector AND a set floor (grounder)', () => {
     const args = buildLaunchArgs(

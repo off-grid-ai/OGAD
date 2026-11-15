@@ -1,16 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pin the upstream Ubuntu 24.04 x64 Vulkan build. It also contains the CPU
-# backend, so image generation remains available without a working GPU driver.
+# Build stable-diffusion.cpp (Vulkan, with the CPU backend) from the pinned source and our patches.
+# Upstream's Linux builds moved to Ubuntu 26.04 and need glibc 2.43, so we build on 24.04 instead.
+# The CPU backend keeps image generation available without a working GPU driver.
 ROOT="${OFFGRID_BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-PINS="$(cd "$(dirname "$0")/.." && pwd)/resources/engine-pins.json"
-# The ref and hash live in resources/engine-pins.json.
-SD_REF="$(node -p "require('$PINS').sd.ref")"
-ARCHIVE="sd-master-${SD_REF##*-}-bin-Linux-Ubuntu-24.04-x86_64-vulkan.zip"
-SHA256="$(node -p "require('$PINS').sd.sha256['linux-vulkan']")"
-URL="https://github.com/leejet/stable-diffusion.cpp/releases/download/$SD_REF/$ARCHIVE"
-
 if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
   echo '[fetch-image-linux] Linux x64 is required' >&2
   exit 1
@@ -18,27 +12,16 @@ fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
-if [ "${OFFGRID_BUILD_IMAGE_FROM_SOURCE:-0}" = 1 ]; then
-  node "$ROOT/scripts/prepare-image-runtime.mjs" "$WORK/src"
-  cmake -S "$WORK/src" -B "$WORK/build" -DCMAKE_BUILD_TYPE=Release \
-    -DSD_VULKAN=ON -DSD_BUILD_EXAMPLES=ON -DSD_SERVER_BUILD_FRONTEND=OFF \
-    -DSD_BUILD_SHARED_LIBS=OFF -DSD_BUILD_SHARED_GGML_LIB=OFF -DGGML_NATIVE=OFF
-  cmake --build "$WORK/build" --target sd-cli sd-server --parallel 4
-  mkdir -p "$WORK/sd"
-  install -m 755 "$WORK/build/bin/sd-cli" "$WORK/build/bin/sd-server" "$WORK/sd/"
-  install -m 644 "$WORK/src/LICENSE" "$WORK/sd/LICENSE"
-  help="$("$WORK/sd/sd-cli" --help 2>&1)"
-  grep -q -- '--decode-preview-path' <<< "$help"
-else
-  if [ -n "${OFFGRID_SD_ARCHIVE_CACHE_DIR:-}" ] &&
-    [ -f "$OFFGRID_SD_ARCHIVE_CACHE_DIR/$ARCHIVE" ]; then
-    cp "$OFFGRID_SD_ARCHIVE_CACHE_DIR/$ARCHIVE" "$WORK/$ARCHIVE"
-  else
-    curl --fail --location --retry 3 --silent --show-error "$URL" --output "$WORK/$ARCHIVE"
-  fi
-  printf '%s  %s\n' "$SHA256" "$WORK/$ARCHIVE" | sha256sum --check --status
-  unzip -q "$WORK/$ARCHIVE" -d "$WORK/sd"
-fi
+node "$ROOT/scripts/prepare-image-runtime.mjs" "$WORK/src"
+cmake -S "$WORK/src" -B "$WORK/build" -DCMAKE_BUILD_TYPE=Release \
+  -DSD_VULKAN=ON -DSD_BUILD_EXAMPLES=ON -DSD_SERVER_BUILD_FRONTEND=OFF \
+  -DSD_BUILD_SHARED_LIBS=OFF -DSD_BUILD_SHARED_GGML_LIB=OFF -DGGML_NATIVE=OFF
+cmake --build "$WORK/build" --target sd-cli sd-server --parallel 4
+mkdir -p "$WORK/sd"
+install -m 755 "$WORK/build/bin/sd-cli" "$WORK/build/bin/sd-server" "$WORK/sd/"
+install -m 644 "$WORK/src/LICENSE" "$WORK/sd/LICENSE"
+help="$("$WORK/sd/sd-cli" --help 2>&1)"
+grep -q -- '--decode-preview-path' <<< "$help"
 test -x "$WORK/sd/sd-cli"
 test -x "$WORK/sd/sd-server"
 

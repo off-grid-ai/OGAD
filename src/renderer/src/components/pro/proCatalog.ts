@@ -12,7 +12,9 @@ import {
   Waveform,
   ShieldCheck,
   Devices as DevicesIcon,
-  FilmStrip
+  FilmStrip,
+  PenNib,
+  Notebook
 } from '@phosphor-icons/react'
 import type { ComponentType } from 'react'
 import { GodIcon } from '../GodIcon'
@@ -220,6 +222,32 @@ export const PRO_FEATURES: ProFeature[] = [
       `${primaryModifier() === 'Cmd' ? 'Option' : 'Alt'}+Space push-to-talk or toggle, anywhere`,
       'Paste-at-cursor + a searchable recordings library',
       'Transcribe any audio/video file, all on-device'
+    ],
+    platforms: ['darwin', 'win32', 'linux']
+  },
+  {
+    route: 'scribe',
+    label: 'Scribe',
+    icon: PenNib,
+    tagline: 'Every message correct, clear and in your voice.',
+    description: `Scribe checks your writing in every text box: your browser, your mail, your chat apps and Off Grid itself. It underlines spelling and grammar as you type and fixes them in one click. Select any text to rewrite it, shorten it, change its tone or translate it. It knows your people and projects, so it never flags their names, and rewrites sound like you. It runs on your ${deviceNoun()}; your writing never leaves it.`,
+    highlights: [
+      'Spelling and grammar fixes as you type, in every app',
+      'Rewrite, shorten, change tone or translate any selection',
+      'Learns your names and words; runs on-device'
+    ],
+    platforms: ['darwin', 'win32', 'linux']
+  },
+  {
+    route: 'notes',
+    label: 'Notes',
+    icon: Notebook,
+    tagline: 'Your notes as plain files you own.',
+    description: `Notes keeps a Markdown library on your ${deviceNoun()}, and opens your Obsidian vaults as they are. Write in a page view or in Markdown, link notes with [[wikilinks]], and see backlinks and a graph of how they connect. Every version is kept. Dictate into a note and it lands formatted. Chat can find what you wrote. Nothing leaves your ${deviceNoun()}.`,
+    highlights: [
+      'Opens your Obsidian vaults as they are',
+      'Links, backlinks, tags and a graph view',
+      'Every version kept; dictation lands formatted'
     ],
     platforms: ['darwin', 'win32', 'linux']
   },

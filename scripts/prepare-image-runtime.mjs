@@ -12,12 +12,11 @@ if (!source) throw new Error('Usage: prepare-image-runtime.mjs <source-directory
 const pins = JSON.parse(readFileSync(resolve(scripts, '../resources/engine-pins.json'), 'utf8'))
 const revision = process.argv[3] || pins.sd.commit
 // Each patch applies inside its own tree: stable-diffusion.cpp itself, or its ggml submodule.
-// ggml's Metal GroupNorm normalized only the first image of a batch; sd.cpp batches CFG's two UNet
-// passes, so the second came back unwritten and every SDXL picture on a Mac rendered white.
+// ggml 1.0.0 (sd.cpp master-1104) normalizes every image of a batch in Metal GroupNorm itself, so
+// our metal-group-norm-batch.patch (white SDXL pictures on a Mac) is gone.
 const patches = [
   { tree: '.', name: 'video-decode-observer.patch' },
-  { tree: '.', name: 'video-decode-cli.patch' },
-  { tree: 'ggml', name: 'metal-group-norm-batch.patch' }
+  { tree: '.', name: 'video-decode-cli.patch' }
 ].map(({ tree, name }) => ({ dir: resolve(source, tree), file: resolve(scripts, 'patches', name) }))
 const git = (...args) => execFileSync('git', ['-C', source, ...args], { stdio: 'inherit' })
 if (!existsSync(resolve(source, '.git'))) {
@@ -33,8 +32,9 @@ for (const { dir, file } of [...patches].reverse()) {
 }
 git('fetch', '--depth', '1', 'origin', revision)
 git('checkout', '--detach', 'FETCH_HEAD')
-// Recursive: newer ggml carries CUTLASS as its own submodule, which the CUDA build needs.
-git('submodule', 'update', '--init', '--recursive', '--depth', '1', 'ggml')
+// The CUDA build needs CUTLASS: sd.cpp master-1104 carries it in thirdparty/cutlass, older ggml
+// carried it as its own submodule (hence recursive).
+git('submodule', 'update', '--init', '--recursive', '--depth', '1', 'ggml', 'thirdparty/cutlass')
 if (execFileSync('git', ['-C', source, 'status', '--porcelain'], { encoding: 'utf8' }).trim()) {
   throw new Error(`Native source has unrelated changes: ${source}`)
 }

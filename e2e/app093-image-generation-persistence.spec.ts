@@ -195,14 +195,18 @@ test('APP-093 generates one owned image and keeps it usable across a full relaun
   await generated.click()
   const preview = page.getByRole('dialog', { name: 'Generated image' })
   await expect(preview).toBeVisible()
-  expect(
-    await preview
-      .getByRole('img', { name: 'Generated image' })
-      .evaluate((image: HTMLImageElement) => ({
-        width: image.naturalWidth,
-        height: image.naturalHeight
-      }))
-  ).toEqual({ width: 96, height: 64 })
+  // The full picture, at its own size, once the viewer has decoded it (a slow runner shows the
+  // dialog a frame before the image finishes loading).
+  await expect
+    .poll(() =>
+      preview
+        .getByRole('img', { name: 'Generated image' })
+        .evaluate((image: HTMLImageElement) => ({
+          width: image.naturalWidth,
+          height: image.naturalHeight
+        }))
+    )
+    .toEqual({ width: 96, height: 64 })
   await preview.getByRole('button', { name: 'Close' }).click()
 
   const beforeRestart = await scopedImages()

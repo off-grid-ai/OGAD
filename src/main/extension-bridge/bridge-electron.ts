@@ -245,6 +245,7 @@ function features(): BridgeFeatures {
     tools: pro && exts.some((e) => e.category === 'tool'),
     connectors: pro && exts.some((e) => e.category !== 'tool'),
     vault: pro && hasHook(HOOKS.extensionVaultRequest),
+    writing: pro && hasHook(HOOKS.extensionWritingRequest),
     // Keep the live socket open only while tasks are set to use the default browser.
     browserTasks: pro && getWebUseSettings().browserTarget === 'default_browser',
     settingsWatch: true
@@ -540,6 +541,11 @@ const data: BridgeData = {
       deviceName: browser.name,
       deviceId: browser.id,
       ...(kinds ? { kinds } : {})
+    }),
+  writing: async (request, browser) =>
+    callHookAsync(HOOKS.extensionWritingRequest, request, {
+      deviceName: browser.name,
+      deviceId: browser.id
     }),
   readSettings: (section) => settingsStore.read(section),
   writeSettings: (section, patch) => settingsStore.write(section, patch)

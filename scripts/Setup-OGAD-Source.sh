@@ -130,7 +130,7 @@ cd "$workspace/desktop"
 git lfs install --local --skip-repo
 git lfs pull --include='resources/bin/kev-local-server.py' --exclude=''
 npm --prefix "$workspace/shared" ci
-for package in models sync use automation speech ui rag design; do
+for package in models sync use automation speech ui rag design writing notes notes-editor; do
   npm --prefix "$workspace/shared/packages/$package" run build
 done
 npm ci

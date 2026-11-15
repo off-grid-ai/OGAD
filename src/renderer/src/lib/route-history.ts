@@ -2,8 +2,8 @@
 // the built app), so Back and Forward (Cmd+[ / Cmd+], the toolbar arrows) are history.back() and
 // history.forward(), and popstate restores the view and where the page was scrolled.
 
-/** Views whose own pages are path segments after the view (/video/watch/<id>). */
-const PATH_SUBROUTE_VIEWS = new Set(['video'])
+/** Views whose own pages are path segments after the view (/video/watch/<id>, /notes/<note>). */
+const PATH_SUBROUTE_VIEWS = new Set(['video', 'notes', 'scribe'])
 
 export function hasPathSubroute(view: string): boolean {
   return PATH_SUBROUTE_VIEWS.has(view)

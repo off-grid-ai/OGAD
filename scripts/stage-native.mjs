@@ -66,6 +66,48 @@ function stageSpeakerDiarize() {
 
 stageSpeakerDiarize()
 
+/**
+ * Pro's Scribe overlay: Windows builds scribe-overlay-win.exe into resources/bin; Linux stages the
+ * X11 helper into build/linux-bin. macOS builds it below with the other Swift helpers.
+ * @returns {void}
+ */
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
+function stageScribeOverlay() {
+  const scripts = path.join(root, 'pro', 'scripts')
+  if (process.platform === 'win32') {
+    const script = path.join(scripts, 'build-scribe-overlay-win.ps1')
+    if (!fs.existsSync(script)) return
+    // PowerShell 7 when installed, else the Windows PowerShell every Windows ships (the script
+    // runs on both), so a fresh source checkout builds without installing pwsh first.
+    const shell = spawnSync('pwsh', ['-NoProfile', '-Command', 'exit 0']).error
+      ? 'powershell.exe'
+      : 'pwsh'
+    const args = [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      script,
+      '-StageDir',
+      stageDir
+    ]
+    const result = spawnSync(shell, args, { cwd: root, stdio: 'inherit' })
+    if (result.error) throw result.error
+    if (result.status !== 0) process.exit(result.status ?? 1)
+  } else if (process.platform === 'linux') {
+    const script = path.join(scripts, 'build-scribe-overlay-linux.sh')
+    if (!fs.existsSync(script)) return
+    const result = spawnSync('bash', [script, path.join(root, 'build', 'linux-bin')], {
+      cwd: root,
+      stdio: 'inherit'
+    })
+    if (result.error) throw result.error
+    if (result.status !== 0) process.exit(result.status ?? 1)
+  }
+}
+
+stageScribeOverlay()
+
 // c2patool signs the AI label into exported videos, on every platform that has a build. Like the
 // diarize helper, it goes where the platform's installer takes its binaries from.
 {
@@ -111,4 +153,5 @@ run(path.join(root, 'scripts', 'build-computer-use-capture.sh'), root)
 run(path.join(root, 'scripts', 'build-ocr.sh'), root)
 run(path.join(root, 'scripts', 'build-actions-helper.sh'), root)
 run(path.join(root, 'pro', 'scripts', 'build-proximity-helper.sh'), path.join(root, 'pro'))
+run(path.join(root, 'pro', 'scripts', 'build-scribe-overlay.sh'), path.join(root, 'pro'))
 
