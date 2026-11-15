@@ -4,7 +4,7 @@ name: Build native engines
 # resources/engine-pins.json, and smoke-tests each engine on its own platform:
 #   mac-native     llama.cpp, Prism, stable-diffusion.cpp and whisper.cpp from source (universal,
 #                  macOS 13+), plus the Kev runtime carried over from the current archive
-#   linux-native   upstream llama.cpp and Prism (Vulkan and CPU) and stable-diffusion.cpp (Vulkan),
+#   linux-native   upstream llama.cpp and Prism (Vulkan and CPU), stable-diffusion.cpp (Vulkan) from source,
 #                  plus whisper, FFmpeg, executorch-speech and licences carried over from the
 #                  current archive (or from a new whisper archive when whisper moved)
 #   linux-sd-cuda  stable-diffusion.cpp CUDA 12.8, all GPU architectures, only when sd moved
@@ -163,15 +163,15 @@ jobs:
     needs: [plan, linux-whisper]
     if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.linux-whisper.result == 'success' || needs.linux-whisper.result == 'skipped') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.plan.outputs.ref }}
           lfs: false
           persist-credentials: false
-      - name: Install runtime dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 unzip
+      - name: Install runtime and stable-diffusion.cpp build dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 unzip cmake libvulkan-dev glslc
       - name: Start from the current archive (whisper, FFmpeg, executorch-speech, licences)
         run: |
           pin() { node -p "require('./resources/engine-pins.json').$1"; }
@@ -192,7 +192,7 @@ jobs:
           rm -rf build/linux-bin/whisper build/linux-bin/whisper-cpu
           tar -xzf "$RUNNER_TEMP/whisper/$(cat "$RUNNER_TEMP/whisper/linux-whisper.name")" -C build/linux-bin \
             --no-same-owner --exclude='whisper-cuda'
-      - name: Stage llama.cpp and Prism (Vulkan, CPU) and stable-diffusion.cpp (Vulkan)
+      - name: Stage llama.cpp and Prism (Vulkan, CPU) and build stable-diffusion.cpp (Vulkan)
         run: |
           for variant in standard prism; do
             for accelerator in vulkan cpu; do

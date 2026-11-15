@@ -31,7 +31,6 @@
     "ref": "master-1028-37bc88b",
     "commit": "37bc88b5e97a213821949732ea66c58ae8ffc784",
     "sha256": {
-      "linux-vulkan": "3e84a0c0e87898bc9aeb71bf4adeb08e89b3d1424d1ab018bca4add907721b37",
       "win-cuda": "62fe56041925f4cd1d6ef3f69ec52cae55839efef27f4e2ed4c8b6a82ca31c59",
       "win-vulkan": "c077a6dbd596f1dbcd3fd05d715a363dea41da1de0e893eaf7fd96e0b4c314f0",
       "win-cpu": "13ed02c2f6bf297a756789b601a0598dcfc6ff7aadffdc5db1f462ad0e390ab0"
