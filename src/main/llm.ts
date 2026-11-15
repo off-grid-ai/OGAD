@@ -798,6 +798,7 @@ export class LLMService {
       spillBatch: this.spillBatchFor(effectiveCtxSize, gpuLayers, serverPath),
       cpuOnly,
       flashAttn: this.flashAttn,
+      flashAttnOff: !this.flashAttn && this.userExplicit.has('flashAttn'),
       kvCacheType: this.kvCacheType,
       // Unset, llama.cpp takes the host's physical cores; under a container CPU quota that
       // oversubscribes it and every thread is throttled, so plan from the quota instead.

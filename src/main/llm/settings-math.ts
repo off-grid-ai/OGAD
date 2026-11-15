@@ -127,6 +127,9 @@ export interface LaunchArgsInput {
    *  spillBatchSize in @offgrid/models). The person's own batch size wins. */
   spillBatch?: number | null
   flashAttn: boolean
+  /** The person switched Flash Attention off themselves. A preset's `false` sends nothing and
+   *  leaves llama.cpp on auto, which turns it on where the backend supports it. */
+  flashAttnOff?: boolean
   kvCacheType: KvCacheType
   threads: number | undefined
   batchSize: number | undefined
@@ -234,6 +237,9 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
   // FlashAttention: faster + lower memory. Required for a quantized KV cache.
   if (i.flashAttn || kv.k !== 'f16' || kv.v !== 'f16') {
     args.push('--flash-attn', 'on')
+  } else if (i.flashAttnOff) {
+    // Unset, llama.cpp picks auto and usually turns it on, so off has to be said.
+    args.push('--flash-attn', 'off')
   }
   // Quantized KV cache (q8_0/q4_0) shrinks the per-token memory footprint — the single
   // biggest lever against memory-overcommit freezes on big contexts.
