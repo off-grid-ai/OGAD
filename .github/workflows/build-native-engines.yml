@@ -171,7 +171,7 @@ jobs:
           lfs: false
           persist-credentials: false
       - name: Install runtime and stable-diffusion.cpp build dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 unzip cmake libvulkan-dev glslc
+        run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 unzip cmake libvulkan-dev glslc spirv-headers
       - name: Start from the current archive (whisper, FFmpeg, executorch-speech, licences)
         run: |
           pin() { node -p "require('./resources/engine-pins.json').$1"; }
