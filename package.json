@@ -72,7 +72,7 @@
     "@codemirror/view": "^6.43.15",
     "@electron-toolkit/utils": "^4.0.0",
     "@gutenye/ocr-node": "^1.4.9",
-    "@huggingface/transformers": "4.3.1",
+    "@huggingface/transformers": "4.3.2",
     "@langchain/core": "^1.2.9",
     "@langchain/langgraph": "^1.4.12",
     "@lezer/highlight": "^1.2.5",
