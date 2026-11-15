@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "llama": {
     "repo": "ggml-org/llama.cpp",
-    "ref": "b12019",
+    "ref": "b12405",
     "sha256": {
-      "linux-cuda": "0295172839d1ff69c4e83d69b5cd3cad81442c463004495710de694968b7fab8",
-      "linux-cudart": "842484ddbe6a6b29d9587b2295d0310ecf4e9825f28f129e019c4624168ec82e",
-      "linux-vulkan": "32283c875bd24c6fa63dbad08f3b60142ddeb7a1f3c50c4f9e09ef46561afe7f",
-      "linux-cpu": "209de6f5c07fa505b4e38678f067bf6c3ddd254c1465e5608924cccf0cdfb0f7",
-      "win-cuda": "b1fe533a8e95d7a6857dba3562288ec64acd537c8533530b25af2b1d5c153d7e",
+      "linux-cuda": "bf9f048919f027f19490d41c180970d23862f46e0b8784445f21f1bf2a99f6c5",
+      "linux-cudart": "a28db0b09e3cc3a6558963680197204b45ebb8fa4dba25fbf349bb3398ce7740",
+      "linux-vulkan": "94d0d052fb1682c1f58c22b65fff9afbfa896c18b7d6bc3802e240fae3023206",
+      "linux-cpu": "deea31e01fe06beb93c61c3113f6bfb56f825651aa1fde432f8745a05e426bf4",
+      "win-cuda": "f069a0ecf89a89be67c0af097b9278baa8d2629becaf6c897defff0059dd70d2",
       "win-cudart": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
-      "win-vulkan": "5baf89edb62446cab5974848ee53b4391f2dc0d7a93eecb95cf6df26f470c427",
-      "win-cpu": "ff2ee6abe944250591192486f9493f7e2527a907c0309da16f559a8b96b0486d"
+      "win-vulkan": "42d13bd422e670dd5cbc830e8a952f33cad84a3343a5d64c2708e3403008ba1d",
+      "win-cpu": "6a382b6e7fd07a6fe4d0d888dcce7e1f10471b53554e0f47631f780c8edf51e9"
     }
   },
   "prism": {
@@ -57,12 +57,12 @@
   },
   "nvidia": {
     "linux": {
-      "nvidia-cuda-runtime": "13.4.92",
-      "nvidia-cublas": "13.8.2.12",
-      "nvidia-curand": "10.4.4.72",
-      "nvidia-cudnn-cu13": "9.27.0.42",
-      "nvidia-cufft": "12.4.0.43",
-      "nvidia-cuda-nvrtc": "13.4.92"
+      "nvidia-cuda-runtime": "13.5.37",
+      "nvidia-cublas": "13.10.0.20",
+      "nvidia-curand": "10.4.5.25",
+      "nvidia-cudnn-cu13": "9.28.1.4",
+      "nvidia-cufft": "12.5.0.14",
+      "nvidia-cuda-nvrtc": "13.5.37"
     },
     "win": {
       "nvidia-cublas-cu12": {
@@ -78,8 +78,8 @@
         "sha256": "8e018af8fa02363876860388bd10ccb89eb9ab8fb0aa749aaf58430a9f7c4891"
       },
       "nvidia-cudnn-cu12": {
-        "version": "9.27.0.42",
-        "sha256": "06e9b0026f3bad97d2b58666330fabec04fe1672f776661ecb0ce0029c27f142"
+        "version": "9.28.1.4",
+        "sha256": "3467aafa9b260e6adf5fbbfc0e21d180133305b42032aa1160be2d3142bb8b09"
       },
       "nvidia-cufft-cu12": {
         "version": "11.4.1.4",
@@ -90,12 +90,12 @@
   "archives": {
     "release": "native-deps-2026-09",
     "mac-native": {
-      "name": "ogad-mac-native-20261115-r4.tar.gz",
-      "sha256": "b124a4d8907b44f0dabc11bfdb8afa7e7f427d396045befca80d5de6b9a40743"
+      "name": "ogad-mac-native-20261115-r28.tar.gz",
+      "sha256": "62cd799bfe6ed15f3725d3c158659892753d18b47985edc0816fe1421a78745c"
     },
     "linux-native": {
-      "name": "ogad-linux-native-x64-20261115-r4.tar.gz",
-      "sha256": "26941b25633c5eff5581b8ca0a1148daba5f52ac7da06b27e5875696594f6e55"
+      "name": "ogad-linux-native-x64-20261115-r28.tar.gz",
+      "sha256": "88fd08ab9863f3e14e12bbcbd96d44cadb14f165518822cd9b037f897657c283"
     },
     "linux-sd-cuda": {
       "name": "ogad-sd-master-1028-37bc88b-linux-x64-cuda12.8-multiarch-20261030-r10.tar.gz",
