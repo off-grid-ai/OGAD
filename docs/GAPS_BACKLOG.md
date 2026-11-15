@@ -45,7 +45,7 @@ prompt, the Windows scheduled task, and the Linux timer.
 
 ### SEARCH-RULES-TESTS-20261022 (P2) - The model search rules have no direct tests
 
-**Evidence:** no test calls `isHiddenUpload`, `baseModelKey`, `parseMoeParams` or `newerModelFor` from
+**Evidence:** no test calls `baseModelKey`, `parseMoeParams` or `newerModelFor` from
 `shared/packages/models/src/search-rules.ts`. The picks are covered by `model-fit-phone.test.mjs` and
 `e2e/model-picks-download-to-chat.spec.ts`.
 
