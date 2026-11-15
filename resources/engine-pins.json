@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "llama": {
     "repo": "ggml-org/llama.cpp",
-    "ref": "b12405",
+    "ref": "b12415",
     "sha256": {
-      "linux-cuda": "bf9f048919f027f19490d41c180970d23862f46e0b8784445f21f1bf2a99f6c5",
-      "linux-cudart": "a28db0b09e3cc3a6558963680197204b45ebb8fa4dba25fbf349bb3398ce7740",
-      "linux-vulkan": "94d0d052fb1682c1f58c22b65fff9afbfa896c18b7d6bc3802e240fae3023206",
-      "linux-cpu": "deea31e01fe06beb93c61c3113f6bfb56f825651aa1fde432f8745a05e426bf4",
-      "win-cuda": "f069a0ecf89a89be67c0af097b9278baa8d2629becaf6c897defff0059dd70d2",
+      "linux-cuda": "718a1d32aac5a6e9a08d6602ee22b76e9ea49e6f1f6af88e9b4b4a90500409df",
+      "linux-cudart": "a72f54ab11b66de6d0fd0378ddb0ff11717801f174ca2c438de0be1a3e500b1e",
+      "linux-vulkan": "be4413d83d54e062009f162c2a40056175ab291f67e1963402277215b86a0749",
+      "linux-cpu": "02ceef24a039ca8ae7b623d8cebd06e3bce2b5786b7447a2bd1952320a7838d8",
+      "win-cuda": "9a39e335f8068b130364491034f66e11d911b958e3d92db354002404c9c76c9b",
       "win-cudart": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
-      "win-vulkan": "42d13bd422e670dd5cbc830e8a952f33cad84a3343a5d64c2708e3403008ba1d",
-      "win-cpu": "6a382b6e7fd07a6fe4d0d888dcce7e1f10471b53554e0f47631f780c8edf51e9"
+      "win-vulkan": "35a5d47cb1e4aca82b119b2f8630fc8927b2f57a59c588bd9a4cfc7eaa648104",
+      "win-cpu": "83d65aca06314b8fa38378a49c4fb16e08d5547460f7bc916b737204ba6a39c1"
     }
   },
   "prism": {
@@ -28,12 +28,12 @@
   },
   "sd": {
     "repo": "leejet/stable-diffusion.cpp",
-    "ref": "master-1028-37bc88b",
-    "commit": "37bc88b5e97a213821949732ea66c58ae8ffc784",
+    "ref": "master-1104-5dcfa79",
+    "commit": "5dcfa79801213f23e27b3e83617350ebb8ea93aa",
     "sha256": {
-      "win-cuda": "62fe56041925f4cd1d6ef3f69ec52cae55839efef27f4e2ed4c8b6a82ca31c59",
-      "win-vulkan": "c077a6dbd596f1dbcd3fd05d715a363dea41da1de0e893eaf7fd96e0b4c314f0",
-      "win-cpu": "13ed02c2f6bf297a756789b601a0598dcfc6ff7aadffdc5db1f462ad0e390ab0"
+      "win-cuda": "c7132d6f7e36dee6c39d3d51e8970470c615e5c9c8db498d6f73d5c14b4b1f5d",
+      "win-vulkan": "7cec077a90a97ccb4b8988b6e590a470bfe84d839f4c6eccf4d8d08fd2a10771",
+      "win-cpu": "b5297bea319d6247e95e9a6834c190047ab0a493a29539b41f217e9cc440025a"
     }
   },
   "whisper": {
