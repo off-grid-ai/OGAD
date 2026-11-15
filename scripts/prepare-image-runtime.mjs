@@ -32,8 +32,9 @@ for (const { dir, file } of [...patches].reverse()) {
 }
 git('fetch', '--depth', '1', 'origin', revision)
 git('checkout', '--detach', 'FETCH_HEAD')
-// Recursive: newer ggml carries CUTLASS as its own submodule, which the CUDA build needs.
-git('submodule', 'update', '--init', '--recursive', '--depth', '1', 'ggml')
+// The CUDA build needs CUTLASS: sd.cpp master-1104 carries it in thirdparty/cutlass, older ggml
+// carried it as its own submodule (hence recursive).
+git('submodule', 'update', '--init', '--recursive', '--depth', '1', 'ggml', 'thirdparty/cutlass')
 if (execFileSync('git', ['-C', source, 'status', '--porcelain'], { encoding: 'utf8' }).trim()) {
   throw new Error(`Native source has unrelated changes: ${source}`)
 }
