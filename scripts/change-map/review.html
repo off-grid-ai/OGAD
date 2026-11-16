@@ -507,13 +507,18 @@ $("forscreen").addEventListener("submit", async (e) => {
   const f = e.target.closest("form[data-ask]"); if (!f) return;
   e.preventDefault();
   const s = shown[current], c = (s.calls || []).find((x) => x.id === f.dataset.ask), q = f.q.value.trim();
-  if (c && await ask(f.closest(".call"), `Call "${c.title}" (${c.id}) on screen ${s.id}`, q)) f.q.value = "";
+  // Clear only what was sent: a question typed while it was sending stays.
+  if (c && await ask(f.closest(".call"), `Call "${c.title}" (${c.id}) on screen ${s.id}`, q) && f.q.value.trim() === q) f.q.value = "";
 });
 $("ask").onclick = async () => {
   const s = shown[current], q = $("text").value.trim();
   if (!q) { status("Write the question first."); return; }
   const at = draft ? ` at ${Math.round(draft.x * 100)}% across, ${Math.round(draft.y * 100)}% down` : "";
-  if (await ask($("shot"), `Screen ${s.id} (${s.name})${at}`, q)) { $("text").value = ""; draft = null; renderPins(); renderCompose(); }
+  const pin = draft;
+  if (!(await ask($("shot"), `Screen ${s.id} (${s.name})${at}`, q))) return;
+  // Clear only what was sent: a new question or pin made while it was sending stays.
+  if ($("text").value.trim() === q) $("text").value = "";
+  if (draft === pin) { draft = null; renderPins(); renderCompose(); }
 };
 $("forscreen").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-call]"); if (!b) return;
@@ -932,7 +937,7 @@ function go(i) {
   renderList(); renderStage(); renderFor(); renderThread(); renderCompose();
   $("screens").children[current]?.scrollIntoView({ block: "nearest" });
   // Whether a Claude session can take a question changes as sessions come and go: re-check per screen.
-  comments?.canSendToClaude().then((v) => {
+  if (comments) Promise.resolve().then(() => comments.canSendToClaude()).then((v) => {
     const ok = v === "available";
     if (ok !== canAsk) { canAsk = ok; $("ask").hidden = !ok; renderFor(); }
   }).catch(() => {});
