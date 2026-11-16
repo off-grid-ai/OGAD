@@ -9,6 +9,7 @@ import { listBridgeBrowsers, removeBridgeBrowser } from './extension-bridge/brid
 import { setupAIRequestLogIPC } from './ai-request-log-ipc'
 import { modelDisplayName } from '@offgrid/models'
 import { setupChatNextActionIpc } from './chat-next-action'
+import { setupGuideAskIpc } from './guide-ask'
 import { setupArtifactPreviewIpc } from './artifact-preview-ipc'
 import {
   getDB,
@@ -290,6 +291,7 @@ export function setupIPC(): void {
   })
   setupAIRequestLogIPC((ref) => nameModel?.(ref) ?? modelDisplayName(ref) ?? ref)
   setupChatNextActionIpc()
+  setupGuideAskIpc()
   setupVoiceTranscriptionIpc()
   getDB()
   setupTtsIpc()
