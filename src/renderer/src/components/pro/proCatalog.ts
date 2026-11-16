@@ -31,6 +31,17 @@ import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
 /** Buy Pro — live now, $119 once or $7.99/month, one license across up to 5 devices. */
 export const PRO_PAY_URL = PRO_PURCHASE_URL
 
+/** The jobs the "What it does for you" page groups features by, in page order. */
+export const FEATURE_GROUPS = [
+  { id: 'write', title: 'Write' },
+  { id: 'remember', title: 'Remember' },
+  { id: 'meetings', title: 'Meetings and people' },
+  { id: 'work', title: 'Get work done' },
+  { id: 'create', title: 'Create' },
+  { id: 'private', title: 'Your private data' }
+] as const
+export type FeatureGroup = (typeof FEATURE_GROUPS)[number]['id']
+
 export interface ProFeature {
   /** Route name — matches the route a registered pro screen claims when unlocked. */
   route: string
@@ -39,6 +50,10 @@ export interface ProFeature {
   icon: ComponentType<any>
   /** One-line pitch shown under the title. */
   tagline: string
+  /** Three or four words: the feature's card on Today's "What you can do" row. */
+  card: string
+  /** Where the feature sits on the "What it does for you" page. */
+  group: FeatureGroup
   /** Upsell paragraph. */
   description: string
   /** Concrete capabilities, shown as a checklist. */
@@ -61,6 +76,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'God',
     icon: GodIcon,
     tagline: 'Your assistant. It knows your day and asks before it acts.',
+    card: 'Your private assistant',
+    group: 'work',
     description:
       'Chat or talk with Ares. It answers from your memory, accounts and tools, raises what needs you, acts on websites and apps with your approval, and keeps you up to date on what is new in Off Grid AI. Wake-word audio is checked on your device and never saved.',
     highlights: [
@@ -75,6 +92,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Video',
     icon: FilmStrip,
     tagline: 'Turn one sentence into a narrated short film.',
+    card: 'Turn a line into film',
+    group: 'create',
     description:
       'Describe a story and Off Grid AI writes the shots, keeps the same people in every shot, adds a voice and captions, and renders it on your computer. Your photos go only to the computer that renders, and the Video screen names it.',
     highlights: [
@@ -90,6 +109,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Tasks',
     icon: ListChecks,
     tagline: 'See every active run in one place.',
+    card: 'Every run in one place',
+    group: 'work',
     description:
       'Track running and completed work, open its live view, and respond when a task needs attention.',
     highlights: ['Live task status', 'Saved task history', 'Attention requests in one place'],
@@ -100,6 +121,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Day',
     icon: CalendarBlank,
     tagline: 'Your day, planned for you.',
+    card: 'Your day, planned',
+    group: 'remember',
     description:
       'Off Grid AI reads your calendar and what you’ve been working on and lays out your day — what’s next, who you’re meeting, and what’s still open — so you start every morning oriented instead of scrambling.',
     highlights: [
@@ -114,6 +137,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Reflect',
     icon: ChartLineUp,
     tagline: 'See where your time really goes.',
+    card: 'Where your time goes',
+    group: 'remember',
     description:
       'A private, on-device breakdown of your focus — the apps, projects, and people that took your attention — so you can see your week clearly and adjust.',
     highlights: [
@@ -132,6 +157,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Replay',
     icon: Rewind,
     tagline: 'Rewind anything you saw.',
+    card: 'Rewind what you saw',
+    group: 'remember',
     description:
       'Scrub back through your screen history to find that doc, message, or number you know you saw — captured on-device and searchable.',
     highlights: [
@@ -151,6 +178,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Meetings',
     icon: Microphone,
     tagline: 'Record & transcribe meetings, locally.',
+    card: 'Meetings, written up',
+    group: 'meetings',
     description:
       'Capture Zoom, Meet, and Teams calls with system audio + mic and get a private transcript and summary — no cloud meeting bot, and your recordings never leave your device.',
     highlights: [
@@ -165,6 +194,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Actions',
     icon: CheckSquare,
     tagline: 'To-dos and actions, handled.',
+    card: 'To-dos, handled',
+    group: 'work',
     description:
       'Off Grid AI extracts the commitments out of your day and your secretary proposes the next step — every action waits in an approval queue, so nothing happens without your say-so.',
     highlights: [
@@ -179,6 +210,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Entities',
     icon: Graph,
     tagline: 'A private graph of your work.',
+    card: 'A map of your work',
+    group: 'meetings',
     description:
       'Every person, project, and company you touch becomes a record with a synthesized story across your screen activity, meetings, and connectors — your own CRM that builds itself.',
     highlights: [
@@ -193,6 +226,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Search',
     icon: MagnifyingGlass,
     tagline: 'Search everything you’ve ever seen.',
+    card: 'Search all you saw',
+    group: 'remember',
     description:
       'One search bar across your captured activity, meetings, entities, and connectors — semantic + keyword, all on-device.',
     highlights: ['Unified semantic search', 'Across capture, meetings & connectors', 'Fully local'],
@@ -203,6 +238,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Notifications',
     icon: Broadcast,
     tagline: 'Approvals & to-dos, surfaced.',
+    card: 'Approvals in one place',
+    group: 'work',
     description:
       'Off Grid AI reaches out first — a morning briefing, a heads-up before meetings, approvals waiting on your decision, and to-dos it pulled from your day — even when the window is closed.',
     highlights: [
@@ -217,6 +254,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Voice',
     icon: Waveform,
     tagline: 'Talk instead of type, fully local.',
+    card: 'Talk instead of typing',
+    group: 'write',
     description: `Hold ${primaryModifier() === 'Cmd' ? 'Option' : 'Alt'}+Space and speak — Off Grid AI Desktop transcribes on-device with whisper.cpp and pastes the text into whatever app you are in. Tap to toggle, hold to push-to-talk. Every recording and transcript is kept in a searchable library, and you can drop in any audio or video file to transcribe it. Runs in your ${deviceNoun()}'s RAM; your audio and transcripts never leave the device.`,
     highlights: [
       `${primaryModifier() === 'Cmd' ? 'Option' : 'Alt'}+Space push-to-talk or toggle, anywhere`,
@@ -230,6 +269,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Scribe',
     icon: PenNib,
     tagline: 'Every message correct, clear and in your voice.',
+    card: 'Clearer writing, any app',
+    group: 'write',
     description: `Scribe checks your writing in every text box: your browser, your mail, your chat apps and Off Grid itself. It underlines spelling and grammar as you type and fixes them in one click. Select any text to rewrite it, shorten it, change its tone or translate it. It knows your people and projects, so it never flags their names, and rewrites sound like you. It runs on your ${deviceNoun()}; your writing never leaves it.`,
     highlights: [
       'Spelling and grammar fixes as you type, in every app',
@@ -243,6 +284,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Notes',
     icon: Notebook,
     tagline: 'Your notes as plain files you own.',
+    card: 'Notes you own',
+    group: 'write',
     description: `Notes keeps a Markdown library on your ${deviceNoun()}, and opens your Obsidian vaults as they are. Write in a page view or in Markdown, link notes with [[wikilinks]], and see backlinks and a graph of how they connect. Every version is kept. Dictate into a note and it lands formatted. Chat can find what you wrote. Nothing leaves your ${deviceNoun()}.`,
     highlights: [
       'Opens your Obsidian vaults as they are',
@@ -256,6 +299,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Vault',
     icon: ShieldCheck,
     tagline: 'Passwords and secrets, encrypted on this device.',
+    card: 'Passwords, locked here',
+    group: 'private',
     description:
       'An encrypted KDBX4 vault for web logins, app passwords, API keys, secure notes, and secret files (.env and the like). Your master password and a device-specific key together lock the vault - the file alone is unreadable. Back up the file anywhere; it stays opaque without both factors. Sync to other devices in your Off Grid AI mesh via EasyShare when you are ready.',
     highlights: [
@@ -274,6 +319,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Clipboard',
     icon: ClipboardText,
     tagline: 'Every copy, kept and searchable.',
+    card: 'Every copy, kept',
+    group: 'remember',
     description: `A local clipboard history that saves what you copy - text, images, and files - with a global hotkey (${primaryModifier()}+Shift+C) quick-paste popup to drop any past copy into whatever app you are in. Stored on-device; what you copy never leaves your machine.`,
     highlights: [
       'Searchable history of text, images & files',
@@ -290,6 +337,8 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Devices',
     icon: DevicesIcon,
     tagline: 'Your chats and settings, on every device.',
+    card: 'Chats on every device',
+    group: 'private',
     description:
       'Pair your computer and phone over your local network to keep chats, projects and model settings in step. Data moves through a direct encrypted connection between your devices. Nothing is uploaded to an Off Grid AI server.',
     highlights: [
