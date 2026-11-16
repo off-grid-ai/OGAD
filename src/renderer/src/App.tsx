@@ -36,6 +36,7 @@ import { shouldRemovePaidRendererAccess } from './bootstrap/entitlementRegistry'
 import { useRendererEntitlement } from './bootstrap/useRendererEntitlement'
 import { renderProView, type ProViewContext } from './bootstrap/proView'
 import { UpgradeScreen } from './components/pro/UpgradeScreen'
+import { FeatureGuide } from './components/FeatureGuide'
 import {
   featureSupportsPlatform,
   getProFeature,
@@ -54,6 +55,7 @@ import { AnimatePresence } from 'motion/react'
 import {
   IconMessageCircle,
   IconSettings,
+  IconInfoCircle,
   IconDownload,
   IconFolders,
   IconPlug,
@@ -138,7 +140,8 @@ const LAUNCH_VIEWS: Record<string, ViewMode> = {
   '/devices': 'devices',
   '/video': 'video',
   '/scribe': 'scribe',
-  '/notes': 'notes'
+  '/notes': 'notes',
+  '/guide': 'guide'
 }
 
 /**
@@ -208,7 +211,8 @@ function routePath(
     devices: '/devices',
     video: '/video',
     scribe: '/scribe',
-    notes: '/notes'
+    notes: '/notes',
+    guide: '/guide'
   }
 
   if (viewMode === 'settings' && settingsSection)
@@ -1348,8 +1352,8 @@ function AppContent(): React.JSX.Element {
               {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
               <div
                 className={cn(
-                  'mt-3 flex h-9 shrink-0 items-center gap-1',
-                  !sidebarOpen && 'justify-center'
+                  'mt-3 flex shrink-0 items-center gap-1',
+                  sidebarOpen ? 'h-9' : 'flex-col justify-center'
                 )}
               >
                 {sidebarOpen && (
@@ -1380,6 +1384,21 @@ function AppContent(): React.JSX.Element {
                     <IconArrowRight className="h-4 w-4 shrink-0" />
                   </button>
                 )}
+                {/* What it does for you: beside Back, so it shows whether the rail is open or not. */}
+                <button
+                  onClick={() => goToView('guide')}
+                  aria-label="What it does for you"
+                  aria-pressed={viewMode === 'guide'}
+                  title="What it does for you"
+                  data-slot="button"
+                  className={cn(
+                    'flex items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 hover:border-neutral-700 hover:bg-neutral-800 hover:text-white',
+                    sidebarOpen ? 'px-2 py-1.5' : 'h-9 w-9',
+                    viewMode === 'guide' ? 'text-green-500' : 'text-neutral-300'
+                  )}
+                >
+                  <IconInfoCircle className="h-4 w-4 shrink-0" />
+                </button>
               </div>
 
               {/* Navigation (scrolls; Settings is pinned to the bottom) */}
@@ -1603,6 +1622,8 @@ function AppContent(): React.JSX.Element {
                       <ConnectorsScreen />
                     ) : viewMode === 'gateway' ? (
                       <GatewayScreen />
+                    ) : viewMode === 'guide' ? (
+                      <FeatureGuide isPro={isPro} onOpen={(view) => goToView(view)} />
                     ) : viewMode === 'settings' ? (
                       <Settings
                         key={settingsNavigationKey}
