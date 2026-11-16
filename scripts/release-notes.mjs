@@ -87,6 +87,8 @@ const PIN = /^(?:pin\s+)?(?:pro|operator-ui)(?:\s+pointer)?(?:\s+[0-9a-f]{7,40})
 function plainChange(subject) {
   if (/^merge\b/i.test(subject) || /^(bump|release)\b/i.test(subject)) return null
   const text = subject.replace(PIN, '').replace(/^what it does for you:\s*/i, '')
+  // A pinned pro commit can carry its own conventional type ("Pin pro abc1234: test: …").
+  if (INTERNAL_TYPES.has(releaseNotes.typeOf(text))) return null
   // A subject that opens with a code name (useAppTheme, gpuDeviceAvailable) is about the code.
   if (
     !text ||
