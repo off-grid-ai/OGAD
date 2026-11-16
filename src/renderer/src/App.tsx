@@ -1109,6 +1109,12 @@ function AppContent(): React.JSX.Element {
     }
   ].filter((group) => group.items.length > 0)
   const navigationItems = navigationGroups.flatMap((group) => group.items)
+  // What it does for you: its own sidebar row under Back, and a screen the palette finds.
+  const guideNav: NavItem = {
+    label: 'What it does for you',
+    icon: <IconInfoCircle className="h-5 w-5 shrink-0" />,
+    view: 'guide'
+  }
   const bottomNav: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
     {
       label: 'Settings',
@@ -1195,7 +1201,7 @@ function AppContent(): React.JSX.Element {
         onSeeAll={openSearch}
         /* The sidebar IS the list of screens - the palette searches that, never a second copy. */
         screens={[
-          ...[...navigationItems, ...bottomNav].map(({ label, view, locked }) => ({
+          ...[guideNav, ...navigationItems, ...bottomNav].map(({ label, view, locked }) => ({
             label,
             view,
             locked
@@ -1387,13 +1393,7 @@ function AppContent(): React.JSX.Element {
               </div>
               {/* What it does for you: a sidebar row under Back, so it is always there and its icon
                   stays put when the rail opens on hover, like every other row. */}
-              <div className="mt-1 flex w-full shrink-0 flex-col">
-                {renderNavItem({
-                  label: 'What it does for you',
-                  icon: <IconInfoCircle className="h-5 w-5 shrink-0" />,
-                  view: 'guide'
-                })}
-              </div>
+              <div className="mt-1 flex w-full shrink-0 flex-col">{renderNavItem(guideNav)}</div>
 
               {/* Navigation (scrolls; Settings is pinned to the bottom) */}
               <div

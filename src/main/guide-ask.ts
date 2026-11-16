@@ -13,24 +13,31 @@ function isTurn(value: unknown): value is GuideTurn {
   )
 }
 
+/** The guide's answer, or why there is none: no chat model to ask, or the ask failed. */
+export type GuideAnswer = { answer: string } | { error: 'no-model' | 'failed' }
+
 /**
  * The Ask box on "What it does for you": the renderer sends the grounding and the
- * conversation, the local model answers. Someone is waiting on it, so it runs as chat.
+ * conversation, the chat model the person chose answers. Someone is waiting on it, so it runs
+ * as chat.
  */
 export function setupGuideAskIpc(): void {
-  ipcMain.handle('guide:ask', async (_event, turns: unknown) => {
-    if (!Array.isArray(turns) || turns.length === 0 || !turns.every(isTurn)) return null
+  ipcMain.handle('guide:ask', async (_event, turns: unknown): Promise<GuideAnswer> => {
+    if (!Array.isArray(turns) || turns.length === 0 || !turns.every(isTurn)) {
+      return { error: 'failed' }
+    }
+    const { llm } = await import('./llm')
+    if (!llm.hasTextModel()) return { error: 'no-model' }
     try {
       return await modalityQueue.run(CHAT_JOB, async () => {
-        const { llm } = await import('./llm')
         const text = await llm.chatMessages(turns as ChatMessage[], undefined, 700, {
           temperature: 0.2,
           disableThinking: true
         })
-        return text.trim() || null
+        return text.trim() ? { answer: text.trim() } : { error: 'failed' as const }
       })
     } catch {
-      return null
+      return { error: 'failed' }
     }
   })
 }

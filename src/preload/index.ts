@@ -310,7 +310,8 @@ const offGridApi = {
   /** The Ask box on "What it does for you": grounding plus conversation in, the answer out. */
   askGuide: (
     turns: { role: 'system' | 'user' | 'assistant'; content: string }[]
-  ): Promise<string | null> => ipcRenderer.invoke('guide:ask', turns),
+  ): Promise<{ answer: string } | { error: 'no-model' | 'failed' }> =>
+    ipcRenderer.invoke('guide:ask', turns),
   // Live token/reasoning/step events for an in-flight ragChat (matched by streamId).
   onRagStream: (
     callback: (data: {

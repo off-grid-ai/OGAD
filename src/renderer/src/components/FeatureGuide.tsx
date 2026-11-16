@@ -227,7 +227,10 @@ function AskPane({
   const [turns, setTurns] = useState<Turn[]>([])
   const [draft, setDraft] = useState('')
   const [waiting, setWaiting] = useState(false)
-  const [noModel, setNoModel] = useState(false)
+  // Why the last question has no answer: no chat model, or the ask failed (try again).
+  const [missed, setMissed] = useState<{ why: 'no-model' | 'failed'; question: string } | null>(
+    null
+  )
   const endRef = useRef<HTMLDivElement>(null)
   const system = useMemo(() => guideSystemPrompt(topics), [topics])
   const firstLook = FIRST_LOOK.map((id) => topics.find((t) => t.id === id)).filter(
@@ -237,22 +240,29 @@ function AskPane({
     requestAnimationFrame(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }))
   }
 
-  const ask = async (question: string): Promise<void> => {
+  /** Ask a question; a retry resends the last one, already on screen, without a second copy. */
+  const ask = async (question: string, retry = false): Promise<void> => {
     const text = question.trim()
     if (!text || waiting) return
-    const history: Turn[] = [...turns, { role: 'user', content: text }]
+    const history: Turn[] = retry ? turns : [...turns, { role: 'user', content: text }]
     setTurns(history)
-    setDraft('')
+    if (!retry) setDraft('')
     setWaiting(true)
-    setNoModel(false)
+    setMissed(null)
     toEnd()
-    const answer = await window.api.askGuide([
-      { role: 'system', content: system },
-      ...history.slice(-7)
-    ])
-    setWaiting(false)
-    if (answer) setTurns([...history, { role: 'assistant', content: answer }])
-    else setNoModel(true)
+    let result: Awaited<ReturnType<typeof window.api.askGuide>> = { error: 'failed' }
+    try {
+      result = await window.api.askGuide([
+        { role: 'system', content: system },
+        ...history.slice(-7)
+      ])
+    } catch {
+      // The bridge itself failed: the same as a failed ask.
+    } finally {
+      setWaiting(false)
+    }
+    if ('answer' in result) setTurns([...history, { role: 'assistant', content: result.answer }])
+    else setMissed({ why: result.error, question: text })
     toEnd()
   }
 
@@ -265,8 +275,8 @@ function AskPane({
               <div>
                 <h2 className="text-2xl font-light text-neutral-100">Ask about Off Grid AI</h2>
                 <p className="mt-1 text-sm text-neutral-400">
-                  What it can do on this computer, your phone or in your browser. Answered on this
-                  computer.
+                  What it can do on this computer, your phone or in your browser. Answered by your
+                  chat model.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -324,9 +334,9 @@ function AskPane({
               Thinking…
             </p>
           ) : null}
-          {noModel ? (
+          {missed?.why === 'no-model' ? (
             <div className="og-guide-in grid gap-2 text-sm text-neutral-400" role="status">
-              <p>No answer yet. Load a chat model first, then ask again.</p>
+              <p>No chat model yet. Load one, then ask again.</p>
               <Button
                 size="sm"
                 variant="outline"
@@ -334,6 +344,18 @@ function AskPane({
                 onClick={() => onOpen('models')}
               >
                 Open Models
+              </Button>
+            </div>
+          ) : missed ? (
+            <div className="og-guide-in grid gap-2 text-sm text-neutral-400" role="status">
+              <p>No answer came back.</p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-fit"
+                onClick={() => void ask(missed.question, true)}
+              >
+                Try again
               </Button>
             </div>
           ) : null}
