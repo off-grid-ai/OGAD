@@ -250,12 +250,15 @@ function AskPane({
     setWaiting(true)
     setMissed(null)
     toEnd()
+    // A question left unanswered stays on screen but is not sent: two user turns in a row
+    // break models that need user and assistant turns to alternate.
+    const sent = history.filter(
+      (t, i) =>
+        t.role !== 'user' || i === history.length - 1 || history[i + 1]?.role === 'assistant'
+    )
     let result: Awaited<ReturnType<typeof window.api.askGuide>> = { error: 'failed' }
     try {
-      result = await window.api.askGuide([
-        { role: 'system', content: system },
-        ...history.slice(-7)
-      ])
+      result = await window.api.askGuide([{ role: 'system', content: system }, ...sent.slice(-7)])
     } catch {
       // The bridge itself failed: the same as a failed ask.
     } finally {
