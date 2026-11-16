@@ -14,6 +14,8 @@
   <em>sees, remembers, reflects, and acts</em> — all on-device.
 </p>
 
+<p align="center"><sub>Made by <a href="https://github.com/alichherawalla">Mac (@alichherawalla)</a>. Follow me for what ships next.</sub></p>
+
 <p align="center">
   <a href="https://github.com/off-grid-ai/OGAD/releases/latest">Download (macOS · Windows · Linux)</a> ·
   <a href="docs/FEATURES.md">Features</a> ·
