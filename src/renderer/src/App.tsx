@@ -1352,8 +1352,8 @@ function AppContent(): React.JSX.Element {
               {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
               <div
                 className={cn(
-                  'mt-3 flex shrink-0 items-center gap-1',
-                  sidebarOpen ? 'h-9' : 'flex-col justify-center'
+                  'mt-3 flex h-9 shrink-0 items-center gap-1',
+                  !sidebarOpen && 'justify-center'
                 )}
               >
                 {sidebarOpen && (
@@ -1384,21 +1384,15 @@ function AppContent(): React.JSX.Element {
                     <IconArrowRight className="h-4 w-4 shrink-0" />
                   </button>
                 )}
-                {/* What it does for you: beside Back, so it shows whether the rail is open or not. */}
-                <button
-                  onClick={() => goToView('guide')}
-                  aria-label="What it does for you"
-                  aria-pressed={viewMode === 'guide'}
-                  title="What it does for you"
-                  data-slot="button"
-                  className={cn(
-                    'flex items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 hover:border-neutral-700 hover:bg-neutral-800 hover:text-white',
-                    sidebarOpen ? 'px-2 py-1.5' : 'h-9 w-9',
-                    viewMode === 'guide' ? 'text-green-500' : 'text-neutral-300'
-                  )}
-                >
-                  <IconInfoCircle className="h-4 w-4 shrink-0" />
-                </button>
+              </div>
+              {/* What it does for you: a sidebar row under Back, so it is always there and its icon
+                  stays put when the rail opens on hover, like every other row. */}
+              <div className="mt-1 flex w-full shrink-0 flex-col">
+                {renderNavItem({
+                  label: 'What it does for you',
+                  icon: <IconInfoCircle className="h-5 w-5 shrink-0" />,
+                  view: 'guide'
+                })}
               </div>
 
               {/* Navigation (scrolls; Settings is pinned to the bottom) */}
