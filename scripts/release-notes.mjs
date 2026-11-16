@@ -46,8 +46,9 @@ const commits = raw
 
 const releaseNotes = {
   // Turn a conventional-commit subject into a plain sentence a user can read.
-  humanize(subject) {
-    const match = subject.match(/^(\w+)(?:\(([^)]+)\))?!?:\s*(.+)$/)
+  // stripType: drop a conventional "type:" prefix. Plain subjects keep theirs ("iOS:", "Ask:").
+  humanize(subject, stripType = true) {
+    const match = stripType && subject.match(/^(\w+)(?:\(([^)]+)\))?!?:\s*(.+)$/)
     let text = match ? match[3] : subject
     text = text
       .replace(/\s*\(#\d+\)\s*$/, '') // drop trailing PR refs: "(#11)"
@@ -64,11 +65,51 @@ const releaseNotes = {
   }
 }
 
+// Most subjects are plain outcome sentences now, not "feat:"/"fix:", and a pro change arrives as
+// "Pin pro <sha>: <what changed>". Read those too, so a build full of changes never says it has
+// none. A subject about tests, CI, docs or the review tooling stays out of the summary.
+const INTERNAL =
+  /\b(e2e|tests|unit tests?|test suite|spec|fixtures?|CI|lint|typecheck|README|docs?|change review|change-map|cache[sd]?|engine pins?|hooks?|refactor|chore)\b/i
+// Conventional types that are internal. Any other "Word:" prefix ("Pro:", "Ask:") is a plain
+// subject naming the feature it changes.
+const INTERNAL_TYPES = new Set([
+  'chore',
+  'ci',
+  'docs',
+  'test',
+  'refactor',
+  'style',
+  'build',
+  'wip',
+  'snapshot'
+])
+const PIN = /^(?:pin\s+)?(?:pro|operator-ui)(?:\s+pointer)?(?:\s+[0-9a-f]{7,40})?\s*:\s*/i
+function plainChange(subject) {
+  if (/^merge\b/i.test(subject) || /^(bump|release)\b/i.test(subject)) return null
+  const text = subject.replace(PIN, '').replace(/^what it does for you:\s*/i, '')
+  // A pinned pro commit can carry its own conventional type ("Pin pro abc1234: test: …").
+  if (INTERNAL_TYPES.has(releaseNotes.typeOf(text))) return null
+  // A subject that opens with a code name (useAppTheme, gpuDeviceAvailable) is about the code.
+  if (
+    !text ||
+    /^pin\s+(?:[0-9a-f]{7,40}|pro|operator-ui)\b/i.test(text) ||
+    /^(?!(?:macOS|iOS|iPadOS|watchOS|visionOS)\b)[a-z]+[A-Z]\w*\b/.test(text) ||
+    INTERNAL.test(text)
+  )
+    return null
+  return releaseNotes.humanize(text.replace(/^pro:\s*/i, ''), false)
+}
+
 // Group the user-facing commits.
-const groups = { New: [], Fixes: [] }
+const groups = { New: [], Fixes: [], Changes: [] }
 for (const c of commits) {
   const group = TYPE_GROUP[releaseNotes.typeOf(c.subject)]
-  if (group) groups[group].push(releaseNotes.humanize(c.subject))
+  if (group) {
+    groups[group].push(releaseNotes.humanize(c.subject))
+  } else if (!INTERNAL_TYPES.has(releaseNotes.typeOf(c.subject))) {
+    const line = plainChange(c.subject)
+    if (line) groups.Changes.push(line)
+  }
 }
 
 // De-dupe within a group (snapshots/rebases can repeat a subject).
@@ -77,7 +118,7 @@ for (const k of Object.keys(groups)) groups[k] = [...new Set(groups[k])]
 const out = []
 out.push('## Highlights', '')
 
-const hasHighlights = groups.New.length || groups.Fixes.length
+const hasHighlights = groups.New.length || groups.Fixes.length || groups.Changes.length
 if (hasHighlights) {
   if (groups.New.length) {
     out.push('**New**', '')
@@ -87,6 +128,11 @@ if (hasHighlights) {
   if (groups.Fixes.length) {
     out.push('**Fixes**', '')
     for (const line of groups.Fixes) out.push(`- ${line}`)
+    out.push('')
+  }
+  if (groups.Changes.length) {
+    out.push('**Changes**', '')
+    for (const line of groups.Changes) out.push(`- ${line}`)
     out.push('')
   }
 } else {
