@@ -68,7 +68,7 @@ const releaseNotes = {
 // "Pin pro <sha>: <what changed>". Read those too, so a build full of changes never says it has
 // none. A subject about tests, CI, docs or the review tooling stays out of the summary.
 const INTERNAL =
-  /\b(e2e|tests?|spec|fixture|CI|lint|typecheck|README|docs?|change review|change-map|workflow|cache[sd]?|engine pins?|hooks?|refactor|chore)\b/i
+  /\b(e2e|tests?|spec|fixture|CI|lint|typecheck|README|docs?|change review|change-map|cache[sd]?|engine pins?|hooks?|refactor|chore)\b/i
 // Conventional types that are internal. Any other "Word:" prefix ("Pro:", "Ask:") is a plain
 // subject naming the feature it changes.
 const INTERNAL_TYPES = new Set([
@@ -87,7 +87,7 @@ function plainChange(subject) {
   if (/^merge\b/i.test(subject) || /^(bump|release)\b/i.test(subject)) return null
   const text = subject.replace(PIN, '').replace(/^what it does for you:\s*/i, '')
   // A subject that opens with a code name (useAppTheme, gpuDeviceAvailable) is about the code.
-  if (!text || /^pin\b/i.test(text) || /^[a-z]+[A-Z]\w*\b/.test(text) || INTERNAL.test(text))
+  if (!text || /^pin\b/i.test(text) || /^(?!(?:macOS|iOS|iPadOS|watchOS|visionOS)\b)[a-z]+[A-Z]\w*\b/.test(text) || INTERNAL.test(text))
     return null
   return releaseNotes.humanize(text)
 }
