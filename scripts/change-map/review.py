@@ -88,7 +88,7 @@ def main(spec_path, out):
     spec = json.load(open(spec_path))
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    files, screens = {}, []
+    files, screens, proves = {}, [], {}
     for r in spec['reviews']:
         d = ROOT / r['dir']
         for s in json.load(open(d / 'screens.json')):
@@ -110,6 +110,8 @@ def main(spec_path, out):
                     if v.get(k):
                         v[k] = pub(v[k])
             screens.append(s)
+            # Which release features this shot proves: the review's own list, else its group.
+            proves[id(s)] = set(r.get('features', [])) | {str(s.get('group', '')).lower()}
 
     rel = {}
     p = Path.home() / '.olympus/argus/sources/release.json'
@@ -128,7 +130,16 @@ def main(spec_path, out):
             proven.append(f'{name}: {line}')
     shown = {pl for e in epics for pl in e.get('shown', [])} | {s['platform'] for s in screens}
     platforms = [{'name': pl, 'shown': pl in shown} for pl in PLATFORMS if any(pl in e.get('shown', []) + e.get('missing', []) for e in epics) or pl in shown]
-    missing = [{'name': f"{e['name']} · {pl}", 'why': 'not shot yet'} for e in epics for pl in e.get('missing', [])]
+    # The platforms each feature must be shot on: the spec's `require` (the release bar), else
+    # what Argus lists. A feature counts as shot on a platform when this page has a shot of it there.
+    require = spec.get('require', {})
+    def shot_on(e):
+        keys = {e['key'], e['name'].lower()}
+        return {sc['platform'] for sc in screens if proves.get(id(sc), set()) & keys}
+    missing = [{'name': f"{e['name']} · {pl}", 'why': 'not shot yet'}
+               for e in epics
+               for pl in require.get(e['key'], e.get('missing', []))
+               if pl not in shot_on(e)]
 
     repos = {x['dir']: x for x in rel.get('repos', [])}
     order = ['shared', 'ui-library', 'desktop', 'desktop-pro', 'mobile', 'mobile-pro', 'extension']
