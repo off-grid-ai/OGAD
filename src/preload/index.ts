@@ -307,6 +307,11 @@ const offGridApi = {
     ) as Promise<RagChatResultContract>,
   suggestNextChatMessage: (asked: string, answer: string): Promise<string | null> =>
     ipcRenderer.invoke('chat:suggest-next', asked, answer),
+  /** The Ask box on "What it does for you": grounding plus conversation in, the answer out. */
+  askGuide: (
+    turns: { role: 'system' | 'user' | 'assistant'; content: string }[]
+  ): Promise<{ answer: string } | { error: 'no-model' | 'failed' }> =>
+    ipcRenderer.invoke('guide:ask', turns),
   // Live token/reasoning/step events for an in-flight ragChat (matched by streamId).
   onRagStream: (
     callback: (data: {

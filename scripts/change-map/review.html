@@ -66,8 +66,12 @@ body > .app { flex: 1 1 auto; min-height: 0; height: auto; }
 .call p.ct { font-size: 14px; font-weight: 600; color: var(--fg); }
 .call .files { font: 11px/1.5 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 .call .opts { display: flex; gap: 8px; flex-wrap: wrap; }
+.call .ask { display: flex; gap: 6px; }
+.call .ask input { flex: 1; min-width: 0; background: var(--glass); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px; }
+.call .ask input:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .call .opts .btn[aria-pressed="true"] { background: var(--gold); color: var(--gold-ink); border-color: var(--gold); }
 .call.decided { background: var(--glass-2); } .call.decided .k { color: var(--ok); }
+.call .result { border-left: 2px solid var(--ok); padding-left: 8px; }
 .checks { color: var(--muted); font-size: 12px; }
 .proven[hidden] { display: none; }
 .proven { border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 4px; font-size: 13px; }
@@ -340,6 +344,7 @@ button, textarea { font: inherit; color: inherit; }
       <textarea id="text" placeholder="What should change here?" aria-label="Note"></textarea>
       <div class="row">
         <button type="button" class="btn" id="cancel">Clear pin</button>
+        <button type="button" class="btn" id="ask" hidden title="Ask the Claude session working on this change. The reply lands in the page's comments.">Ask Claude</button>
         <button type="submit" class="btn primary" id="save">Pin note</button>
       </div>
     </form>
@@ -370,6 +375,9 @@ let decided = {};      // call id -> {choice, by, at}, from the "calls" collecti
 let lastVisit = 0;     // epoch ms of this viewer's previous visit: screens updated since are New
 const sel = {};        // screen id -> index of the version shown as After (default: the latest)
 let db = null, user = null, me = null;
+// Ask: a question goes to the Claude session that published this page (it watches it), with the
+// code and history in hand. The reply lands in the page's comments. Hidden unless it can get through.
+let comments = null, canAsk = false;
 const names = {};
 
 function screenId() { return shown[current]?.id; }
@@ -475,18 +483,59 @@ function renderFor() {
     const d = decided[c.id];
     const why = [["What it is", c.what], ["What goes wrong", c.risk], ["What I'd do", c.rec], ["Learned", c.standing]].filter(([, t]) => t)
       .map(([h, t]) => `<p><b>${h}.</b> ${esc(t)}</p>`).join("");
-    return `<div class="call${d ? " decided" : ""}"><span class="k">${esc(d ? "Decided: " + d.choice : c.kind || "Your call")}</span>`
-      + `<p class="ct">${esc(c.title || c.text)}</p>${why}`
+    // Decided → Claude is on it → Done, with what changed: Claude writes state and result back.
+    const k = !d ? (c.kind || "Your call") : d.state === "done" ? "Done: " + d.choice : "Decided: " + d.choice + " · Claude is on it";
+    return `<div class="call${d ? " decided" : ""}${d?.state === "done" ? " done" : ""}"><span class="k">${esc(k)}</span>`
+      + `<p class="ct">${esc(c.title || c.text)}</p>${d?.result ? `<p class="result"><b>${d.state === "done" ? "Done." : "Working."}</b> ${esc(d.result)}</p>` : ""}${why}`
       + (c.files?.length ? `<details class="files"><summary>${c.files.length} file${c.files.length === 1 ? "" : "s"}</summary>${c.files.map(esc).join("<br>")}</details>` : "")
-      + `<div class="opts">${(c.options || []).map((o) => `<button type="button" class="btn${!d && o === c.recommended ? " primary" : ""}" data-call="${esc(c.id)}" data-choice="${esc(o)}" aria-pressed="${d?.choice === o}">${esc(o)}</button>`).join("")}</div></div>`;
+      + (canAsk ? `<form class="ask" data-ask="${esc(c.id)}"><input name="q" placeholder="Ask Claude about this call" aria-label="Ask Claude about this call" autocomplete="off"><button type="submit" class="btn" aria-label="Send to Claude" title="Send to Claude">↑</button></form>` : "")
+      + `<div class="opts">${(c.options || []).map((o) => `<button type="button" class="btn${!d && o === c.recommended ? " primary" : ""}" data-call="${esc(c.id)}" data-choice="${esc(o)}" aria-pressed="${d?.choice === o}">${d?.choice === o ? "✓ " : ""}${esc(o)}</button>`).join("")}</div></div>`;
   }).join("") + (s.checks ? `<div class="checks">${esc(s.checks)}</div>` : "");
 }
+// One send to the watching session: where it was asked, then the question in the asker's words.
+async function ask(el, where, q) {
+  if (!comments || !q) return false;
+  try {
+    const anchor = await comments.anchorFor(el);
+    await comments.sendToClaude({ anchor, text: `${where}: ${q}` });
+    status("Sent to Claude. The reply comes back in the comments.");
+    return true;
+  } catch (err) {
+    if (err?.code === "claude_unavailable") { canAsk = false; renderFor(); $("ask").hidden = true; }
+    status("That question didn't reach Claude: " + (err?.message || "try again."));
+    return false;
+  }
+}
+$("forscreen").addEventListener("submit", async (e) => {
+  const f = e.target.closest("form[data-ask]"); if (!f) return;
+  e.preventDefault();
+  const s = shown[current], c = (s.calls || []).find((x) => x.id === f.dataset.ask), q = f.q.value.trim();
+  // Clear only what was sent: a question typed while it was sending stays.
+  if (c && await ask(f.closest(".call"), `Call "${c.title}" (${c.id}) on screen ${s.id}`, q) && f.q.value.trim() === q) f.q.value = "";
+});
+$("ask").onclick = async () => {
+  const s = shown[current], q = $("text").value.trim();
+  if (!q) { status("Write the question first."); return; }
+  const at = draft ? ` at ${Math.round(draft.x * 100)}% across, ${Math.round(draft.y * 100)}% down` : "";
+  const pin = draft;
+  if (!(await ask($("shot"), `Screen ${s.id} (${s.name})${at}`, q))) return;
+  // Clear only what was sent: a new question or pin made while it was sending stays.
+  if ($("text").value.trim() === q) $("text").value = "";
+  if (draft === pin) { draft = null; renderPins(); renderCompose(); }
+};
 $("forscreen").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-call]"); if (!b) return;
   if (!db) { status("Choices need you signed in to claude.ai."); return; }
   const s = shown[current];
-  try { await db.collection("calls").doc(b.dataset.call).set({ screen: s.id, choice: b.dataset.choice, by: me || "", at: Date.now() }); }
-  catch (err) { status("That choice didn't save: " + (err?.message || "try again.")); }
+  // Pressed → working → done: the button says it is saving, then the card shows the choice.
+  const label = b.textContent;
+  b.disabled = true; b.textContent = "Saving…";
+  try {
+    await db.collection("calls").doc(b.dataset.call).set({ screen: s.id, choice: b.dataset.choice, by: me || "", at: Date.now() });
+    status(`Decided: ${b.dataset.choice}. The card says Done when Claude has made it.`);
+    b.closest(".call")?.animate([{ boxShadow: "0 0 0 2px var(--ok)" }, { boxShadow: "0 0 0 0 transparent" }], { duration: 900 });
+  } catch (err) { status("That choice didn't save: " + (err?.message || "try again.")); }
+  finally { if (b.isConnected) { b.disabled = false; b.textContent = label; } }
 });
 
 function vname(x, latest) { return `v${x.n}${x.label ? " · " + x.label : ""}${x.at ? " · " + when(x.at) : ""}${latest ? " (latest)" : ""}`; }
@@ -897,6 +946,11 @@ function go(i) {
   if (location.hash.slice(1) !== screenId()) history.replaceState(null, "", "#" + screenId());
   renderList(); renderStage(); renderFor(); renderThread(); renderCompose();
   $("screens").children[current]?.scrollIntoView({ block: "nearest" });
+  // Whether a Claude session can take a question changes as sessions come and go: re-check per screen.
+  if (comments) Promise.resolve().then(() => comments.canSendToClaude()).then((v) => {
+    const ok = v === "available";
+    if (ok !== canAsk) { canAsk = ok; $("ask").hidden = !ok; renderFor(); }
+  }).catch(() => {});
 }
 
 function status(msg) {
@@ -1026,6 +1080,11 @@ async function boot() {
   user = await window.claude.use("user");
   if (user) { try { me = await user.id(); } catch (_) {} }
   renderCompose();
+  comments = await window.claude.use("comments");
+  if (comments) {
+    try { canAsk = (await comments.canSendToClaude()) === "available"; } catch (_) { canAsk = false; }
+    $("ask").hidden = !canAsk; renderFor();
+  }
   if (!db) { renderThread(); return; }
   db.collection("calls").onSnapshot((snap) => {
     decided = Object.fromEntries(snap.docs.map((d) => [d.id, d.data()]));

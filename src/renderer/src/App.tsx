@@ -36,6 +36,7 @@ import { shouldRemovePaidRendererAccess } from './bootstrap/entitlementRegistry'
 import { useRendererEntitlement } from './bootstrap/useRendererEntitlement'
 import { renderProView, type ProViewContext } from './bootstrap/proView'
 import { UpgradeScreen } from './components/pro/UpgradeScreen'
+import { FeatureGuide } from './components/FeatureGuide'
 import {
   featureSupportsPlatform,
   getProFeature,
@@ -54,6 +55,7 @@ import { AnimatePresence } from 'motion/react'
 import {
   IconMessageCircle,
   IconSettings,
+  IconInfoCircle,
   IconDownload,
   IconFolders,
   IconPlug,
@@ -138,7 +140,8 @@ const LAUNCH_VIEWS: Record<string, ViewMode> = {
   '/devices': 'devices',
   '/video': 'video',
   '/scribe': 'scribe',
-  '/notes': 'notes'
+  '/notes': 'notes',
+  '/guide': 'guide'
 }
 
 /**
@@ -208,7 +211,8 @@ function routePath(
     devices: '/devices',
     video: '/video',
     scribe: '/scribe',
-    notes: '/notes'
+    notes: '/notes',
+    guide: '/guide'
   }
 
   if (viewMode === 'settings' && settingsSection)
@@ -1105,6 +1109,12 @@ function AppContent(): React.JSX.Element {
     }
   ].filter((group) => group.items.length > 0)
   const navigationItems = navigationGroups.flatMap((group) => group.items)
+  // What it does for you: its own sidebar row under Back, and a screen the palette finds.
+  const guideNav: NavItem = {
+    label: 'What it does for you',
+    icon: <IconInfoCircle className="h-5 w-5 shrink-0" />,
+    view: 'guide'
+  }
   const bottomNav: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
     {
       label: 'Settings',
@@ -1191,7 +1201,7 @@ function AppContent(): React.JSX.Element {
         onSeeAll={openSearch}
         /* The sidebar IS the list of screens - the palette searches that, never a second copy. */
         screens={[
-          ...[...navigationItems, ...bottomNav].map(({ label, view, locked }) => ({
+          ...[guideNav, ...navigationItems, ...bottomNav].map(({ label, view, locked }) => ({
             label,
             view,
             locked
@@ -1381,6 +1391,9 @@ function AppContent(): React.JSX.Element {
                   </button>
                 )}
               </div>
+              {/* What it does for you: a sidebar row under Back, so it is always there and its icon
+                  stays put when the rail opens on hover, like every other row. */}
+              <div className="mt-1 flex w-full shrink-0 flex-col">{renderNavItem(guideNav)}</div>
 
               {/* Navigation (scrolls; Settings is pinned to the bottom) */}
               <div
@@ -1603,6 +1616,8 @@ function AppContent(): React.JSX.Element {
                       <ConnectorsScreen />
                     ) : viewMode === 'gateway' ? (
                       <GatewayScreen />
+                    ) : viewMode === 'guide' ? (
+                      <FeatureGuide isPro={isPro} onOpen={(view) => goToView(view)} />
                     ) : viewMode === 'settings' ? (
                       <Settings
                         key={settingsNavigationKey}

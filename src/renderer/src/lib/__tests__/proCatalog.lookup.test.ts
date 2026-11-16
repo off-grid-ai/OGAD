@@ -25,6 +25,8 @@ const macOnly = (route: string): ProFeature => ({
   label: route,
   icon: (() => null) as unknown as ProFeature['icon'],
   tagline: 't',
+  card: 'c',
+  group: 'work',
   description: 'd',
   highlights: ['h'],
   platforms: ['darwin']
