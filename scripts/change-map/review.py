@@ -146,7 +146,7 @@ def main(spec_path, out):
         v = worst([cv for _, cv, _ in cells])
         line = '; '.join(f"{n}: {cl}" for n, cv, cl in cells if cv not in ('GO', 'INFO') and cl) or (cells[0][2] if cells else '')
         lenses.append({'name': name, 'verdict': v, 'line': line})
-        if v == 'GO':
+        if v == 'GO' and line:
             proven.append(f'{name}: {line}')
     missing = [{'name': f"{e['name']} · {pl}", 'why': 'not shot yet'}
                for e in epics
@@ -222,10 +222,13 @@ def main(spec_path, out):
         pr = x.get('pr') or {}
         s['checks'] = f"{REPO[s['surface']][0]} · CI {pr.get('ci') or 'not run'}" + (f" · PR #{pr['n']}" if pr.get('n') else '')
 
-    shared_files = [f for f in changed('shared') if re.search(r'packages/(writing|notes|notes-editor)/', f)]
-    sx = repos.get('shared', {}).get('pr') or {}
-    no_screen = [{'name': 'Shared rules · writing, notes, editor', 'state': 'proven' if sx.get('ci') == 'passing' else 'to check',
-                  'status': 'ok' if sx.get('ci') == 'passing' else 'watch', 'line': f'{len(shared_files)} source files changed'}]
+    # The shared writing/notes rules have no screen of their own: listed only for a change that touches them.
+    no_screen = []
+    if {'writing', 'notes'} & set(spec['concepts']):
+        shared_files = [f for f in changed('shared') if re.search(r'packages/(writing|notes|notes-editor)/', f)]
+        sx = repos.get('shared', {}).get('pr') or {}
+        no_screen = [{'name': 'Shared rules · writing, notes, editor', 'state': 'proven' if sx.get('ci') == 'passing' else 'to check',
+                      'status': 'ok' if sx.get('ci') == 'passing' else 'watch', 'line': f'{len(shared_files)} source files changed'}]
 
     change = {'title': spec['title'], 'verdict': rel.get('verdict', ''), 'lenses': lenses, 'map': cmap, 'collides': collides,
               'platforms': platforms, 'missing': missing, 'noScreen': no_screen, 'proven': proven}
