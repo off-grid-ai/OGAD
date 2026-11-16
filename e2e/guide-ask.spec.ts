@@ -66,6 +66,14 @@ async function openAsk(): Promise<void> {
   await expect(page.getByRole('region', { name: 'Ask about Off Grid AI' })).toBeVisible()
 }
 
+/** The pane's notice that offers this button: the failed ask (Try again) or no model (Open Models). */
+function notice(button: string): ReturnType<Page['getByRole']> {
+  return page
+    .getByRole('region', { name: 'Ask about Off Grid AI' })
+    .getByRole('status')
+    .filter({ has: page.getByRole('button', { name: button }) })
+}
+
 async function ask(question: string): Promise<void> {
   await page.getByRole('textbox', { name: 'Your question' }).fill(question)
   await page.getByRole('button', { name: 'Ask', exact: true }).click()
@@ -96,12 +104,12 @@ test('a question is answered; after a failed ask, Try again and the next questio
   await expect(page.getByRole('textbox', { name: 'Your question' })).toHaveValue('')
 
   await ask('Please drop this one')
-  await expect(pane.getByText('No answer came back.')).toBeVisible({ timeout: 30_000 })
+  await expect(notice('Try again')).toBeVisible({ timeout: 30_000 })
   await expect(pane.getByText('Please drop this one', { exact: true })).toHaveCount(1)
 
   // Try again resends the same question without a second copy on screen.
   await pane.getByRole('button', { name: 'Try again' }).click()
-  await expect(pane.getByText('No answer came back.')).toBeVisible({ timeout: 30_000 })
+  await expect(notice('Try again')).toBeVisible({ timeout: 30_000 })
   await expect(pane.getByText('Please drop this one', { exact: true })).toHaveCount(1)
 
   // A new question after the failure is answered: the unanswered one stays on screen but is not
@@ -110,7 +118,7 @@ test('a question is answered; after a failed ask, Try again and the next questio
   await expect(
     pane.getByText('You asked: Can I use it on my phone?', { exact: false })
   ).toBeVisible({ timeout: 30_000 })
-  await expect(pane.getByText('No answer came back.')).toHaveCount(0)
+  await expect(notice('Try again')).toHaveCount(0)
   await expect(pane.getByText('Please drop this one', { exact: true })).toHaveCount(1)
 
   const last = sentRoles().at(-1)!
@@ -123,10 +131,9 @@ test('with no chat model the pane says why and opens Models', async () => {
   const pane = page.getByRole('region', { name: 'Ask about Off Grid AI' })
 
   await ask('What can it do?')
-  await expect(pane.getByText('No chat model yet. Load one, then ask again.')).toBeVisible({
-    timeout: 30_000
-  })
+  await expect(notice('Open Models')).toBeVisible({ timeout: 30_000 })
   await pane.getByRole('button', { name: 'Open Models' }).click()
+  await expect(page.getByRole('heading', { name: 'Models', exact: true })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Ask about Off Grid AI' })).toHaveCount(0)
   expect(sentRoles()).toEqual([])
 })
