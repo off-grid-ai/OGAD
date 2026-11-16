@@ -111,6 +111,21 @@
   ]
  },
  {
+  "id": "scribe-direction",
+  "name": "Tell it what you need",
+  "group": "Scribe",
+  "what": "Rewrite card → 'Tell it what you need'. Type the goal in your own words and press Enter. The version does that, signs with your name, names the people you know and, when a time is asked for, offers your free calendar slots. In Gmail and Outlook it also reads the message you are replying to.",
+  "file": "screens/scribe-direction.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Directed rewrites (16 Nov)",
+    "at": "2026-11-16T12:00:00Z",
+    "file": "screens/scribe-direction.jpg"
+   }
+  ]
+ },
+ {
   "id": "scribe-learned",
   "name": "Learned",
   "group": "Scribe",
@@ -423,5 +438,20 @@
    }
   ],
   "clip": "screens/notes-settings.mp4"
+ },
+ {
+  "id": "devices-vault",
+  "name": "Vault in Sync sharing",
+  "group": "Vault",
+  "what": "Devices → Sync sharing → Vault: off by default, same words as the phone. On, logins travel to paired devices while the vault is open on both. The Mac keeps its own KDBX; only items travel, inside the paired, encrypted session.",
+  "file": "screens/devices-vault.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Notes parity + Vault (16 Nov)",
+    "at": "2026-11-16T04:40:00Z",
+    "file": "screens/devices-vault.jpg"
+   }
+  ]
  }
 ]
