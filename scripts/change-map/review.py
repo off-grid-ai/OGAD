@@ -119,15 +119,6 @@ def main(spec_path, out):
         rel = json.load(open(p)).get('data', {})
     feats = [f for f in rel.get('features', []) if f['key'] in spec['features']]
     epics = [e for e in rel.get('ship', {}).get('epics', []) if e['key'] in spec['features']]
-    names = {'tech': 'Tech', 'design': 'Design', 'product': 'Product', 'business': 'Business', 'quality': 'Quality'}
-    lenses, proven = [], []
-    for k, name in names.items():
-        cells = [(f['name'], c) for f in feats for c in f['cells'] if c['lens'] == k]
-        v = worst([c['verdict'] for _, c in cells])
-        line = '; '.join(f"{n}: {c['line']}" for n, c in cells if c['verdict'] not in ('GO', 'INFO')) or (cells[0][1]['line'] if cells else '')
-        lenses.append({'name': name, 'verdict': v, 'line': line})
-        if v == 'GO':
-            proven.append(f'{name}: {line}')
     shown = {pl for e in epics for pl in e.get('shown', [])} | {s['platform'] for s in screens}
     platforms = [{'name': pl, 'shown': pl in shown} for pl in PLATFORMS if any(pl in e.get('shown', []) + e.get('missing', []) for e in epics) or pl in shown]
     # The platforms each feature must be shot on: the spec's `require` (the release bar), else
@@ -136,6 +127,27 @@ def main(spec_path, out):
     def shot_on(e):
         keys = {e['key'], e['name'].lower()}
         return {sc['platform'] for sc in screens if proves.get(id(sc), set()) & keys}
+    names = {'tech': 'Tech', 'design': 'Design', 'product': 'Product', 'business': 'Business', 'quality': 'Quality'}
+
+    def current(f, c):
+        """Argus counts only PR-screenshot folders: drop 'Never shown on X' where this page shows it."""
+        line = c['line']
+        m = re.search(r'Never shown on ([^.;]+)\.?\s*', line)
+        if not m:
+            return c['verdict'], line
+        on = shot_on({'key': f['key'], 'name': f['name']})
+        left = [pl.strip() for pl in m.group(1).split(',') if pl.strip() not in on]
+        line = line.replace(m.group(0), f"Never shown on {', '.join(left)}. " if left else '').strip()
+        return (c['verdict'] if line else 'GO'), line
+
+    lenses, proven = [], []
+    for k, name in names.items():
+        cells = [(f['name'], *current(f, c)) for f in feats for c in f['cells'] if c['lens'] == k]
+        v = worst([cv for _, cv, _ in cells])
+        line = '; '.join(f"{n}: {cl}" for n, cv, cl in cells if cv not in ('GO', 'INFO') and cl) or (cells[0][2] if cells else '')
+        lenses.append({'name': name, 'verdict': v, 'line': line})
+        if v == 'GO':
+            proven.append(f'{name}: {line}')
     missing = [{'name': f"{e['name']} · {pl}", 'why': 'not shot yet'}
                for e in epics
                for pl in require.get(e['key'], e.get('missing', []))
