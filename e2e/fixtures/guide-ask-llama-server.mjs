@@ -14,6 +14,11 @@ import http from 'node:http'
 import path from 'node:path'
 
 const args = process.argv.slice(2)
+// The Linux engine probe asks for a GPU first; answer it like a Vulkan build and exit.
+if (args.includes('--list-devices')) {
+  process.stdout.write('Available devices:\n  Vulkan0: Fake GPU (8192 MiB, 8000 MiB free)\n')
+  process.exit(0)
+}
 const portFlag = Math.max(args.indexOf('--port'), args.indexOf('-p'))
 const port = portFlag >= 0 ? Number(args[portFlag + 1]) : 8439
 const log = path.join(path.dirname(process.argv[1]), 'requests.jsonl')
