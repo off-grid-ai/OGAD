@@ -199,6 +199,7 @@ export class AnalyticsService {
     this.flows.clear()
     this.onboardingSteps = null
     this.session = null
+    this.promoShown.clear()
     try {
       this.deps.settings.delete(ANALYTICS_SETTING_KEYS.pendingSession)
     } catch {
@@ -366,7 +367,8 @@ export class AnalyticsService {
         if (!surface) return
         // Seen on every visit to the screen, so sent once per session per surface (the budget).
         if (event === 'boost_promo_shown') {
-          if (this.promoShown.has(surface)) return
+          // An impression that cannot be sent must not spend the session's one impression.
+          if (!this.usageOn() || this.promoShown.has(surface)) return
           this.promoShown.add(surface)
         }
         this.capture(event, { surface })
