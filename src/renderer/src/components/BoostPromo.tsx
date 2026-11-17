@@ -37,16 +37,21 @@ export function BoostPromo({
 
   useEffect(() => {
     let live = true
+    // A close elsewhere is newer than the saved setting: a read still in flight must not reopen it.
+    let closedHere = false
     // Where the settings bridge is absent (isolated surfaces), it shows as never closed.
     Promise.resolve()
       .then(() => window.api.getSettings())
       .then((settings) => {
-        if (!live) return
+        if (!live || closedHere) return
         const value = settings[BOOST_PROMO_SETTING]
         setClosedVersion(typeof value === 'string' ? value : null)
       })
-      .catch(() => live && setClosedVersion(null))
-    const closedElsewhere = (event: Event): void => setClosedVersion((event as CustomEvent<string>).detail)
+      .catch(() => live && !closedHere && setClosedVersion(null))
+    const closedElsewhere = (event: Event): void => {
+      closedHere = true
+      setClosedVersion((event as CustomEvent<string>).detail)
+    }
     window.addEventListener(CLOSED_EVENT, closedElsewhere)
     return () => {
       live = false
