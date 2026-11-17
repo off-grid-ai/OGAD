@@ -14,9 +14,17 @@ import { openExternal } from '@renderer/constants/links'
 import { cn } from '@renderer/lib/utils'
 import type { ViewMode } from '@renderer/lib/view-modes'
 import {
+  GUIDE_FIRST_LOOK,
+  GUIDE_STARTERS,
+  guideAnswerBlocks,
+  guideTurnsToSend,
+  guideWhereLabel
+} from '@offgrid/models'
+import {
   GUIDE_GROUPS,
   answerParts,
-  guideSystemPrompt,
+  guideGrounding,
+  guideStarterAnswer,
   guideTopics,
   type GuideTopic
 } from './guide/guideKnowledge'
@@ -26,15 +34,10 @@ type Turn = { role: 'user' | 'assistant'; content: string }
 
 const ASK = 'ask'
 
-const STARTERS = [
-  'What can it do with my meetings?',
-  'What works on my phone?',
-  'How do I fix my writing in any app?',
-  'What does the browser extension do?'
-]
+const STARTERS = GUIDE_STARTERS.desktop
 
 /** A few features worth a first look, shown under the Ask box before anything is asked. */
-const FIRST_LOOK = ['scribe', 'notes', 'explore', 'meetings', 'phone', 'extension']
+const FIRST_LOOK = GUIDE_FIRST_LOOK.desktop
 
 /** The app's theme is data-theme on <html>, so the light take shows only there. */
 function MediaView({
@@ -111,7 +114,7 @@ function MediaFrame({
 function TopicTag({ topic }: Readonly<{ topic: GuideTopic }>): React.ReactElement {
   return (
     <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-500">
-      {topic.where} · {topic.pro ? 'Pro' : 'Free'}
+      {guideWhereLabel('desktop', topic.where)} · {topic.pro ? 'Pro' : 'Free'}
     </span>
   )
 }
@@ -213,6 +216,27 @@ function AnswerCard({
   )
 }
 
+/** One topic among several in an answer: icon, name and line, so a row of them lines up. It
+ * opens the topic, where its action is. */
+function AnswerTile({
+  topic,
+  onShow
+}: Readonly<{ topic: GuideTopic; onShow: (id: string) => void }>): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={() => onShow(topic.id)}
+      className="og-guide-in grid content-start gap-1 rounded-xl border border-neutral-800 p-3 text-left transition-colors hover:border-green-500/60"
+    >
+      <span className="flex items-center gap-2 text-sm text-neutral-100">
+        <topic.icon className="h-4 w-4 shrink-0 text-green-500" />
+        <span className="truncate">{topic.label}</span>
+      </span>
+      <span className="line-clamp-2 text-xs text-neutral-500">{topic.tagline}</span>
+    </button>
+  )
+}
+
 function AskPane({
   topics,
   isPro,
@@ -232,7 +256,6 @@ function AskPane({
     null
   )
   const endRef = useRef<HTMLDivElement>(null)
-  const system = useMemo(() => guideSystemPrompt(topics), [topics])
   const firstLook = FIRST_LOOK.map((id) => topics.find((t) => t.id === id)).filter(
     (t): t is GuideTopic => Boolean(t?.media)
   )
@@ -245,20 +268,24 @@ function AskPane({
     const text = question.trim()
     if (!text || waiting) return
     const history: Turn[] = retry ? turns : [...turns, { role: 'user', content: text }]
-    setTurns(history)
     if (!retry) setDraft('')
+    // A starter's answer is built from the guide itself: instant, and there with no model.
+    const starter = retry ? null : guideStarterAnswer(text, topics)
+    if (starter) {
+      setTurns([...history, { role: 'assistant', content: starter }])
+      toEnd()
+      return
+    }
+    setTurns(history)
     setWaiting(true)
     setMissed(null)
     toEnd()
-    // A question left unanswered stays on screen but is not sent: two user turns in a row
-    // break models that need user and assistant turns to alternate.
-    const sent = history.filter(
-      (t, i) =>
-        t.role !== 'user' || i === history.length - 1 || history[i + 1]?.role === 'assistant'
-    )
     let result: Awaited<ReturnType<typeof window.api.askGuide>> = { error: 'failed' }
     try {
-      result = await window.api.askGuide([{ role: 'system', content: system }, ...sent.slice(-7)])
+      result = await window.api.askGuide([
+        { role: 'system', content: guideGrounding(topics, history) },
+        ...guideTurnsToSend(history)
+      ])
     } catch {
       // The bridge itself failed: the same as a failed ask.
     } finally {
@@ -314,19 +341,25 @@ function AskPane({
               </p>
             ) : (
               <div key={i} className="og-guide-in grid gap-4 text-sm text-neutral-200">
-                {answerParts(turn.content, topics).map((part, j) =>
-                  part.kind === 'text' ? (
+                {guideAnswerBlocks(answerParts(turn.content, topics)).map((block, j) =>
+                  block.kind === 'text' ? (
                     <div key={j} className="min-w-0">
-                      <ChatMarkdown content={part.text} />
+                      <ChatMarkdown content={block.text} />
                     </div>
-                  ) : (
+                  ) : block.topics.length === 1 && block.topics[0] ? (
                     <AnswerCard
                       key={j}
-                      topic={part.topic}
+                      topic={block.topics[0]}
                       isPro={isPro}
                       onShow={onShow}
                       onOpen={onOpen}
                     />
+                  ) : (
+                    <div key={j} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      {block.topics.map((t) => (
+                        <AnswerTile key={t.id} topic={t} onShow={onShow} />
+                      ))}
+                    </div>
                   )
                 )}
               </div>
