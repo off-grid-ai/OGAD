@@ -255,7 +255,7 @@ describe('after the user opts in', () => {
     service.setConsent({ usage: true }, 'settings')
     service.captureFromRenderer('boost_promo_shown', { surface: 'models' })
     await service.shutdown()
-    const shown = () =>
+    const shown = (): unknown[] =>
       fake!.events.filter((event) => event.event === 'boost_promo_shown').map((event) => event.properties.surface)
     expect(shown()).toEqual(['models'])
 
