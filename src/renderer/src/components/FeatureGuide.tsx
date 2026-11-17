@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import {
   ArrowSquareOutIcon,
+  CaretRightIcon,
   CheckIcon,
   LockSimpleIcon,
   PaperPlaneRightIcon,
@@ -17,6 +18,7 @@ import {
   GUIDE_FIRST_LOOK,
   GUIDE_STARTERS,
   guideAnswerBlocks,
+  guideFlowAnswerById,
   guideTurnsToSend,
   guideWhereLabel
 } from '@offgrid/models'
@@ -24,7 +26,8 @@ import {
   GUIDE_GROUPS,
   answerParts,
   guideGrounding,
-  guideDirectAnswer,
+  guideStarterAnswer,
+  guideStepsAnswer,
   guideTopics,
   type GuideTopic
 } from './guide/guideKnowledge'
@@ -263,17 +266,22 @@ function AskPane({
     requestAnimationFrame(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }))
   }
 
-  /** Ask a question; a retry resends the last one, already on screen, without a second copy. */
-  const ask = async (question: string, retry = false): Promise<void> => {
+  /** Ask a question; a retry resends the last one, already on screen, without a second copy. A
+   * pick from a "Which one?" list asks with that flow's id, so its steps come back exactly. */
+  const ask = async (question: string, retry = false, flowId?: string): Promise<void> => {
     const text = question.trim()
     if (!text || waiting) return
     const history: Turn[] = retry ? turns : [...turns, { role: 'user', content: text }]
     if (!retry) setDraft('')
-    // A starter's or a "how do I…" answer is built from the guide itself: instant, exact, and
-    // there with no model.
-    const starter = retry ? null : guideDirectAnswer(text, topics, currentPlatform())
-    if (starter) {
-      setTurns([...history, { role: 'assistant', content: starter }])
+    // A starter's or a picked flow's answer is built from the guide itself: instant, and there
+    // with no model.
+    const instant = retry
+      ? null
+      : flowId
+        ? guideFlowAnswerById('desktop', flowId, topics)
+        : guideStarterAnswer(text, topics)
+    if (instant) {
+      setTurns([...history, { role: 'assistant', content: instant }])
       toEnd()
       return
     }
@@ -281,10 +289,20 @@ function AskPane({
     setWaiting(true)
     setMissed(null)
     toEnd()
+    // A "how do I…" answer is the app's own steps, found by what the question means when the
+    // guide's search model is on this computer, else by its words; the model answers the rest.
+    const vector = (await window.api.embedGuideQuestion(text).catch(() => null)) ?? undefined
+    const steps = retry ? null : guideStepsAnswer(text, topics, currentPlatform(), vector)
+    if (steps) {
+      setWaiting(false)
+      setTurns([...history, { role: 'assistant', content: steps }])
+      toEnd()
+      return
+    }
     let result: Awaited<ReturnType<typeof window.api.askGuide>> = { error: 'failed' }
     try {
       result = await window.api.askGuide([
-        { role: 'system', content: guideGrounding(topics, history, currentPlatform()) },
+        { role: 'system', content: guideGrounding(topics, history, currentPlatform(), vector) },
         ...guideTurnsToSend(history)
       ])
     } catch {
@@ -346,6 +364,25 @@ function AskPane({
                   block.kind === 'text' ? (
                     <div key={j} className="min-w-0">
                       <ChatMarkdown content={block.text} />
+                    </div>
+                  ) : block.kind === 'picks' ? (
+                    <div
+                      key={j}
+                      className="grid w-full max-w-xl divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10"
+                    >
+                      {block.picks.map((pick) => (
+                        <button
+                          key={pick.id}
+                          type="button"
+                          disabled={waiting}
+                          onClick={() => void ask(pick.label, false, pick.id)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-left text-neutral-200 transition-colors hover:bg-white/5 active:bg-white/10 disabled:opacity-50"
+                          data-testid={`guide-pick-${pick.id}`}
+                        >
+                          <span className="min-w-0 flex-1">{pick.label}</span>
+                          <CaretRightIcon className="size-4 shrink-0 text-neutral-500" aria-hidden />
+                        </button>
+                      ))}
                     </div>
                   ) : block.topics.length === 1 && block.topics[0] ? (
                     <AnswerCard

@@ -312,6 +312,9 @@ const offGridApi = {
     turns: { role: 'system' | 'user' | 'assistant'; content: string }[]
   ): Promise<{ answer: string } | { error: 'no-model' | 'failed' }> =>
     ipcRenderer.invoke('guide:ask', turns),
+  /** The guide's question as a vector (its own search model, when on this computer), or null. */
+  embedGuideQuestion: (question: string): Promise<number[] | null> =>
+    ipcRenderer.invoke('guide:embed', question),
   // Live token/reasoning/step events for an in-flight ragChat (matched by streamId).
   onRagStream: (
     callback: (data: {

@@ -123,19 +123,32 @@ function flowPlatform(platform: DevicePlatform): GuideFlowPlatform | undefined {
 
 /** The grounding the local model answers from: only the topics this conversation is about, and the
  * checked flows closest to the question. */
-export function guideGrounding(topics: GuideTopic[], history: Turn[], platform: DevicePlatform): string {
-  return sharedGuideGrounding('desktop', topics, history, { platform: flowPlatform(platform) })
+export function guideGrounding(
+  topics: GuideTopic[],
+  history: Turn[],
+  platform: DevicePlatform,
+  vector?: number[]
+): string {
+  return sharedGuideGrounding('desktop', topics, history, { platform: flowPlatform(platform), vector })
+}
+
+/** A starter question's answer, built by code with no model. Null for anything else. */
+export function guideStarterAnswer(question: string, topics: GuideTopic[]): string | null {
+  return sharedGuideStarterAnswer('desktop', question, topics)
 }
 
 /**
- * An answer built by code, with no model: a starter question's, or a "how do I…" question's from
- * the app's checked flows (its own labels, in order). Null for anything the model answers.
+ * A "how do I…" question's answer from the app's checked flows (its own labels, in order), or a
+ * short list to pick from; found by meaning when the question came with its vector. Null when no
+ * flow fits: the model answers those.
  */
-export function guideDirectAnswer(question: string, topics: GuideTopic[], platform: DevicePlatform): string | null {
-  return (
-    sharedGuideStarterAnswer('desktop', question, topics) ??
-    guideFlowAnswer('desktop', question, topics, { platform: flowPlatform(platform) })
-  )
+export function guideStepsAnswer(
+  question: string,
+  topics: GuideTopic[],
+  platform: DevicePlatform,
+  vector?: number[]
+): string | null {
+  return guideFlowAnswer('desktop', question, topics, { platform: flowPlatform(platform), vector })
 }
 
 export type AnswerPart = GuideAnswerPart<GuideTopic>
