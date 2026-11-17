@@ -241,7 +241,9 @@ export type RendererAnalyticsEvent = keyof RendererAnalyticsEvents
 /** Where the private cloud promo shows. */
 export const BOOST_PROMO_SURFACES = [
   'models',
-  'model_settings'
+  'model_settings',
+  'onboarding',
+  'home'
 ] as const satisfies readonly BoostPromoSurface[]
 
 /** A renderer error, before main scrubs it. */

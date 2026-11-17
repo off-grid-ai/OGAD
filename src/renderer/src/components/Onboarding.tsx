@@ -12,6 +12,7 @@ import { deviceNoun, isMac } from '@renderer/lib/device'
 import { cn } from '@renderer/lib/utils'
 import logo from '@/assets/logo.png'
 import { QuickConnections } from './QuickConnections'
+import { BoostPromoLine } from './BoostPromo'
 import { Button } from './ui/button'
 import { Checkbox } from '@offgrid/operator-ui/operator/coss/checkbox'
 import { WhatWeShareDialog } from './analytics/WhatWeShareDialog'
@@ -302,6 +303,14 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
               >
                 Chat / Vision / Image / Video / Transcription / Voice / Web Use / Computer Use
               </motion.p>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 1.2 }}
+                className="mt-6 text-center"
+              >
+                <BoostPromoLine />
+              </motion.div>
             </div>
           </motion.div>
         )}

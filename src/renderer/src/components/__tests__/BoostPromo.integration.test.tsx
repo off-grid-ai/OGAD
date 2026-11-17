@@ -10,7 +10,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { BOOST_PROMO } from '@offgrid/models'
-import { BoostPromo, BOOST_PROMO_SETTING } from '../BoostPromo'
+import { BoostPromo, BoostPromoLine, BOOST_PROMO_SETTING } from '../BoostPromo'
 
 function bridge(saved: Record<string, unknown> = {}): {
   settings: Record<string, unknown>
@@ -79,5 +79,21 @@ describe('the private cloud promo', () => {
     bridge({ [BOOST_PROMO_SETTING]: 'an-older-promo' })
     render(<BoostPromo surface="models" />)
     expect(await screen.findByTestId('boost-promo')).toBeTruthy()
+  })
+
+  it('in onboarding: one line with the offer and a link to its page', () => {
+    const api = bridge()
+    render(<BoostPromoLine />)
+    expect(screen.getByTestId('boost-promo-line').textContent).toContain(
+      'Smarter answers, without a new computer.'
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Claim my discount' }))
+    expect(api.opened).toEqual([
+      'https://getoffgridai.co/boost?utm_source=off-grid-desktop-app&utm_medium=boost-onboarding&utm_campaign=in-app'
+    ])
+    expect(api.events).toEqual([
+      ['boost_promo_shown', { surface: 'onboarding' }],
+      ['boost_promo_clicked', { surface: 'onboarding' }]
+    ])
   })
 })

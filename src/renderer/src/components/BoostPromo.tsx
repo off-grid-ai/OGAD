@@ -35,8 +35,9 @@ export function BoostPromo({
 
   useEffect(() => {
     let live = true
-    window.api
-      .getSettings()
+    // Where the settings bridge is absent (isolated surfaces), it shows as never closed.
+    Promise.resolve()
+      .then(() => window.api.getSettings())
       .then((settings) => {
         if (!live) return
         const value = settings[BOOST_PROMO_SETTING]
@@ -63,7 +64,9 @@ export function BoostPromo({
   const close = (): void => {
     track('boost_promo_dismissed', { surface })
     setClosedVersion(BOOST_PROMO.version)
-    void window.api.saveSetting(BOOST_PROMO_SETTING, BOOST_PROMO.version)
+    Promise.resolve()
+      .then(() => window.api.saveSetting(BOOST_PROMO_SETTING, BOOST_PROMO.version))
+      .catch(() => undefined)
   }
 
   return (
@@ -102,5 +105,32 @@ export function BoostPromo({
         </Button>
       </IconTip>
     </motion.section>
+  )
+}
+
+/**
+ * The offer as one quiet line in a step of onboarding: what it is and a link to the page. Nothing to
+ * close: the step itself moves on.
+ */
+export function BoostPromoLine({ className }: { className?: string }): React.JSX.Element {
+  useEffect(() => {
+    track('boost_promo_shown', { surface: 'onboarding' })
+  }, [])
+  const claim = (): void => {
+    track('boost_promo_clicked', { surface: 'onboarding' })
+    openExternal(boostPromoLink('desktop', 'onboarding'))
+  }
+  return (
+    <p data-testid="boost-promo-line" className={`text-sm text-neutral-400 ${className ?? ''}`}>
+      {COPY.title}{' '}
+      <button
+        type="button"
+        onClick={claim}
+        data-testid="boost-promo-line-claim"
+        className="text-emerald-600 underline-offset-4 transition-colors duration-150 hover:underline active:scale-[0.98] dark:text-emerald-400"
+      >
+        {COPY.action}
+      </button>
+    </p>
   )
 }
