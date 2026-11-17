@@ -24,7 +24,7 @@ import {
   GUIDE_GROUPS,
   answerParts,
   guideGrounding,
-  guideStarterAnswer,
+  guideDirectAnswer,
   guideTopics,
   type GuideTopic
 } from './guide/guideKnowledge'
@@ -269,8 +269,9 @@ function AskPane({
     if (!text || waiting) return
     const history: Turn[] = retry ? turns : [...turns, { role: 'user', content: text }]
     if (!retry) setDraft('')
-    // A starter's answer is built from the guide itself: instant, and there with no model.
-    const starter = retry ? null : guideStarterAnswer(text, topics)
+    // A starter's or a "how do I…" answer is built from the guide itself: instant, exact, and
+    // there with no model.
+    const starter = retry ? null : guideDirectAnswer(text, topics, currentPlatform())
     if (starter) {
       setTurns([...history, { role: 'assistant', content: starter }])
       toEnd()
@@ -283,7 +284,7 @@ function AskPane({
     let result: Awaited<ReturnType<typeof window.api.askGuide>> = { error: 'failed' }
     try {
       result = await window.api.askGuide([
-        { role: 'system', content: guideGrounding(topics, history) },
+        { role: 'system', content: guideGrounding(topics, history, currentPlatform()) },
         ...guideTurnsToSend(history)
       ])
     } catch {

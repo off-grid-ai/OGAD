@@ -15,10 +15,12 @@ import {
   DESKTOP_BEYOND_GROUP,
   GUIDE_LINKS,
   guideAnswerParts,
+  guideFlowAnswer,
   guideGrounding as sharedGuideGrounding,
   guideStarterAnswer as sharedGuideStarterAnswer,
   guideTopicsFor,
   type GuideAnswerPart,
+  type GuideFlowPlatform,
   type GuideWhere
 } from '@offgrid/models'
 import { FEATURE_GROUPS, PRO_FEATURES, featureSupportsPlatform } from '../pro/proCatalog'
@@ -111,14 +113,29 @@ export function guideTopics(platform: DevicePlatform): GuideTopic[] {
 
 type Turn = { role: 'user' | 'assistant'; content: string }
 
-/** The grounding the local model answers from: only the topics this conversation is about. */
-export function guideGrounding(topics: GuideTopic[], history: Turn[]): string {
-  return sharedGuideGrounding('desktop', topics, history)
+/** This computer as the guide's flows name platforms; undefined shows every platform's flows. */
+function flowPlatform(platform: DevicePlatform): GuideFlowPlatform | undefined {
+  if (platform === 'darwin') return 'mac'
+  if (platform === 'win32') return 'windows'
+  if (platform === 'linux') return 'linux'
+  return undefined
 }
 
-/** A starter question's answer, built from the topics; null for anything the model answers. */
-export function guideStarterAnswer(question: string, topics: GuideTopic[]): string | null {
-  return sharedGuideStarterAnswer('desktop', question, topics)
+/** The grounding the local model answers from: only the topics this conversation is about, and the
+ * checked flows closest to the question. */
+export function guideGrounding(topics: GuideTopic[], history: Turn[], platform: DevicePlatform): string {
+  return sharedGuideGrounding('desktop', topics, history, { platform: flowPlatform(platform) })
+}
+
+/**
+ * An answer built by code, with no model: a starter question's, or a "how do I…" question's from
+ * the app's checked flows (its own labels, in order). Null for anything the model answers.
+ */
+export function guideDirectAnswer(question: string, topics: GuideTopic[], platform: DevicePlatform): string | null {
+  return (
+    sharedGuideStarterAnswer('desktop', question, topics) ??
+    guideFlowAnswer('desktop', question, topics, { platform: flowPlatform(platform) })
+  )
 }
 
 export type AnswerPart = GuideAnswerPart<GuideTopic>
