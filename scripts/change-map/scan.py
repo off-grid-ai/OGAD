@@ -9,7 +9,7 @@ Usage (from desktop/):
 
 It reads every git-tracked file in the sibling repos of the off-grid-ai workspace (shared, desktop, desktop/pro,
 mobile, mobile/pro, browser-extension, website). A file joins a layer by its folder and a concept by its path name.
-Concepts come from shared/packages/features (the feature list), plus model library and Pro licensing.
+Concepts come from shared/packages/features (the feature list), plus model library, Pro licensing and analytics.
 """
 import argparse, csv, json, re, subprocess, sys, os
 from collections import defaultdict
@@ -37,8 +37,9 @@ CONCEPTS = {
   'todos':     ('To-dos and people', 'feature', r'(todo|(^|[/-])crm|people|entity|briefing|identity|dossier)'),
   'agents':    ('Agents', 'feature', r'(computer-use|web-use|automation|operator|(^|[/-])agent|(^|[/-])use([/-]|$)|action-pipeline)'),
   'sync':      ('Devices and sync', 'feature', r'((^|[/-])sync|pair|mesh|transfer|discovery|companion)'),
-  'models':    ('Model library', 'infra', r'(model-(download|manager|browser|catalog|residency|picks)|download|catalog|hugging-?face|huggingface|active-model|engine-pack|device-picks|best-settings|fastest-settings|recommend)'),
-  'licensing': ('Pro licensing', 'infra', r'(licens|keygen|entitlement|fingerprint|paywall|purchase|revenuecat|checkout|pro-pricing|pro-detail|pro-unlock)'),
+  'models':    ('Model library', 'infra', r'(model-(download|manager|browser|catalog|residency|picks)|download|catalog|hugging-?face|huggingface|active-model|engine-pack|device-picks|best-settings|fastest-settings|recommend|boost-promo)'),
+  'licensing': ('Pro licensing', 'infra', r'(licens|keygen|entitlement|fingerprint|paywall|purchase|revenuecat|checkout|pro-pricing|pro-detail|pro-unlock|get-pro)'),
+  'analytics': ('Analytics', 'infra', r'(analytics|session-tally|usage-snapshot)'),
 }
 
 SKIP = re.compile(r'(^|/)(docs|outputs|\.artifacts|node_modules|dist|coverage|generated|\.github|scripts|fastlane|patches|vendor|Pods|\.vscode|test-results|marketing|demo-gifs|resources|preview-ui|tools|_includes|_layouts)(/|$)|\.(png|jpe?g|gif|webp|svg|mp4|mov|ttf|otf|woff2?|lock|ico|icns|car|mp3|wav|pdf|zip|bin|onnx|txt|md)$|package(-lock)?\.json$|tsconfig|eslint|vite|vitest|playwright|knip|jest|babel|metro')
