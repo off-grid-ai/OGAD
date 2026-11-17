@@ -81,12 +81,13 @@ describe('the private cloud promo', () => {
     expect(await screen.findByTestId('boost-promo')).toBeTruthy()
   })
 
-  it('in onboarding: one line with the offer and a link to its page', () => {
+  it('in onboarding: one line with the offer and a link to its page', async () => {
     const api = bridge()
     render(<BoostPromoLine />)
     expect(screen.getByTestId('boost-promo-line').textContent).toContain(
       'Smarter answers, without a new computer.'
     )
+    await waitFor(() => expect(api.events).toEqual([['boost_promo_shown', { surface: 'onboarding' }]]))
     fireEvent.click(screen.getByRole('button', { name: 'Claim my discount' }))
     expect(api.opened).toEqual([
       'https://getoffgridai.co/boost?utm_source=off-grid-desktop-app&utm_medium=boost-onboarding&utm_campaign=in-app'
@@ -95,5 +96,26 @@ describe('the private cloud promo', () => {
       ['boost_promo_shown', { surface: 'onboarding' }],
       ['boost_promo_clicked', { surface: 'onboarding' }]
     ])
+  })
+
+  it('in onboarding: moving on before the line fades in is not an impression', async () => {
+    const api = bridge()
+    const { unmount } = render(<BoostPromoLine delay={0.05} />)
+    unmount()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(api.events).toEqual([])
+  })
+
+  it('closing one promo closes every other promo on screen', async () => {
+    bridge()
+    render(
+      <>
+        <BoostPromo surface="models" />
+        <BoostPromo surface="model_settings" />
+      </>
+    )
+    await waitFor(() => expect(screen.getAllByTestId('boost-promo')).toHaveLength(2))
+    fireEvent.click(screen.getAllByTestId('boost-promo-close')[0]!)
+    await waitFor(() => expect(screen.queryAllByTestId('boost-promo')).toHaveLength(0))
   })
 })

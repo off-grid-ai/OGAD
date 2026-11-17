@@ -16,6 +16,8 @@ import { track } from '../lib/analytics'
 const COPY = boostPromoCopy('computer')
 /** The setting that holds the promo version the person closed. */
 export const BOOST_PROMO_SETTING = 'boostPromoClosedVersion'
+/** Sent when one promo is closed, so every other promo on screen closes with it. */
+const CLOSED_EVENT = 'offgrid:boost-promo-closed'
 
 /**
  * Models too big for this computer, on our private servers. Free and Pro both see it. Closing it
@@ -44,8 +46,11 @@ export function BoostPromo({
         setClosedVersion(typeof value === 'string' ? value : null)
       })
       .catch(() => live && setClosedVersion(null))
+    const closedElsewhere = (event: Event): void => setClosedVersion((event as CustomEvent<string>).detail)
+    window.addEventListener(CLOSED_EVENT, closedElsewhere)
     return () => {
       live = false
+      window.removeEventListener(CLOSED_EVENT, closedElsewhere)
     }
   }, [])
 
@@ -64,6 +69,7 @@ export function BoostPromo({
   const close = (): void => {
     track('boost_promo_dismissed', { surface })
     setClosedVersion(BOOST_PROMO.version)
+    window.dispatchEvent(new CustomEvent(CLOSED_EVENT, { detail: BOOST_PROMO.version }))
     Promise.resolve()
       .then(() => window.api.saveSetting(BOOST_PROMO_SETTING, BOOST_PROMO.version))
       .catch(() => undefined)
@@ -111,18 +117,32 @@ export function BoostPromo({
 
 /**
  * The offer as one quiet line in a step of onboarding: what it is and a link to the page. Nothing to
- * close: the step itself moves on.
+ * close: the step itself moves on. It fades in after `delay` seconds and counts as shown only then,
+ * so moving on before it appears is not an impression.
  */
-export function BoostPromoLine({ className }: { className?: string }): React.JSX.Element {
+export function BoostPromoLine({
+  className,
+  delay = 0
+}: {
+  className?: string
+  delay?: number
+}): React.JSX.Element {
   useEffect(() => {
-    track('boost_promo_shown', { surface: 'onboarding' })
-  }, [])
+    const shown = window.setTimeout(() => track('boost_promo_shown', { surface: 'onboarding' }), delay * 1000)
+    return () => window.clearTimeout(shown)
+  }, [delay])
   const claim = (): void => {
     track('boost_promo_clicked', { surface: 'onboarding' })
     openExternal(boostPromoLink('desktop', 'onboarding'))
   }
   return (
-    <p data-testid="boost-promo-line" className={`text-sm text-neutral-400 ${className ?? ''}`}>
+    <motion.p
+      data-testid="boost-promo-line"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ delay }}
+      className={`text-sm text-neutral-400 ${className ?? ''}`}
+    >
       {COPY.title} {COPY.line}{' '}
       <button
         type="button"
@@ -132,6 +152,6 @@ export function BoostPromoLine({ className }: { className?: string }): React.JSX
       >
         {COPY.action}
       </button>
-    </p>
+    </motion.p>
   )
 }

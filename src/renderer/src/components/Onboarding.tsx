@@ -252,14 +252,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                   />
                 </div>
                 {/* Up here, not under the orbit: the step's footer is fixed and covers the bottom. */}
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 1.2 }}
-                  className="mt-4"
-                >
-                  <BoostPromoLine />
-                </motion.div>
+                <BoostPromoLine delay={1.2} className="mt-4" />
               </div>
 
               <motion.div
