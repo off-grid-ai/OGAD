@@ -40,6 +40,7 @@ CONCEPTS = {
   'models':    ('Model library', 'infra', r'(model-(download|manager|browser|catalog|residency|picks)|download|catalog|hugging-?face|huggingface|active-model|engine-pack|device-picks|best-settings|fastest-settings|recommend|boost-promo)'),
   'licensing': ('Pro licensing', 'infra', r'(licens|keygen|entitlement|fingerprint|paywall|purchase|revenuecat|checkout|pro-pricing|pro-detail|pro-unlock|get-pro)'),
   'analytics': ('Analytics', 'infra', r'(analytics|session-tally|usage-snapshot)'),
+  'guide': ('What it does for you', 'infra', r'(feature-guide|guide-ask|guide-knowledge|guide-media|product-guide|(?<!mcp-)guide-screen|guide-topic|guide-picture|use-guide-action)'),
 }
 
 SKIP = re.compile(r'(^|/)(docs|outputs|\.artifacts|node_modules|dist|coverage|generated|\.github|scripts|fastlane|patches|vendor|Pods|\.vscode|test-results|marketing|demo-gifs|resources|preview-ui|tools|_includes|_layouts)(/|$)|\.(png|jpe?g|gif|webp|svg|mp4|mov|ttf|otf|woff2?|lock|ico|icns|car|mp3|wav|pdf|zip|bin|onnx|txt|md)$|package(-lock)?\.json$|tsconfig|eslint|vite|vitest|playwright|knip|jest|babel|metro')
