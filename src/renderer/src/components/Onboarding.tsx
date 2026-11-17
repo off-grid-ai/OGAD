@@ -12,6 +12,7 @@ import { deviceNoun, isMac } from '@renderer/lib/device'
 import { cn } from '@renderer/lib/utils'
 import logo from '@/assets/logo.png'
 import { QuickConnections } from './QuickConnections'
+import { BoostPromoLine } from './BoostPromo'
 import { Button } from './ui/button'
 import { Checkbox } from '@offgrid/operator-ui/operator/coss/checkbox'
 import { WhatWeShareDialog } from './analytics/WhatWeShareDialog'
@@ -233,7 +234,8 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
             exit={{ opacity: 0 }}
             className="relative h-full w-full"
           >
-            <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6">
+            {/* pb-36: centred in the space above the fixed footer, so the list never meets the step dots. */}
+            <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 pb-36">
               <div className="mb-6 text-center">
                 <TextGenerate
                   words={`Choose what runs on your ${deviceNoun()}.`}
@@ -249,6 +251,8 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                     delay={0.4}
                   />
                 </div>
+                {/* Up here, not under the orbit: the step's footer is fixed and covers the bottom. */}
+                <BoostPromoLine delay={1.2} className="mt-4" />
               </div>
 
               <motion.div

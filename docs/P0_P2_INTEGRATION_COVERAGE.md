@@ -20,21 +20,21 @@ manual claim does not count as complete integration coverage.
   - P0 partial: 68.
   - P0 open: 2.
   - P0 left: 70.
-  - P1: 71 total.
+  - P1: 72 total.
   - P1 complete: 12.
-  - P1 partial: 59.
+  - P1 partial: 60.
   - P1 open: 0.
-  - P1 left: 59.
+  - P1 left: 60.
   - P2: 10 total.
   - P2 complete: 3.
   - P2 partial: 7.
   - P2 open: 0.
   - P2 left: 7.
-  - Overall: 155 total.
+  - Overall: 156 total.
   - Overall complete: 19.
-  - Overall partial: 134.
+  - Overall partial: 135.
   - Overall open: 2.
-  - Overall left: 136.
+  - Overall left: 137.
 - Complete P0 journeys:
   - #9 - Fresh onboarding completes.
   - #79 - Gateway models endpoint.
@@ -67,7 +67,7 @@ manual claim does not count as complete integration coverage.
   - #11, #14, #16, #18, #19, #20, #21, #22, #23, #24, #35, #36, #37, #40, #45, #47,
     #49, #54, #57, #58, #60, #64, #65, #66, #67, #70, #72, #77, #78, #81, #82, #88,
     #91, #92, #93, #98, #101, #102, #103, #105, #107, #108, #109, #110, #111, #113,
-    #114, #115, #120, #123, #131, #133, #139, #141, #142, #143, #146, #149, #154.
+    #114, #115, #120, #123, #131, #133, #139, #141, #142, #143, #146, #149, #154, #156.
 - Partial P2 journeys left:
   - #31, #50, #55, #104, #124, #152, #153.
 - Open journeys:

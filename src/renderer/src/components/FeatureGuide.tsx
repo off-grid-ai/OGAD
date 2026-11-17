@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import {
   ArrowSquareOutIcon,
+  CaretRightIcon,
   CheckIcon,
   LockSimpleIcon,
   PaperPlaneRightIcon,
@@ -14,9 +15,19 @@ import { openExternal } from '@renderer/constants/links'
 import { cn } from '@renderer/lib/utils'
 import type { ViewMode } from '@renderer/lib/view-modes'
 import {
+  GUIDE_FIRST_LOOK,
+  GUIDE_STARTERS,
+  guideAnswerBlocks,
+  guideFlowAnswerById,
+  guideTurnsToSend,
+  guideWhereLabel
+} from '@offgrid/models'
+import {
   GUIDE_GROUPS,
   answerParts,
-  guideSystemPrompt,
+  guideGrounding,
+  guideStarterAnswer,
+  guideStepsAnswer,
   guideTopics,
   type GuideTopic
 } from './guide/guideKnowledge'
@@ -26,15 +37,10 @@ type Turn = { role: 'user' | 'assistant'; content: string }
 
 const ASK = 'ask'
 
-const STARTERS = [
-  'What can it do with my meetings?',
-  'What works on my phone?',
-  'How do I fix my writing in any app?',
-  'What does the browser extension do?'
-]
+const STARTERS = GUIDE_STARTERS.desktop
 
 /** A few features worth a first look, shown under the Ask box before anything is asked. */
-const FIRST_LOOK = ['scribe', 'notes', 'explore', 'meetings', 'phone', 'extension']
+const FIRST_LOOK = GUIDE_FIRST_LOOK.desktop
 
 /** The app's theme is data-theme on <html>, so the light take shows only there. */
 function MediaView({
@@ -111,7 +117,7 @@ function MediaFrame({
 function TopicTag({ topic }: Readonly<{ topic: GuideTopic }>): React.ReactElement {
   return (
     <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-500">
-      {topic.where} · {topic.pro ? 'Pro' : 'Free'}
+      {guideWhereLabel('desktop', topic.where)} · {topic.pro ? 'Pro' : 'Free'}
     </span>
   )
 }
@@ -213,6 +219,27 @@ function AnswerCard({
   )
 }
 
+/** One topic among several in an answer: icon, name and line, so a row of them lines up. It
+ * opens the topic, where its action is. */
+function AnswerTile({
+  topic,
+  onShow
+}: Readonly<{ topic: GuideTopic; onShow: (id: string) => void }>): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={() => onShow(topic.id)}
+      className="og-guide-in grid content-start gap-1 rounded-xl border border-neutral-800 p-3 text-left transition-colors hover:border-green-500/60"
+    >
+      <span className="flex items-center gap-2 text-sm text-neutral-100">
+        <topic.icon className="h-4 w-4 shrink-0 text-green-500" />
+        <span className="truncate">{topic.label}</span>
+      </span>
+      <span className="line-clamp-2 text-xs text-neutral-500">{topic.tagline}</span>
+    </button>
+  )
+}
+
 function AskPane({
   topics,
   isPro,
@@ -232,7 +259,6 @@ function AskPane({
     null
   )
   const endRef = useRef<HTMLDivElement>(null)
-  const system = useMemo(() => guideSystemPrompt(topics), [topics])
   const firstLook = FIRST_LOOK.map((id) => topics.find((t) => t.id === id)).filter(
     (t): t is GuideTopic => Boolean(t?.media)
   )
@@ -240,25 +266,46 @@ function AskPane({
     requestAnimationFrame(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }))
   }
 
-  /** Ask a question; a retry resends the last one, already on screen, without a second copy. */
-  const ask = async (question: string, retry = false): Promise<void> => {
+  /** Ask a question; a retry resends the last one, already on screen, without a second copy. A
+   * pick from a "Which one?" list asks with that flow's id, so its steps come back exactly. */
+  const ask = async (question: string, retry = false, flowId?: string): Promise<void> => {
     const text = question.trim()
     if (!text || waiting) return
     const history: Turn[] = retry ? turns : [...turns, { role: 'user', content: text }]
-    setTurns(history)
     if (!retry) setDraft('')
-    setWaiting(true)
+    // A new question, answered or not, replaces any earlier failure and its Try again.
     setMissed(null)
+    // A starter's or a picked flow's answer is built from the guide itself: instant, and there
+    // with no model.
+    const instant = retry
+      ? null
+      : flowId
+        ? guideFlowAnswerById('desktop', flowId, topics)
+        : guideStarterAnswer(text, topics)
+    if (instant) {
+      setTurns([...history, { role: 'assistant', content: instant }])
+      toEnd()
+      return
+    }
+    setTurns(history)
+    setWaiting(true)
     toEnd()
-    // A question left unanswered stays on screen but is not sent: two user turns in a row
-    // break models that need user and assistant turns to alternate.
-    const sent = history.filter(
-      (t, i) =>
-        t.role !== 'user' || i === history.length - 1 || history[i + 1]?.role === 'assistant'
-    )
+    // A "how do I…" answer is the app's own steps, found by what the question means when the
+    // guide's search model is on this computer, else by its words; the model answers the rest.
+    const vector = (await window.api.embedGuideQuestion(text).catch(() => null)) ?? undefined
+    const steps = retry ? null : guideStepsAnswer(text, topics, currentPlatform(), vector)
+    if (steps) {
+      setWaiting(false)
+      setTurns([...history, { role: 'assistant', content: steps }])
+      toEnd()
+      return
+    }
     let result: Awaited<ReturnType<typeof window.api.askGuide>> = { error: 'failed' }
     try {
-      result = await window.api.askGuide([{ role: 'system', content: system }, ...sent.slice(-7)])
+      result = await window.api.askGuide([
+        { role: 'system', content: guideGrounding(topics, history, currentPlatform(), vector) },
+        ...guideTurnsToSend(history)
+      ])
     } catch {
       // The bridge itself failed: the same as a failed ask.
     } finally {
@@ -314,19 +361,44 @@ function AskPane({
               </p>
             ) : (
               <div key={i} className="og-guide-in grid gap-4 text-sm text-neutral-200">
-                {answerParts(turn.content, topics).map((part, j) =>
-                  part.kind === 'text' ? (
+                {guideAnswerBlocks(answerParts(turn.content, topics)).map((block, j) =>
+                  block.kind === 'text' ? (
                     <div key={j} className="min-w-0">
-                      <ChatMarkdown content={part.text} />
+                      <ChatMarkdown content={block.text} />
                     </div>
-                  ) : (
+                  ) : block.kind === 'picks' ? (
+                    <div
+                      key={j}
+                      className="grid w-full max-w-xl divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10"
+                    >
+                      {block.picks.map((pick) => (
+                        <button
+                          key={pick.id}
+                          type="button"
+                          disabled={waiting}
+                          onClick={() => void ask(pick.label, false, pick.id)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-left text-neutral-200 transition-colors hover:bg-white/5 active:bg-white/10 disabled:opacity-50"
+                          data-testid={`guide-pick-${pick.id}`}
+                        >
+                          <span className="min-w-0 flex-1">{pick.label}</span>
+                          <CaretRightIcon className="size-4 shrink-0 text-neutral-500" aria-hidden />
+                        </button>
+                      ))}
+                    </div>
+                  ) : block.topics.length === 1 && block.topics[0] ? (
                     <AnswerCard
                       key={j}
-                      topic={part.topic}
+                      topic={block.topics[0]}
                       isPro={isPro}
                       onShow={onShow}
                       onOpen={onOpen}
                     />
+                  ) : (
+                    <div key={j} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      {block.topics.map((t) => (
+                        <AnswerTile key={t.id} topic={t} onShow={onShow} />
+                      ))}
+                    </div>
                   )
                 )}
               </div>

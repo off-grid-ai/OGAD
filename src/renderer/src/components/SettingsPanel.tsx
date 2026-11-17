@@ -48,6 +48,7 @@ import { AutoHeight, SettingRow } from '@offgrid/operator-ui/operator/presence'
 import { BackendPreferencesSection } from './ProcessingControls'
 import { useReplySound } from '../lib/reply-sound'
 import { SettingsSection } from './SettingsSection'
+import { BoostPromo } from './BoostPromo'
 import { groupConnectors } from '../../../shared/connector-groups'
 import type { SpeechLanguage } from '@offgrid/speech'
 import {
@@ -721,6 +722,7 @@ export function SettingsPanel({
         ) : null}
         {tab === 'model' && (
           <>
+            <BoostPromo surface="model_settings" className="mb-4" />
             <SettingsSection
               id="text.model"
               title="Model and memory"

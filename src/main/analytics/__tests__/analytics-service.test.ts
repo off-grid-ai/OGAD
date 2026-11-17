@@ -221,6 +221,54 @@ describe('after the user opts in', () => {
     expect(used.map((event) => event.properties.feature)).toEqual(['tools', 'web_search', 'tools'])
   })
 
+  it('sends the private cloud promo once seen per session per surface, and every click and close', async () => {
+    const service = build()
+    service.optIn('settings')
+    service.sessionFocused()
+    service.captureFromRenderer('boost_promo_shown', { surface: 'models' })
+    service.captureFromRenderer('boost_promo_shown', { surface: 'models' })
+    service.captureFromRenderer('boost_promo_shown', { surface: 'model_settings' })
+    service.captureFromRenderer('boost_promo_shown', { surface: 'https://example.com' })
+    service.captureFromRenderer('boost_promo_clicked', { surface: 'models', url: 'x' })
+    service.captureFromRenderer('boost_promo_dismissed', { surface: 'model_settings' })
+    service.endSession()
+    service.sessionFocused()
+    service.captureFromRenderer('boost_promo_shown', { surface: 'models' })
+    await service.shutdown()
+    const promo = fake!.events.filter((event) => event.event.startsWith('boost_promo_'))
+    expect(promo.map((event) => [event.event, event.properties.surface])).toEqual([
+      ['boost_promo_shown', 'models'],
+      ['boost_promo_shown', 'model_settings'],
+      ['boost_promo_clicked', 'models'],
+      ['boost_promo_dismissed', 'model_settings'],
+      ['boost_promo_shown', 'models']
+    ])
+    expect(promo.every((event) => !('url' in event.properties))).toBe(true)
+  })
+
+  it('a promo seen while usage is off, or before an opt-out, leaves the next impression to send', async () => {
+    const service = build()
+    // Crash reports on, usage off: the visit is not sent, so it spends nothing.
+    service.setConsent({ usage: false, crashes: true }, 'settings')
+    service.sessionFocused()
+    service.captureFromRenderer('boost_promo_shown', { surface: 'models' })
+    service.setConsent({ usage: true }, 'settings')
+    service.captureFromRenderer('boost_promo_shown', { surface: 'models' })
+    await service.shutdown()
+    const shown = (): unknown[] =>
+      fake!.events.filter((event) => event.event === 'boost_promo_shown').map((event) => event.properties.surface)
+    expect(shown()).toEqual(['models'])
+
+    // Opting out forgets the session's impressions with the session.
+    service.setConsent({ usage: false, crashes: false }, 'settings')
+    service.optIn('settings')
+    const before = shown().length
+    service.sessionFocused()
+    service.captureFromRenderer('boost_promo_shown', { surface: 'models' })
+    await service.shutdown()
+    expect(shown().slice(before)).toEqual(['models'])
+  })
+
   it('times flows and follows the setup funnel to the first message', async () => {
     let now = 1_000
     const service = build({ now: () => now })
