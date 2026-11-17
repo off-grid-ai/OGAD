@@ -273,6 +273,8 @@ function AskPane({
     if (!text || waiting) return
     const history: Turn[] = retry ? turns : [...turns, { role: 'user', content: text }]
     if (!retry) setDraft('')
+    // A new question, answered or not, replaces any earlier failure and its Try again.
+    setMissed(null)
     // A starter's or a picked flow's answer is built from the guide itself: instant, and there
     // with no model.
     const instant = retry
@@ -287,7 +289,6 @@ function AskPane({
     }
     setTurns(history)
     setWaiting(true)
-    setMissed(null)
     toEnd()
     // A "how do I…" answer is the app's own steps, found by what the question means when the
     // guide's search model is on this computer, else by its words; the model answers the rest.
