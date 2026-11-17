@@ -1,0 +1,79 @@
+[
+ {
+  "id": "guide-flow-mac",
+  "name": "What it does for you: the whole flow",
+  "group": "Guide",
+  "what": "A starter answered at once, a typed starter, a question with no chat model, then the Meetings topic.",
+  "file": "screens/meetings-starter-mac.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Guide on the phone (17 Nov)",
+    "at": "2026-11-17T08:30:00Z",
+    "file": "screens/meetings-starter-mac.jpg",
+    "clip": "screens/guide-mac.mp4"
+   }
+  ],
+  "clip": "screens/guide-mac.mp4"
+ },
+ {
+  "id": "guide-open-mac",
+  "name": "The guide opens",
+  "group": "Guide",
+  "what": "Ask with four starters and a first look of pictures.",
+  "file": "screens/guide-open-mac.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Guide on the phone (17 Nov)",
+    "at": "2026-11-17T08:30:00Z",
+    "file": "screens/guide-open-mac.jpg"
+   }
+  ]
+ },
+ {
+  "id": "meetings-starter",
+  "name": "What can it do with my meetings?",
+  "group": "Guide",
+  "what": "Answered at once from the guide: what Meetings does, then Meetings, Entities and Actions as a row of cards.",
+  "file": "screens/meetings-starter-mac.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Guide on the phone (17 Nov)",
+    "at": "2026-11-17T08:30:00Z",
+    "file": "screens/meetings-starter-mac.jpg"
+   }
+  ]
+ },
+ {
+  "id": "no-model",
+  "name": "A question with no chat model",
+  "group": "Guide",
+  "what": "Starters still answer; a free question says there is no chat model and offers Open Models.",
+  "file": "screens/answers-and-no-model-mac.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Guide on the phone (17 Nov)",
+    "at": "2026-11-17T08:30:00Z",
+    "file": "screens/answers-and-no-model-mac.jpg"
+   }
+  ]
+ },
+ {
+  "id": "meetings-topic",
+  "name": "Meetings",
+  "group": "Guide",
+  "what": "A card opens the topic: picture, words and Open Meetings.",
+  "file": "screens/meetings-topic-mac.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Guide on the phone (17 Nov)",
+    "at": "2026-11-17T08:30:00Z",
+    "file": "screens/meetings-topic-mac.jpg"
+   }
+  ]
+ }
+]
