@@ -15,7 +15,8 @@ export const SUMMARY_COUNTERS = [
   'empty_states',
   'notifications_clicked',
   'chat_inputs',
-  'settings_changed'
+  'settings_changed',
+  'scribe'
 ] as const
 export type SummaryCounter = (typeof SUMMARY_COUNTERS)[number]
 

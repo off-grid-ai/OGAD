@@ -33,7 +33,11 @@ export const USAGE_COUNTS = [
   'models_video',
   'models_tts',
   'models_stt',
-  'models_embedding'
+  'models_embedding',
+  'notes',
+  'note_folders',
+  'vault_items',
+  'learned_words'
 ] as const
 export type UsageCount = (typeof USAGE_COUNTS)[number]
 

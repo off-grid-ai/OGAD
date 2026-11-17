@@ -81,7 +81,12 @@ export const FEATURES = [
   'clipboard',
   'meetings',
   'sync',
-  'capture'
+  'capture',
+  'scribe',
+  'scribe_everywhere',
+  'improve',
+  'notes',
+  'vault'
 ] as const
 export type AnalyticsFeature = (typeof FEATURES)[number]
 
@@ -221,6 +226,8 @@ export interface RendererAnalyticsEvents {
   empty_state_seen: { screen: string }
   notification_clicked: { type: (typeof NOTIFICATION_TYPES)[number] }
   chat_input: { method: (typeof CHAT_INPUT_METHODS)[number]; extension: string }
+  /** A Scribe fix picked (applied) or the issue ignored, in a note: counts only, never the words. */
+  scribe_fix: { applied: boolean }
   // Kept on the device for the daily snapshot.
   appearance: { theme: (typeof THEME_MODES)[number]; ui_animations: boolean }
 }

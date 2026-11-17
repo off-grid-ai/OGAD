@@ -423,6 +423,11 @@ export class AnalyticsService {
       const screen = this.screenName(props.screen)
       if (screen) this.countInteraction('empty_states', screen)
     },
+    scribe_fix: ({ props }) => {
+      if (typeof props.applied !== 'boolean') return
+      this.countInteraction('scribe', props.applied ? 'app:applied' : 'app:dismissed')
+      this.capture('feature_used', { feature: 'scribe' })
+    },
     notification_clicked: ({ oneOf }) => {
       const type = oneOf(NOTIFICATION_TYPES, 'type')
       if (type) this.countInteraction('notifications_clicked', type)
