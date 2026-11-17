@@ -122,6 +122,7 @@ import {
 import offGridLogo from '@/assets/logo.png'
 import { useRendererEntitlement } from '../bootstrap/useRendererEntitlement'
 import { VideoProUpsell } from './VideoProUpsell'
+import { BoostPromo } from './BoostPromo'
 import { flow } from '@renderer/lib/analytics'
 import { useUiAnimations } from '@renderer/ui-animations'
 
@@ -2325,6 +2326,7 @@ export function ModelsScreen({
                 if (activeKind !== 'computer_use')
                   return (
                     <>
+                      {activeKind === 'text' && <BoostPromo surface="models" className="mt-4" />}
                       {showPicks && (
                         <Section
                           label={`For this ${deviceNoun()}`}
