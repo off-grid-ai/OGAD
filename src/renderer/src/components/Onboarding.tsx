@@ -234,7 +234,8 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
             exit={{ opacity: 0 }}
             className="relative h-full w-full"
           >
-            <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6">
+            {/* pb-36: centred in the space above the fixed footer, so the list never meets the step dots. */}
+            <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 pb-36">
               <div className="mb-6 text-center">
                 <TextGenerate
                   words={`Choose what runs on your ${deviceNoun()}.`}
@@ -250,6 +251,15 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                     delay={0.4}
                   />
                 </div>
+                {/* Up here, not under the orbit: the step's footer is fixed and covers the bottom. */}
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 1.2 }}
+                  className="mt-4"
+                >
+                  <BoostPromoLine />
+                </motion.div>
               </div>
 
               <motion.div
@@ -303,14 +313,6 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
               >
                 Chat / Vision / Image / Video / Transcription / Voice / Web Use / Computer Use
               </motion.p>
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 1.2 }}
-                className="mt-6 text-center"
-              >
-                <BoostPromoLine />
-              </motion.div>
             </div>
           </motion.div>
         )}
