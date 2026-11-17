@@ -730,6 +730,13 @@ code {
    and Radix waits for the close animation before unmounting. The `translate`
    matches the Dialog's base centering transform so there's no positional jump;
    reduced-motion is honored by the global block above. */
+/* A side panel opens by growing its width, so the page beside it slides over instead of jumping. */
+@keyframes og-side-in {
+  from {
+    width: 0;
+    opacity: 0;
+  }
+}
 @keyframes og-overlay-in {
   from {
     opacity: 0;
