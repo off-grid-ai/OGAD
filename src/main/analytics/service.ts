@@ -1,6 +1,7 @@
 import {
   ANALYTICS_SETTING_KEYS,
   ANALYTICS_SETTING_KEY_LIST,
+  BOOST_PROMO_SURFACES,
   CHAT_INPUT_METHODS,
   ERROR_RESPONSES,
   FAILURE_PROMPT_INTERVAL_DAYS,
@@ -103,6 +104,8 @@ export class AnalyticsService {
   private readonly launchedAt: number
   private session: SessionTally | null = null
   private sessionsEnded = 0
+  /** Promo surfaces already reported as seen in this session. */
+  private readonly promoShown = new Set<string>()
   private persistedAt = 0
   private firstMessageSent = false
   private appearanceState: Record<string, AnalyticsValue> | null = null
@@ -354,6 +357,21 @@ export class AnalyticsService {
           this.capture('feature_used', { feature: props.feature as string })
         }
         return
+      case 'boost_promo_shown':
+      case 'boost_promo_clicked':
+      case 'boost_promo_dismissed': {
+        const surface = (BOOST_PROMO_SURFACES as readonly unknown[]).includes(props.surface)
+          ? (props.surface as string)
+          : null
+        if (!surface) return
+        // Seen on every visit to the screen, so sent once per session per surface (the budget).
+        if (event === 'boost_promo_shown') {
+          if (this.promoShown.has(surface)) return
+          this.promoShown.add(surface)
+        }
+        this.capture(event, { surface })
+        return
+      }
       case 'message_action':
         if ((MESSAGE_ACTIONS as readonly unknown[]).includes(props.action))
           this.capture('message_action', { action: props.action as string })
@@ -644,6 +662,7 @@ export class AnalyticsService {
     if (!session) return
     this.session = null
     this.sessionsEnded += 1
+    this.promoShown.clear()
     const now = this.now()
     session.background(now)
     if (this.usageOn()) {

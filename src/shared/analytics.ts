@@ -1,3 +1,4 @@
+import type { BoostPromoSurface } from '@offgrid/models'
 /**
  * The opt-in analytics contract shared by main, preload and the renderer.
  *
@@ -228,10 +229,20 @@ export interface RendererAnalyticsEvents {
   chat_input: { method: (typeof CHAT_INPUT_METHODS)[number]; extension: string }
   /** A Scribe fix picked (applied) or the issue ignored, in a note: counts only, never the words. */
   scribe_fix: { applied: boolean }
+  /** The private cloud promo: seen (once per session per surface), its button clicked, or closed. */
+  boost_promo_shown: { surface: BoostPromoSurface }
+  boost_promo_clicked: { surface: BoostPromoSurface }
+  boost_promo_dismissed: { surface: BoostPromoSurface }
   // Kept on the device for the daily snapshot.
   appearance: { theme: (typeof THEME_MODES)[number]; ui_animations: boolean }
 }
 export type RendererAnalyticsEvent = keyof RendererAnalyticsEvents
+
+/** Where the private cloud promo shows. */
+export const BOOST_PROMO_SURFACES = [
+  'models',
+  'model_settings'
+] as const satisfies readonly BoostPromoSurface[]
 
 /** A renderer error, before main scrubs it. */
 export interface RendererErrorReport {

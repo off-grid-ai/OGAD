@@ -221,6 +221,31 @@ describe('after the user opts in', () => {
     expect(used.map((event) => event.properties.feature)).toEqual(['tools', 'web_search', 'tools'])
   })
 
+  it('sends the private cloud promo once seen per session per surface, and every click and close', async () => {
+    const service = build()
+    service.optIn('settings')
+    service.sessionFocused()
+    service.captureFromRenderer('boost_promo_shown', { surface: 'models' })
+    service.captureFromRenderer('boost_promo_shown', { surface: 'models' })
+    service.captureFromRenderer('boost_promo_shown', { surface: 'model_settings' })
+    service.captureFromRenderer('boost_promo_shown', { surface: 'https://example.com' })
+    service.captureFromRenderer('boost_promo_clicked', { surface: 'models', url: 'x' })
+    service.captureFromRenderer('boost_promo_dismissed', { surface: 'model_settings' })
+    service.endSession()
+    service.sessionFocused()
+    service.captureFromRenderer('boost_promo_shown', { surface: 'models' })
+    await service.shutdown()
+    const promo = fake!.events.filter((event) => event.event.startsWith('boost_promo_'))
+    expect(promo.map((event) => [event.event, event.properties.surface])).toEqual([
+      ['boost_promo_shown', 'models'],
+      ['boost_promo_shown', 'model_settings'],
+      ['boost_promo_clicked', 'models'],
+      ['boost_promo_dismissed', 'model_settings'],
+      ['boost_promo_shown', 'models']
+    ])
+    expect(promo.every((event) => !('url' in event.properties))).toBe(true)
+  })
+
   it('times flows and follows the setup funnel to the first message', async () => {
     let now = 1_000
     const service = build({ now: () => now })
