@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
-import { XIcon } from '@phosphor-icons/react'
+import { CloudIcon, XIcon } from '@phosphor-icons/react'
 import {
   BOOST_PROMO,
   boostPromoCopy,
@@ -76,18 +76,19 @@ export function BoostPromo({
       initial={reduceMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: reduceMotion ? 0 : 0.3, ease: [0.16, 1, 0.3, 1] }}
-      className={`flex items-center gap-6 rounded-xl border border-border/60 bg-card/50 px-5 py-4 backdrop-blur-xl ${className ?? ''}`}
+      className={`flex items-center gap-3 rounded-xl border border-border/60 bg-card/50 py-2.5 pl-4 pr-2 backdrop-blur-xl ${className ?? ''}`}
     >
-      <div className="min-w-0 flex-1">
-        <h3 className="text-lg font-light tracking-tight text-foreground">{COPY.title}</h3>
-        <p className="mt-1 text-sm text-muted-foreground">{COPY.body}</p>
-      </div>
+      <CloudIcon className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+      <p className="min-w-0 flex-1 truncate text-sm text-foreground">
+        {COPY.title} <span className="text-muted-foreground">{COPY.line}</span>
+      </p>
       <Button
         type="button"
-        size="sm"
+        size="xs"
+        variant="ghost"
         onClick={claim}
         data-testid="boost-promo-claim"
-        className="shrink-0 whitespace-nowrap"
+        className="shrink-0 whitespace-nowrap text-primary"
       >
         {COPY.action}
       </Button>
@@ -99,7 +100,7 @@ export function BoostPromo({
           onClick={close}
           aria-label={COPY.close}
           data-testid="boost-promo-close"
-          className="shrink-0 self-start text-muted-foreground"
+          className="shrink-0 text-muted-foreground"
         >
           <XIcon className="h-3.5 w-3.5" />
         </Button>
@@ -122,7 +123,7 @@ export function BoostPromoLine({ className }: { className?: string }): React.JSX
   }
   return (
     <p data-testid="boost-promo-line" className={`text-sm text-neutral-400 ${className ?? ''}`}>
-      {COPY.title}{' '}
+      {COPY.title} {COPY.line}{' '}
       <button
         type="button"
         onClick={claim}
