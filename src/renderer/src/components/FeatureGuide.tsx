@@ -22,7 +22,6 @@ import {
   guideAnswerBlocks,
   guideAnswerLength,
   guideAnswerReveal,
-  guideFlowAnswerById,
   guideTypingMs,
   type GuideAnswerBlock,
   guideTurnsToSend,
@@ -32,6 +31,7 @@ import {
   GUIDE_GROUPS,
   answerParts,
   guideGrounding,
+  guideFlowStepsById,
   guideStarterAnswer,
   guideStepsAnswer,
   guideTopics,
@@ -338,7 +338,7 @@ function AskPane({
     const instant = retry
       ? null
       : flowId
-        ? guideFlowAnswerById('desktop', flowId, topics)
+        ? guideFlowStepsById(flowId, topics, currentPlatform())
         : guideStarterAnswer(text, topics)
     if (instant) {
       setTurns([...history, { role: 'assistant', content: instant }])
@@ -351,7 +351,7 @@ function AskPane({
     // A "how do I…" answer is the app's own steps, found by what the question means when the
     // guide's search model is on this computer, else by its words; the model answers the rest.
     const vector = (await window.api.embedGuideQuestion(text).catch(() => null)) ?? undefined
-    const steps = retry ? null : guideStepsAnswer(text, topics, currentPlatform(), vector)
+    const steps = retry ? null : guideStepsAnswer(text, topics, currentPlatform(), vector, turns)
     if (steps) {
       setWaiting(false)
       setTurns([...history, { role: 'assistant', content: steps }])
@@ -473,6 +473,25 @@ function AskPane({
                                 className="size-4 shrink-0 text-neutral-500"
                                 aria-hidden
                               />
+                            </button>
+                          ))}
+                        </div>
+                      ) : block.kind === 'nexts' ? (
+                        <div
+                          key={j}
+                          className="flex max-w-xl flex-wrap gap-2"
+                          aria-label="Follow-ups"
+                        >
+                          {block.nexts.map((next) => (
+                            <button
+                              key={next.id}
+                              type="button"
+                              disabled={waiting}
+                              onClick={() => void ask(next.label, false, next.id)}
+                              className="rounded-full border border-white/10 px-3 py-1.5 text-left text-xs text-neutral-300 transition-colors hover:bg-white/5 hover:text-neutral-100 active:bg-white/10 disabled:opacity-50"
+                              data-testid={`guide-next-${next.id}`}
+                            >
+                              {next.label}
                             </button>
                           ))}
                         </div>

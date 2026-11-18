@@ -16,6 +16,8 @@ import {
   GUIDE_LINKS,
   guideAnswerParts,
   guideFlowAnswer,
+  guideFlowAnswerById,
+  guideLastFlowId,
   guideGrounding as sharedGuideGrounding,
   guideStarterAnswer as sharedGuideStarterAnswer,
   guideTopicsFor,
@@ -129,7 +131,10 @@ export function guideGrounding(
   platform: DevicePlatform,
   vector?: number[]
 ): string {
-  return sharedGuideGrounding('desktop', topics, history, { platform: flowPlatform(platform), vector })
+  return sharedGuideGrounding('desktop', topics, history, {
+    platform: flowPlatform(platform),
+    vector
+  })
 }
 
 /** A starter question's answer, built by code with no model. Null for anything else. */
@@ -146,9 +151,25 @@ export function guideStepsAnswer(
   question: string,
   topics: GuideTopic[],
   platform: DevicePlatform,
-  vector?: number[]
+  vector?: number[],
+  history: Turn[] = []
 ): string | null {
-  return guideFlowAnswer('desktop', question, topics, { platform: flowPlatform(platform), vector })
+  // A follow-up ("what if we're not on the same Wi-Fi?") is read against the flow just shown.
+  const after = guideLastFlowId(history.filter((t) => t.role === 'assistant').map((t) => t.content))
+  return guideFlowAnswer('desktop', question, topics, {
+    platform: flowPlatform(platform),
+    vector,
+    after
+  })
+}
+
+/** A flow's answer by its id (a pick or a follow-up), with the follow-ups this computer can do. */
+export function guideFlowStepsById(
+  id: string,
+  topics: GuideTopic[],
+  platform: DevicePlatform
+): string | null {
+  return guideFlowAnswerById('desktop', id, topics, flowPlatform(platform))
 }
 
 export type AnswerPart = GuideAnswerPart<GuideTopic>
