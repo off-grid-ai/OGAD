@@ -5,6 +5,7 @@ import { Section } from '@offgrid/operator-ui/operator/experience'
 import { PageShell } from './PageShell'
 import { Badge } from '@offgrid/operator-ui/operator/coss/badge'
 import { SetupPanel } from './setup/SetupPanel'
+import { WhatYouUseSettings } from './onboarding/WhatYouUseSettings'
 import { PerformancePackPanel } from './setup/PerformancePackPanel'
 import { EngineUpdatesSection } from './setup/EngineUpdatesSection'
 import { StoragePanel } from './setup/StoragePanel'
@@ -30,6 +31,7 @@ import { AIRequestLogs } from './AIRequestLogs'
 export { ModelPipelineSection } from './ProcessingControls'
 
 const SETTINGS_SECTION_TITLES: Record<string, string> = {
+  'what-you-use': 'What you use',
   setup: 'Setup & health',
   permissions: 'Setup & health',
   performance: 'Engines',
@@ -181,6 +183,14 @@ export function Settings({
             }
           >
             {/* Each section is a collapsed-by-default accordion (SettingsCard). */}
+            <SettingsCard
+              title="What you use"
+              summary="Pick what you use. It leads your menu and model setup."
+              delay={0.12}
+            >
+              <WhatYouUseSettings />
+            </SettingsCard>
+
             <SettingsCard
               title="Setup & health"
               summary="Set up your local AI, manage storage, and see live component health."

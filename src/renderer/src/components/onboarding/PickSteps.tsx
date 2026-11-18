@@ -241,3 +241,55 @@ export function FeaturesStep({
     </div>
   )
 }
+
+/**
+ * Settings → What you use: every group with its features, picked ones ticked. A change saves at
+ * once and the menu and model setup follow it.
+ */
+export function WhatYouUse({
+  picks,
+  onToggle
+}: Readonly<{ picks: Picks; onToggle: (id: string) => void }>): JSX.Element {
+  return (
+    <div className="grid gap-5">
+      <p className="text-xs text-muted-foreground">
+        What you pick leads your menu and is checked in model setup. Everything else stays one click
+        away.
+      </p>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] items-start gap-x-4 gap-y-5">
+        {onboardingGroups(PLATFORM).map((g) => (
+          <section key={g.id} aria-labelledby={`what-you-use-${g.id}`} className="grid gap-2">
+            <h3
+              id={`what-you-use-${g.id}`}
+              className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground"
+            >
+              {g.name}
+            </h3>
+            {partsFor([g.id], PLATFORM).map((p) => {
+              const Icon = partIcon(p.id)
+              const on = picks.parts.includes(p.id)
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={on}
+                  data-testid={`what-you-use-${p.id}`}
+                  onClick={() => onToggle(p.id)}
+                  className={cn(choice(on), 'flex items-center gap-3 px-3 py-2')}
+                >
+                  <Icon aria-hidden="true" className="h-4 w-4 shrink-0 text-foreground" />
+                  <span className="flex min-w-0 flex-1 items-center gap-2 text-sm text-foreground">
+                    <span className="truncate">{p.name}</span>
+                    {isPro(p) ? <ProTag /> : null}
+                  </span>
+                  <Tick on={on} size="h-4 w-4" />
+                </button>
+              )
+            })}
+          </section>
+        ))}
+      </div>
+    </div>
+  )
+}

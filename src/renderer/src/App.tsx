@@ -21,7 +21,7 @@ import { ProjectsScreen } from './components/ProjectsScreen'
 import { ConnectorsScreen } from './components/ConnectorsScreen'
 import { GatewayScreen } from './components/GatewayScreen'
 import { Onboarding } from './components/Onboarding'
-import { ONBOARDING_OPEN_KEY, pickedViews } from './components/onboarding/picks'
+import { ONBOARDING_OPEN_KEY, PICKS_CHANGED_EVENT, pickedViews } from './components/onboarding/picks'
 import { guideTopics, needsPro } from './components/guide/guideKnowledge'
 import { PermissionGate } from './components/PermissionGate'
 import { PerformancePackGate } from './components/setup/PerformancePackGate'
@@ -408,10 +408,19 @@ function AppContent(): React.JSX.Element {
   const [launch] = useState(() => launchRoute(appLocationPath()))
   // The screens onboarding's picks open, in pick order: they lead the sidebar, and the app opens on
   // the first one this computer can show you. No picks: the sidebar and landing are as before.
-  const [picked] = useState(() => {
+  const readPicked = (): ViewMode[] => {
     const topics = guideTopics(currentPlatform(), { unsupported: true })
     return pickedViews((id) => topics.find((topic) => topic.id === id)?.route) as ViewMode[]
-  })
+  }
+  const [picked, setPicked] = useState(readPicked)
+  // A change in Settings → What you use reorders the menu at once.
+  useEffect(() => {
+    const update = (): void => setPicked(readPicked())
+    window.addEventListener(PICKS_CHANGED_EVENT, update)
+    return () => window.removeEventListener(PICKS_CHANGED_EVENT, update)
+    // readPicked reads storage only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [viewMode, commitViewMode] = useState<ViewMode>(
     () =>
       launch?.view ??
@@ -1461,6 +1470,8 @@ function AppContent(): React.JSX.Element {
                   Menu
                 </div>
                 <SidebarNavigationMenu
+                  // Picks appearing or going away start the sections afresh.
+                  key={pickedItems.length ? 'picks' : 'all'}
                   activeView={viewMode}
                   expanded={sidebarOpen}
                   groups={navigationGroups}

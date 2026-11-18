@@ -47,8 +47,26 @@ export function loadPicks(): Picks {
   return { groups: [...DEFAULT_PICKS.groups], parts: [...DEFAULT_PICKS.parts] }
 }
 
+/** Fired on window when the picks change, so the menu follows a change made in Settings. */
+export const PICKS_CHANGED_EVENT = 'offgrid:picks-changed'
+
 export function savePicks(picks: Picks): void {
   localStorage.setItem(PICKS_KEY, JSON.stringify(picks))
+  window.dispatchEvent(new Event(PICKS_CHANGED_EVENT))
+}
+
+/**
+ * Picks or unpicks one part from Settings, where every group is on show: a group counts as picked
+ * while any of its parts is.
+ */
+export function togglePartAnywhere(picks: Picks, id: string): Picks {
+  const parts = picks.parts.includes(id)
+    ? picks.parts.filter((p) => p !== id)
+    : [...picks.parts, id]
+  const groups = onboardingGroups(PLATFORM)
+    .map((g) => g.id)
+    .filter((g) => partsFor([g], PLATFORM).some((p) => parts.includes(p.id)))
+  return cleanPicks({ groups, parts })
 }
 
 /** No saved picks: the model gate does what it did before onboarding asked. */
