@@ -1,7 +1,7 @@
 // The recommended-model catalog this app fetches from OGAD's catalog/models.json, so a new
-// curated model reaches every install without a release. The bundled catalog is the default and
-// works offline: the app fetches only when someone asks (Check for new models) and keeps what it
-// got. Fetch, validation and merge live in @offgrid/models; this file supplies the ports (fetch,
+// curated model reaches every install without a release. The copy of that file this build shipped
+// with is the default, so a fresh install recommends from it offline: the app fetches only when
+// someone asks (Check for new models) and keeps what it got, when it is newer. Fetch, validation and merge live in @offgrid/models; this file supplies the ports (fetch,
 // a cache file in userData) and keeps the merged list in memory for the synchronous callers. No
 // electron import: the transcription runner reads catalogModelsByKind() outside the app and
 // gets the bundled list.
@@ -14,6 +14,7 @@ import {
   loadCachedCatalog,
   mergeCatalogEntries,
   modelSupportsKind,
+  parseCatalogEnvelope,
   parseDesktopCatalogSections,
   refreshRemoteCatalog,
   type CatalogCache,
@@ -22,6 +23,7 @@ import {
   type ModelKind,
   type RemoteCatalogSource
 } from '@offgrid/models'
+import shippedCatalog from '../../../catalog/models.json'
 
 export interface CatalogCheckResult {
   status: 'updated' | 'unchanged' | 'failed'
@@ -30,7 +32,10 @@ export interface CatalogCheckResult {
   error?: string
 }
 
-let remoteModels: ModelEntry[] = []
+/** catalog/models.json as this build shipped it. */
+const shipped = parseCatalogEnvelope(shippedCatalog, parseDesktopCatalogSections)
+
+let remoteModels: ModelEntry[] = shipped?.sections.models ?? []
 let source: RemoteCatalogSource<DesktopCatalogSections> | null = null
 let inFlight: Promise<CatalogCheckResult> | null = null
 let changed: () => void = () => undefined
@@ -73,7 +78,9 @@ export async function initRemoteModelCatalog(
     parseSections: parseDesktopCatalogSections
   }
   const cached = await loadCachedCatalog(source)
-  remoteModels = cached?.sections.models ?? []
+  // A copy fetched before this build shipped is older than the one inside it.
+  const newer = cached && (!shipped || cached.updatedAt >= shipped.updatedAt) ? cached : shipped
+  remoteModels = newer?.sections.models ?? []
   if (remoteModels.length > 0) changed()
 }
 

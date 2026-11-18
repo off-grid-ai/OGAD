@@ -569,6 +569,12 @@ export function kevNeedsOnlyRuntime(modelId: string): boolean {
 const DESKTOP_CATALOG = [BONSAI_2, BONSAI_2_9B, DECIDER_2B, DECIDER_2B_VISION, ...KEV_MODELS]
 const DESKTOP_CATALOG_IDS = new Set(DESKTOP_CATALOG.map((model) => model.id))
 
+/** A model only this app's code lists, not the shared catalog or catalog/models.json. It stays
+ *  listed and downloadable; Fast, Balanced and Best come from the recommended catalog only. */
+export function isAppOnlyModel(id: string): boolean {
+  return DESKTOP_CATALOG_IDS.has(id) && !remoteCatalogModels().some((model) => model.id === id)
+}
+
 /** The shared catalog with the fetched entries merged in, without the desktop-only ids. */
 function baseCatalog(): ModelEntry[] {
   return baseCatalogModels().filter((model) => !DESKTOP_CATALOG_IDS.has(model.id))
@@ -822,7 +828,8 @@ export async function getCatalog(): Promise<{
       ...remoteModels
     ].map((model) => ({
       ...model,
-      name: describeModel(model.id, sources).displayName
+      name: describeModel(model.id, sources).displayName,
+      ...(isAppOnlyModel(model.id) ? { appOnly: true } : {})
     }))
   }
 }

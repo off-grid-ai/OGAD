@@ -25,8 +25,8 @@ import {
   listInstalled,
   setActiveModel,
   setActiveModalChoice,
-  BONSAI_2,
   desktopCatalog,
+  isAppOnlyModel,
   displayModelName,
   recordDownloadProgress,
   remainingModelDownloadBytes
@@ -237,34 +237,30 @@ function settingsMode(): RecMode {
 export async function recommendChatModel(
   modeOverride?: RecMode
 ): Promise<{ id: string; name: string } | null> {
-  const { recommendForRam } = await import('@offgrid/models')
+  const { recommendForRam, pickModelsForDevice, pickForMode, toPickCandidate } =
+    await import('@offgrid/models')
   const CATALOG = await desktopCatalog()
-  const { chooseChatModel, recommendedParamCeiling, preferredModelIds, modeBudget } =
-    await import('./model-sizing')
   const gb = ramGb()
-  const tier = recommendForRam(gb)
   const mode: RecMode = modeOverride ?? settingsMode()
-  const frac = recommendBudgetFraction(mode)
-  const budget = gb * frac * 1e9
-  // Bonsai's packed PQ2 weights fit the Balanced loader's memory envelope at
-  // 16 GB, even though they exceed the general 38% recommendation budget. Leave
-  // room for context and the loader's normal reserve before recommending it.
-  const { frac: balancedFrac, reserveGb } = modeBudget('balanced')
-  if (
-    mode === 'balanced' &&
-    gb >= (BONSAI_2.minRamGb ?? 0) &&
-    totalBytes(BONSAI_2) / 1e9 + reserveGb + 0.5 <= gb * balancedFrac
-  ) {
-    return { id: BONSAI_2.id, name: BONSAI_2.name }
-  }
-  // 1) Curated default for the tier, if it fits the normal recommendation budget.
-  for (const id of preferredModelIds(gb, mode)) {
-    const e = CATALOG.find((m) => m.id === id)
-    if (e && totalBytes(e as never) <= budget) return { id: e.id, name: e.name }
-  }
-  // 2) Otherwise the size heuristic, capped by recommended params (8B only ≥24GB).
-  const maxParams = Math.min(tier.maxParams, recommendedParamCeiling(gb, mode))
-  const pick = chooseChatModel(CATALOG as never, gb, maxParams, frac) as {
+  // The same Fast, Balanced and Best the Models screen shows, from the recommended catalog (the
+  // shared catalog and catalog/models.json): Conservative takes Fast, Extreme takes Best.
+  const pool = CATALOG.filter(
+    (m) =>
+      (m.kind === 'text' || m.kind === 'vision') &&
+      !m.quantOf &&
+      m.availability !== 'coming_soon' &&
+      !isAppOnlyModel(m.id)
+  )
+  const picks = pickModelsForDevice(
+    pool.map((m) => toPickCandidate(m, totalBytes(m as never))),
+    gb
+  )
+  const picked = pool.find((m) => m.id === pickForMode(picks, mode))
+  if (picked) return { id: picked.id, name: picked.name }
+  // A machine too small for any pick still gets the smallest chat model that fits.
+  const { chooseChatModel, recommendedParamCeiling } = await import('./model-sizing')
+  const maxParams = Math.min(recommendForRam(gb).maxParams, recommendedParamCeiling(gb, mode))
+  const pick = chooseChatModel(pool as never, gb, maxParams, recommendBudgetFraction(mode)) as {
     id: string
     name: string
   } | null

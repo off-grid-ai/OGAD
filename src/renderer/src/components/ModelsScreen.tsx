@@ -213,6 +213,8 @@ interface ModelEntry {
   /** Which of its files are on disk already, when some are (brought by another model). */
   onDiskFiles?: string[]
   minLlamaBuild?: number
+  /** Listed by this app's own code, not the recommended catalog: never a Fast, Balanced or Best pick. */
+  appOnly?: boolean
 }
 /** What a Hugging Face search adds to a card: other uploads of the model, an MTP head, a newer model. */
 interface SearchExtras {
@@ -1118,6 +1120,7 @@ export function ModelsScreen({
             (activeKind !== 'text' || m.kind === 'text' || m.kind === 'vision') &&
             !m.quantOf &&
             !m.remoteServerId &&
+            !m.appOnly &&
             m.availability !== 'coming_soon'
         )
         .map((m) => ({

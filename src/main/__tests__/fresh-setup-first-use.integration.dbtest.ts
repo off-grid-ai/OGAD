@@ -266,13 +266,14 @@ describe('fresh setup to first use', () => {
     await expect(llm.setSettings({ performanceMode: 'conservative' })).resolves.toBeUndefined()
     const plan = await setup.getSetupPlan()
     expect(plan.mode).toBe('conservative')
-    // Exercise the desktop-only packed-weight recommendation through the same
-    // persisted setup owner, without changing the conservative first-use path.
+    // Balanced on a 16 GB machine takes a pick from the recommended catalog, never a model only
+    // this app's code lists (Bonsai), without changing the conservative first-use path.
     const totalmem = vi.spyOn(os, 'totalmem').mockReturnValue(16e9)
     try {
-      expect((await setup.recommendChatModel('balanced'))?.id).toBe(
-        'prism-ml/Ternary-Bonsai-2-27B-gguf'
-      )
+      const { isAppOnlyModel } = await import('../models-manager')
+      const balanced = (await setup.recommendChatModel('balanced'))?.id
+      expect(balanced).toBeTruthy()
+      expect(isAppOnlyModel(balanced!)).toBe(false)
     } finally {
       totalmem.mockRestore()
     }
