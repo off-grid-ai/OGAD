@@ -10,10 +10,14 @@ import { FeatureGuide } from '../FeatureGuide'
 
 afterEach(cleanup)
 
-// The Electron bridge with no services behind it: a starter's answer needs none. jsdom has no
-// matchMedia; a window with motion on (the default) answers no to reduced motion.
+// The Electron bridge of a computer with no chat model loaded: a starter's answer needs none, and
+// anything else comes back as "no model". jsdom has no matchMedia; a window with motion on (the
+// default) answers no to reduced motion.
 Object.assign(window, {
-  api: {},
+  api: {
+    embedGuideQuestion: () => Promise.resolve(null),
+    askGuide: () => Promise.resolve({ error: 'no-model' })
+  },
   matchMedia: (query: string) => ({
     matches: false,
     media: query,
@@ -33,4 +37,15 @@ it('an answer types out, then shows whole with the card it names', async () => {
   expect(
     await screen.findByText('Free on the App Store and Google Play', {}, { timeout: 3000 })
   ).toBeTruthy()
+})
+
+it("a feature's Ask more asks about it, and New starts over", async () => {
+  render(<FeatureGuide isPro={false} onOpen={() => undefined} />)
+  await userEvent.click(screen.getByRole('button', { name: /^Chat/ }))
+  await userEvent.click(await screen.findByTestId('guide-topic-ask'))
+
+  expect(await screen.findByText('Tell me more about Chat.')).toBeTruthy()
+  await userEvent.click(await screen.findByRole('button', { name: 'New question' }))
+  expect(screen.queryByText('Tell me more about Chat.')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'New question' })).toBeNull()
 })
