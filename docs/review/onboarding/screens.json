@@ -19,7 +19,7 @@
   "name": "What do you want to do?",
   "group": "Desktop onboarding",
   "what": "Pick any of seven groups. Chat starts picked; picking a group picks its first feature.",
-  "file": "screens/v/groups-2.jpg",
+  "file": "screens/v/groups-3.jpg",
   "versions": [
    {
     "v": 1,
@@ -34,16 +34,24 @@
     "file": "screens/v/groups-2.jpg",
     "clip": "screens/v/groups-2.mp4",
     "what": "The living background shows through; tiles use the design tokens and fill the width; the block sits centred above the footer."
+   },
+   {
+    "v": 3,
+    "label": "Live run, fresh profile",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/groups-3.jpg",
+    "what": "Pick the jobs you want; Continue opens the details.",
+    "clip": "screens/v/groups-3.mp4"
    }
   ],
-  "clip": "screens/v/groups-2.mp4"
+  "clip": "screens/v/groups-3.mp4"
  },
  {
   "id": "details",
   "name": "Which ones?",
   "group": "Desktop onboarding",
   "what": "The features of each picked group, a column per group. A picked Pro feature brings the license key box.",
-  "file": "screens/v/details-2.jpg",
+  "file": "screens/v/details-3.jpg",
   "versions": [
    {
     "v": 1,
@@ -57,6 +65,13 @@
     "at": "2026-11-18T12:40:00Z",
     "file": "screens/v/details-2.jpg",
     "what": "Columns fill the width; the license key box sits under them instead of under the title."
+   },
+   {
+    "v": 3,
+    "label": "Live run, no Pro",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/details-3.jpg",
+    "what": "Without Pro, a Pro pick shows where to enter a licence. With Pro active it no longer shows."
    }
   ]
  },
@@ -65,7 +80,7 @@
   "name": "How it works: Chat",
   "group": "Desktop onboarding",
   "what": "The guide, filtered to the picks. Where models run and the analytics opt-in sit under Your picks.",
-  "file": "screens/v/how-chat-2.jpg",
+  "file": "screens/v/how-chat-3.jpg",
   "versions": [
    {
     "v": 1,
@@ -79,8 +94,17 @@
     "at": "2026-11-18T12:40:00Z",
     "file": "screens/v/how-chat-2.jpg",
     "what": "One emerald action (Set up my models); the settings moved under Your picks so the guide gets the right side."
+   },
+   {
+    "v": 3,
+    "label": "Live run",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/how-chat-3.jpg",
+    "what": "One page per pick, then Set up my models opens the app.",
+    "clip": "screens/v/how-chat-3.mp4"
    }
-  ]
+  ],
+  "clip": "screens/v/how-chat-3.mp4"
  },
  {
   "id": "how-meetings",
@@ -124,7 +148,7 @@
   "name": "After setup: models",
   "group": "Desktop onboarding",
   "what": "Set up my models hands off to model setup as today, with the picks saved. Step 5 makes it use them.",
-  "file": "screens/v/handoff-2.jpg",
+  "file": "screens/v/handoff-3.jpg",
   "versions": [
    {
     "v": 1,
@@ -137,7 +161,48 @@
     "label": "Built to the design doc",
     "at": "2026-11-18T12:40:00Z",
     "file": "screens/v/handoff-2.jpg"
+   },
+   {
+    "v": 3,
+    "label": "Checked for the picks",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/handoff-3.jpg",
+    "what": "Setup comes checked for the picks (chat and image here; Pro picks wait for Pro)."
    }
   ]
+ },
+ {
+  "id": "sidebar",
+  "name": "Menu: your picks",
+  "group": "Desktop after onboarding",
+  "what": "The menu leads with Your picks; the other groups stay closed.",
+  "versions": [
+   {
+    "v": 1,
+    "label": "New",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/sidebar-1.jpg",
+    "what": "The menu leads with Your picks; the other groups stay closed."
+   }
+  ],
+  "file": "screens/v/sidebar-1.jpg"
+ },
+ {
+  "id": "what-you-use",
+  "name": "Settings: What you use",
+  "group": "Desktop after onboarding",
+  "what": "Settings \u2192 What you use: a pick turned on shows in the menu at once.",
+  "versions": [
+   {
+    "v": 1,
+    "label": "New",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/what-you-use-1.jpg",
+    "what": "Settings \u2192 What you use: a pick turned on shows in the menu at once.",
+    "clip": "screens/v/what-you-use-1.mp4"
+   }
+  ],
+  "clip": "screens/v/what-you-use-1.mp4",
+  "file": "screens/v/what-you-use-1.jpg"
  }
 ]
