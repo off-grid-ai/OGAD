@@ -36,6 +36,7 @@
     "build": "node scripts/stage-native.mjs && npm run typecheck && electron-vite build",
     "postinstall": "node scripts/patch-windows-onnx-cuda.mjs && electron-builder install-app-deps",
     "prepare:speech-defaults": "node scripts/prepare-default-speech.mjs",
+    "build:preview": "vite build -c preview.vite.config.ts",
     "build:unpack": "npm run build && npm run prepare:speech-defaults && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "node scripts/stage-native.mjs && electron-vite build && npm run prepare:speech-defaults && electron-builder --mac",
