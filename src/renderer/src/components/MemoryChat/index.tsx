@@ -991,7 +991,8 @@ export function MemoryChat({
   // Pro registers this slot after the core renderer starts. Resolve it on each render so an
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
-  const TaskSupervisorOverlay = isPro ? getSlot(SLOTS.taskSupervisorOverlay) : undefined
+  // Web Use and Computer Use are free: the task overlay registers without Pro (registerTaskUseSlots).
+  const TaskSupervisorOverlay = getSlot(SLOTS.taskSupervisorOverlay)
   const ChatVideoProgress = getSlot(SLOTS.chatVideoProgress)
   // Esc closes the open overlay (attachment viewer / image lightbox).
   useEffect(() => {
