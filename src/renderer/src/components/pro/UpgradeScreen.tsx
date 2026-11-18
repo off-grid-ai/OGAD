@@ -35,7 +35,7 @@ function showComingSoonBadge(comingSoon: boolean, linux: boolean, feature?: ProF
 // a core build has no pro code bundled, so entering a key would unlock nothing.
 // Main and renderer lifecycle owners react to the saved entitlement, so activation
 // completes in this process without a restart.
-function LicenseActivation(): React.ReactElement {
+export function LicenseActivation(): React.ReactElement {
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)

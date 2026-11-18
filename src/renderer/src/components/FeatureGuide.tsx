@@ -162,12 +162,17 @@ function TopicDetail({
   topic,
   isPro,
   onOpen,
-  onAsk
+  onAsk,
+  mediaHeight = 'h-[56vh]',
+  footer
 }: Readonly<{
   topic: GuideTopic
   isPro: boolean
   onOpen: (view: ViewMode) => void
   onAsk: (question: string) => void
+  mediaHeight?: string
+  /** Shown under the feature: onboarding puts Get Pro or the connections here. */
+  footer?: ReactNode
 }>): React.ReactElement {
   return (
     <article className="og-guide-in grid max-w-5xl gap-5" aria-labelledby="guide-topic-title">
@@ -191,7 +196,7 @@ function TopicDetail({
           <TopicAction topic={topic} isPro={isPro} onOpen={onOpen} />
         </div>
       </div>
-      <MediaFrame topic={topic} height="h-[56vh]" />
+      <MediaFrame topic={topic} height={mediaHeight} />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <p className="text-sm leading-relaxed text-neutral-400">{topic.description}</p>
         <ul className="grid content-start gap-2">
@@ -203,6 +208,7 @@ function TopicDetail({
           ))}
         </ul>
       </div>
+      {footer}
     </article>
   )
 }
@@ -618,13 +624,121 @@ function NavRow({
  */
 export function FeatureGuide({
   isPro,
-  onOpen
-}: Readonly<{ isPro: boolean; onOpen: (view: ViewMode) => void }>): React.ReactElement {
+  onOpen,
+  picks
+}: Readonly<{
+  isPro: boolean
+  onOpen: (view: ViewMode) => void
+  /**
+   * Onboarding's "How it works": only these topics, in this order, as "Your picks", starting on
+   * the first. The footer goes under each one (Get Pro, connections).
+   */
+  picks?: { ids: string[]; footer?: (topic: GuideTopic) => ReactNode }
+}>): React.ReactElement {
   const topics = useMemo(() => guideTopics(currentPlatform()), [])
-  const [selectedId, setSelectedId] = useState(ASK)
+  const picked = useMemo(
+    () =>
+      picks?.ids
+        .map((id) => topics.find((t) => t.id === id))
+        .filter((t): t is GuideTopic => Boolean(t)) ?? [],
+    [picks?.ids, topics]
+  )
+  const [selectedId, setSelectedId] = useState(() => picked[0]?.id ?? ASK)
   const [pending, setPending] = useState<{ question: string; at: number } | null>(null)
   const selected = topics.find((t) => t.id === selectedId)
 
+  const askRow = (
+    <NavRow
+      active={!selected}
+      onClick={() => setSelectedId(ASK)}
+      icon={SparkleIcon}
+      label="Ask about Off Grid AI"
+    />
+  )
+  const body = (
+    <div className="grid min-h-0 flex-1 gap-8 md:grid-cols-[220px_minmax(0,1fr)]">
+      <nav aria-label="Features" className="grid min-h-0 content-start gap-5 overflow-y-auto pr-1">
+        {picks ? null : askRow}
+        {picks ? (
+          <section aria-labelledby="guide-your-picks">
+            <h2
+              id="guide-your-picks"
+              className="pb-1.5 pl-2 font-mono text-[10px] uppercase tracking-widest text-neutral-500"
+            >
+              Your picks
+            </h2>
+            <ul className="grid gap-0.5">
+              {picked.map((t) => (
+                <li key={t.id}>
+                  <NavRow
+                    active={t.id === selectedId}
+                    onClick={() => setSelectedId(t.id)}
+                    icon={t.icon}
+                    label={t.label}
+                  />
+                </li>
+              ))}
+              <li>{askRow}</li>
+            </ul>
+          </section>
+        ) : null}
+        {(picks ? [] : GUIDE_GROUPS).map((group) => {
+          const inGroup = topics.filter((t) => t.group === group.id)
+          if (inGroup.length === 0) return null
+          return (
+            <section key={group.id} aria-labelledby={`guide-${group.id}`}>
+              <h2
+                id={`guide-${group.id}`}
+                className="pb-1.5 pl-2 font-mono text-[10px] uppercase tracking-widest text-neutral-500"
+              >
+                {group.title}
+              </h2>
+              <ul className="grid gap-0.5">
+                {inGroup.map((t) => (
+                  <li key={t.id}>
+                    <NavRow
+                      active={t.id === selectedId}
+                      onClick={() => setSelectedId(t.id)}
+                      icon={t.icon}
+                      label={t.label}
+                      locked={t.pro && !isPro && Boolean(t.route)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )
+        })}
+      </nav>
+      <div className="min-h-0 min-w-0">
+        <div className={cn('h-full', selected && 'hidden')}>
+          <AskPane
+            topics={topics}
+            isPro={isPro}
+            onShow={setSelectedId}
+            onOpen={onOpen}
+            pending={pending}
+          />
+        </div>
+        {selected ? (
+          <div key={selected.id} className="h-full overflow-y-auto pr-2">
+            <TopicDetail
+              topic={selected}
+              isPro={isPro}
+              onOpen={onOpen}
+              onAsk={(question) => {
+                setPending({ question, at: Date.now() })
+                setSelectedId(ASK)
+              }}
+              mediaHeight={picks ? 'h-[38vh]' : undefined}
+              footer={picks?.footer?.(selected)}
+            />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+  if (picks) return body
   return (
     <PageShell
       fill
@@ -632,70 +746,7 @@ export function FeatureGuide({
       eyebrow="Off Grid AI"
       description="Everything runs on your own computer and phone. Ask, or pick a feature to see it."
     >
-      <div className="grid min-h-0 flex-1 gap-8 md:grid-cols-[220px_minmax(0,1fr)]">
-        <nav
-          aria-label="Features"
-          className="grid min-h-0 content-start gap-5 overflow-y-auto pr-1"
-        >
-          <NavRow
-            active={!selected}
-            onClick={() => setSelectedId(ASK)}
-            icon={SparkleIcon}
-            label="Ask about Off Grid AI"
-          />
-          {GUIDE_GROUPS.map((group) => {
-            const inGroup = topics.filter((t) => t.group === group.id)
-            if (inGroup.length === 0) return null
-            return (
-              <section key={group.id} aria-labelledby={`guide-${group.id}`}>
-                <h2
-                  id={`guide-${group.id}`}
-                  className="pb-1.5 pl-2 font-mono text-[10px] uppercase tracking-widest text-neutral-500"
-                >
-                  {group.title}
-                </h2>
-                <ul className="grid gap-0.5">
-                  {inGroup.map((t) => (
-                    <li key={t.id}>
-                      <NavRow
-                        active={t.id === selectedId}
-                        onClick={() => setSelectedId(t.id)}
-                        icon={t.icon}
-                        label={t.label}
-                        locked={t.pro && !isPro && Boolean(t.route)}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )
-          })}
-        </nav>
-        <div className="min-h-0 min-w-0">
-          <div className={cn('h-full', selected && 'hidden')}>
-            <AskPane
-              topics={topics}
-              isPro={isPro}
-              onShow={setSelectedId}
-              onOpen={onOpen}
-              pending={pending}
-            />
-          </div>
-          {selected ? (
-            <div key={selected.id} className="h-full overflow-y-auto pr-2">
-              <TopicDetail
-                topic={selected}
-                isPro={isPro}
-                onOpen={onOpen}
-                onAsk={(question) => {
-                  setPending({ question, at: Date.now() })
-                  setSelectedId(ASK)
-                }}
-              />
-            </div>
-          ) : null}
-        </div>
-      </div>
+      {body}
     </PageShell>
   )
 }
