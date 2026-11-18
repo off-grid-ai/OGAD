@@ -1465,6 +1465,8 @@ function AppContent(): React.JSX.Element {
                   expanded={sidebarOpen}
                   groups={navigationGroups}
                   renderItem={renderNavItem}
+                  // With picks, only they start open: the rest is one click away, not in the way.
+                  initiallyOpen={pickedItems.length ? ['Your picks'] : undefined}
                 />
               </div>
             </div>
