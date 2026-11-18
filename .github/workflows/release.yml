@@ -269,12 +269,16 @@ jobs:
           MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
         run: node scripts/stage-native.mjs && npx electron-vite build
       # The version job has already created this build's draft tag. Exclude it
-      # when finding the previous release for the changelog.
+      # when finding the previous release for the changelog. A stable release
+      # compares against the previous STABLE tag, not the beta it was cut from:
+      # the beta sits on the same commit, so comparing to it reads "No changes".
       - name: Generate release notes
         run: |
+          BETA_EXCLUDE=""
+          if [ "${{ needs.version.outputs.channel }}" = "stable" ]; then BETA_EXCLUDE="--exclude=*-beta*"; fi
           LAST_TAG=$(git describe --tags --abbrev=0 \
             --exclude="v${{ needs.version.outputs.version }}" \
-            --exclude=nightly 2>/dev/null || echo "")
+            --exclude=nightly $BETA_EXCLUDE 2>/dev/null || echo "")
           node scripts/release-notes.mjs \
             "$LAST_TAG" \
             "${{ needs.version.outputs.version }}" \
