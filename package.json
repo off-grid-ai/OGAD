@@ -80,6 +80,7 @@
     "@offgrid/automation": "file:../shared/packages/automation",
     "@offgrid/clipboard": "file:./packages/clipboard",
     "@offgrid/design": "file:../shared/packages/design",
+    "@offgrid/features": "file:../shared/packages/features",
     "@offgrid/models": "file:../shared/packages/models",
     "@offgrid/notes": "file:../shared/packages/notes",
     "@offgrid/notes-editor": "file:../shared/packages/notes-editor",

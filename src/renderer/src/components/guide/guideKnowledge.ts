@@ -26,6 +26,7 @@ import {
   type GuideWhere
 } from '@offgrid/models'
 import { FEATURE_GROUPS, PRO_FEATURES, featureSupportsPlatform } from '../pro/proCatalog'
+import { FEATURE_PARTS, tierOf } from '@offgrid/features'
 import type { DevicePlatform } from '@offgrid/core/shared/device'
 import type { ViewMode } from '@renderer/lib/view-modes'
 import { GUIDE_MEDIA, type GuideMedia } from './guideMedia'
@@ -106,11 +107,20 @@ export function guideTopics(platform: DevicePlatform): GuideTopic[] {
       highlights: f.highlights,
       group: f.group,
       where: 'computer',
-      pro: true,
+      pro: needsPro(f.route),
       route: f.route as ViewMode
     })
   )
   return [...shared, ...pro].map((t) => ({ ...t, media: GUIDE_MEDIA[t.id] }))
+}
+
+/**
+ * Whether a screen in the Pro catalog needs Pro, read from the shared feature parts that show it.
+ * Web Use and Computer Use live in the catalog but are free; a screen no part names stays Pro.
+ */
+export function needsPro(route: string): boolean {
+  const parts = FEATURE_PARTS.filter((p) => p.guide.desktop === route)
+  return parts.length === 0 || parts.some((p) => tierOf(p, 'desktop') === 'pro')
 }
 
 type Turn = { role: 'user' | 'assistant'; content: string }
