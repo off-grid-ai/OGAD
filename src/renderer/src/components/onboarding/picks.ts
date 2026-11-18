@@ -6,10 +6,12 @@
  */
 import {
   DEFAULT_PICKS,
+  cleanPicks as cleanSharedPicks,
   guideTopicsFor,
   modelKindsFor,
-  onboardingGroups,
-  partsFor,
+  toggleGroupPick,
+  togglePartAnywhere as togglePartAnywhereShared,
+  togglePartPick,
   type ModelKind,
   type OnboardingGroupId
 } from '@offgrid/features'
@@ -27,12 +29,7 @@ export interface Picks {
 const PLATFORM = 'desktop' as const
 
 /** Drops picks this app does not offer, and parts whose group is not picked. */
-export function cleanPicks(picks: Picks): Picks {
-  const offered = new Set(onboardingGroups(PLATFORM).map((g) => g.id))
-  const groups = picks.groups.filter((g) => offered.has(g))
-  const parts = new Set(partsFor(groups, PLATFORM).map((p) => p.id))
-  return { groups, parts: picks.parts.filter((p) => parts.has(p)) }
-}
+export const cleanPicks = (picks: Picks): Picks => cleanSharedPicks(picks, PLATFORM)
 
 /** The saved picks, or the defaults (Chat) when there are none or they cannot be read. */
 export function loadPicks(): Picks {
@@ -55,46 +52,20 @@ export function savePicks(picks: Picks): void {
   window.dispatchEvent(new Event(PICKS_CHANGED_EVENT))
 }
 
-/**
- * Picks or unpicks one part from Settings, where every group is on show: a group counts as picked
- * while any of its parts is.
- */
-export function togglePartAnywhere(picks: Picks, id: string): Picks {
-  const parts = picks.parts.includes(id)
-    ? picks.parts.filter((p) => p !== id)
-    : [...picks.parts, id]
-  const groups = onboardingGroups(PLATFORM)
-    .map((g) => g.id)
-    .filter((g) => partsFor([g], PLATFORM).some((p) => parts.includes(p.id)))
-  return cleanPicks({ groups, parts })
-}
-
 /** No saved picks: the model gate does what it did before onboarding asked. */
 export function clearPicks(): void {
   localStorage.removeItem(PICKS_KEY)
 }
 
-/**
- * Picks or unpicks a group. A newly picked group starts with its first part picked, so the next
- * step never opens on an empty column; unpicking a group drops its parts.
- */
-export function toggleGroup(picks: Picks, id: OnboardingGroupId): Picks {
-  if (picks.groups.includes(id)) {
-    return cleanPicks({ groups: picks.groups.filter((g) => g !== id), parts: picks.parts })
-  }
-  const first = partsFor([id], PLATFORM)[0]
-  return cleanPicks({
-    groups: [...picks.groups, id],
-    parts: first && !picks.parts.includes(first.id) ? [...picks.parts, first.id] : picks.parts
-  })
-}
+/** Picks or unpicks one part from Settings: a group counts as picked while any of its parts is. */
+export const togglePartAnywhere = (picks: Picks, id: string): Picks =>
+  togglePartAnywhereShared(picks, id, PLATFORM)
 
-export function togglePart(picks: Picks, id: string): Picks {
-  return {
-    groups: picks.groups,
-    parts: picks.parts.includes(id) ? picks.parts.filter((p) => p !== id) : [...picks.parts, id]
-  }
-}
+/** Picks or unpicks a group; a new group starts with its first part picked. */
+export const toggleGroup = (picks: Picks, id: OnboardingGroupId): Picks =>
+  toggleGroupPick(picks, id, PLATFORM)
+
+export const togglePart = togglePartPick
 
 /** Which setup row each kind of model a feature needs is. */
 const SETUP_KIND: Record<ModelKind, SetupItemKind> = {
