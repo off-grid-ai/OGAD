@@ -233,6 +233,8 @@ export interface RendererAnalyticsEvents {
   boost_promo_shown: { surface: BoostPromoSurface }
   boost_promo_clicked: { surface: BoostPromoSurface }
   boost_promo_dismissed: { surface: BoostPromoSurface }
+  /** What was picked in onboarding (fixed group and feature ids, comma-joined), sent with the setup opt-in. */
+  onboarding_picks: { groups: string; features: string }
   // Kept on the device for the daily snapshot.
   appearance: { theme: (typeof THEME_MODES)[number]; ui_animations: boolean }
 }

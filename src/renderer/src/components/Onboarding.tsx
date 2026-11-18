@@ -90,8 +90,17 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
     localStorage.setItem('onboarding_completed', 'true')
     if (open) localStorage.setItem(ONBOARDING_OPEN_KEY, open)
     // Either answer counts as asked, so no prompt asks again soon.
-    if (shareAnalytics) void analyticsBridge()?.optIn?.('setup')
-    else void analyticsBridge()?.dismissPrompt?.()
+    if (shareAnalytics) {
+      // What was picked goes with the opt-in, once consent is on.
+      void analyticsBridge()
+        ?.optIn?.('setup')
+        .then(() =>
+          analyticsBridge()?.capture?.('onboarding_picks', {
+            groups: picks.groups.join(','),
+            features: picks.parts.join(',')
+          })
+        )
+    } else void analyticsBridge()?.dismissPrompt?.()
     onComplete()
   }
 

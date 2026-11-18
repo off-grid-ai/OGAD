@@ -23,6 +23,7 @@ import {
   type OptInSource,
   type RendererErrorReport
 } from '../../shared/analytics'
+import { FEATURE_PARTS, ONBOARDING_GROUPS } from '@offgrid/features'
 import type { AnalyticsClient, ClientOptions } from './client'
 import type { AnalyticsProperties, AnalyticsValue } from './properties'
 import { documentFileType, roundMs } from './properties'
@@ -374,6 +375,12 @@ export class AnalyticsService {
         this.capture(event, { surface })
         return
       }
+      case 'onboarding_picks':
+        this.capture('onboarding_picks', {
+          groups: knownIds(props.groups, ONBOARDING_GROUPS),
+          features: knownIds(props.features, FEATURE_PARTS)
+        })
+        return
       case 'message_action':
         if ((MESSAGE_ACTIONS as readonly unknown[]).includes(props.action))
           this.capture('message_action', { action: props.action as string })
@@ -745,4 +752,14 @@ function withoutUndefined(
 
 export function isOptInSource(value: unknown): value is OptInSource {
   return (OPT_IN_SOURCES as readonly unknown[]).includes(value)
+}
+
+/** A comma-joined list kept to ids the app ships, so a report can carry nothing else. */
+function knownIds(value: unknown, known: readonly { id: string }[]): string {
+  if (typeof value !== 'string') return ''
+  const ids = new Set(known.map((k) => k.id))
+  return value
+    .split(',')
+    .filter((id) => ids.has(id))
+    .join(',')
 }
