@@ -6,6 +6,7 @@ import {
   cleanPicks,
   clearPicks,
   loadPicks,
+  pickedViews,
   savePicks,
   setupKindsForPicks,
   toggleGroup,
@@ -65,4 +66,19 @@ it('setup checks what the picks need: none picked keeps chat alone, a Pro pick n
   expect(setupKindsForPicks(true)).toEqual(
     expect.arrayContaining(['chat', 'image', 'video', 'transcription'])
   )
+})
+
+it('the picks open their screens in pick order, each once; no picks leaves the app as it was', () => {
+  const routes: Record<string, string> = {
+    chat: 'memory-chat',
+    images: 'memory-chat',
+    meetings: 'meetings',
+    video: 'video'
+  }
+  expect(pickedViews((id) => routes[id])).toEqual([])
+  savePicks({
+    groups: ['meetings', 'chat', 'create'],
+    parts: ['meetings', 'chat', 'images', 'video-studio']
+  })
+  expect(pickedViews((id) => routes[id])).toEqual(['meetings', 'memory-chat', 'video'])
 })

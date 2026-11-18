@@ -6,6 +6,7 @@
  */
 import {
   DEFAULT_PICKS,
+  guideTopicsFor,
   modelKindsFor,
   onboardingGroups,
   partsFor,
@@ -96,4 +97,14 @@ export function setupKindsForPicks(pro: boolean): SetupItemKind[] | null {
   if (localStorage.getItem(PICKS_KEY) === null) return null
   const kinds = modelKindsFor(loadPicks().parts, PLATFORM, pro).map((kind) => SETUP_KIND[kind])
   return [...new Set<SetupItemKind>(['chat', ...kinds])]
+}
+
+/**
+ * The screens the picks open, in pick order, each once: the guide topic each picked part shows,
+ * then that topic's screen. Empty when nothing was picked, so the app looks as it always did.
+ */
+export function pickedViews(routeOf: (topicId: string) => string | undefined): string[] {
+  if (localStorage.getItem(PICKS_KEY) === null) return []
+  const routes = guideTopicsFor(loadPicks().parts, PLATFORM).map(routeOf)
+  return [...new Set(routes.filter((route): route is string => Boolean(route)))]
 }

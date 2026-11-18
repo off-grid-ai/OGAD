@@ -21,7 +21,8 @@ import { ProjectsScreen } from './components/ProjectsScreen'
 import { ConnectorsScreen } from './components/ConnectorsScreen'
 import { GatewayScreen } from './components/GatewayScreen'
 import { Onboarding } from './components/Onboarding'
-import { ONBOARDING_OPEN_KEY } from './components/onboarding/picks'
+import { ONBOARDING_OPEN_KEY, pickedViews } from './components/onboarding/picks'
+import { guideTopics, needsPro } from './components/guide/guideKnowledge'
 import { PermissionGate } from './components/PermissionGate'
 import { PerformancePackGate } from './components/setup/PerformancePackGate'
 import type { SearchHit } from './types'
@@ -69,6 +70,7 @@ import {
   IconDeviceMobile,
   IconExternalLink,
   IconSparkles,
+  IconStar,
   IconBriefcase,
   IconShieldLock,
   IconTool
@@ -404,8 +406,23 @@ function AppContent(): React.JSX.Element {
 
   // Open on Day only where the catalog supports it.
   const [launch] = useState(() => launchRoute(appLocationPath()))
+  // The screens onboarding's picks open, in pick order: they lead the sidebar, and the app opens on
+  // the first one this computer can show you. No picks: the sidebar and landing are as before.
+  const [picked] = useState(() => {
+    const topics = guideTopics(currentPlatform(), { unsupported: true })
+    return pickedViews((id) => topics.find((topic) => topic.id === id)?.route) as ViewMode[]
+  })
   const [viewMode, commitViewMode] = useState<ViewMode>(
-    () => launch?.view ?? landingView(currentPlatform(), isPro)
+    () =>
+      launch?.view ??
+      picked.find((view) => {
+        const feature = getProFeature(view)
+        return (
+          !feature ||
+          (featureSupportsPlatform(feature, currentPlatform()) && (isPro || !needsPro(view)))
+        )
+      }) ??
+      landingView(currentPlatform(), isPro)
   )
   // Visiting the Tasks screen counts as seeing them, on the way in and on the way out.
   useEffect(() => {
@@ -1050,7 +1067,7 @@ function AppContent(): React.JSX.Element {
   // Icons take no color — the nav button drives it (emerald when active).
   const navItems = (...items: Array<NavItem | null>): NavItem[] =>
     items.filter((item): item is NavItem => item !== null)
-  const navigationGroups = [
+  const featureGroups = [
     {
       label: 'Discover',
       icon: <IconSparkles className="h-5 w-5 shrink-0" />,
@@ -1108,6 +1125,25 @@ function AppContent(): React.JSX.Element {
         proItem('notifications')
       )
     }
+  ]
+  // What you picked in onboarding leads, in pick order; each row moves there, so nothing is lost.
+  const pickedItems = picked.flatMap((view) =>
+    featureGroups.flatMap((group) => group.items).filter((item) => item.view === view)
+  )
+  const navigationGroups = [
+    ...(pickedItems.length
+      ? [
+          {
+            label: 'Your picks',
+            icon: <IconStar className="h-5 w-5 shrink-0" />,
+            items: pickedItems
+          }
+        ]
+      : []),
+    ...featureGroups.map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !pickedItems.includes(item))
+    }))
   ].filter((group) => group.items.length > 0)
   const navigationItems = navigationGroups.flatMap((group) => group.items)
   // What it does for you: its own sidebar row under Back, and a screen the palette finds.
