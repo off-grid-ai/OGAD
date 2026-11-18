@@ -646,16 +646,21 @@ export function FeatureGuide({
   }
 }>): React.ReactElement {
   const topics = useMemo(() => guideTopics(currentPlatform()), [])
+  // A pick this platform does not have yet still shows, with a line saying so.
+  const withUnsupported = useMemo(
+    () => (picks ? guideTopics(currentPlatform(), { unsupported: true }) : topics),
+    [picks, topics]
+  )
   const picked = useMemo(
     () =>
       picks?.ids
-        .map((id) => topics.find((t) => t.id === id))
+        .map((id) => withUnsupported.find((t) => t.id === id))
         .filter((t): t is GuideTopic => Boolean(t)) ?? [],
-    [picks?.ids, topics]
+    [picks?.ids, withUnsupported]
   )
   const [selectedId, setSelectedId] = useState(() => picked[0]?.id ?? ASK)
   const [pending, setPending] = useState<{ question: string; at: number } | null>(null)
-  const selected = topics.find((t) => t.id === selectedId)
+  const selected = withUnsupported.find((t) => t.id === selectedId)
 
   const askRow = (
     <NavRow

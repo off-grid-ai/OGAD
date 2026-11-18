@@ -55,6 +55,8 @@ export interface GuideTopic {
   /** The page to get it, for things that live outside this app. */
   url?: string
   media?: GuideMedia
+  /** Not on this computer's platform yet (shown only where a pick asks for it). */
+  notHere?: boolean
 }
 
 export const GUIDE_GROUPS = [...FEATURE_GROUPS, DESKTOP_BEYOND_GROUP] as const
@@ -81,8 +83,14 @@ const ROUTES: Record<string, ViewMode> = {
   connectors: 'connectors'
 }
 
-/** Every topic this computer can show, in page order within each group. */
-export function guideTopics(platform: DevicePlatform): GuideTopic[] {
+/**
+ * Every topic this computer can show, in page order within each group. With `unsupported`, Pro
+ * features this platform does not have yet come too, marked `notHere`, so a pick never vanishes.
+ */
+export function guideTopics(
+  platform: DevicePlatform,
+  opts: { unsupported?: boolean } = {}
+): GuideTopic[] {
   const shared: GuideTopic[] = guideTopicsFor('desktop').map((t) => ({
     id: t.id,
     label: t.label,
@@ -97,20 +105,21 @@ export function guideTopics(platform: DevicePlatform): GuideTopic[] {
     route: ROUTES[t.id],
     url: t.get ? GUIDE_LINKS[t.get] : undefined
   }))
-  const pro: GuideTopic[] = PRO_FEATURES.filter((f) => featureSupportsPlatform(f, platform)).map(
-    (f) => ({
-      id: f.route,
-      label: f.label,
-      icon: f.icon,
-      tagline: f.tagline,
-      description: f.description,
-      highlights: f.highlights,
-      group: f.group,
-      where: 'computer',
-      pro: needsPro(f.route),
-      route: f.route as ViewMode
-    })
-  )
+  const pro: GuideTopic[] = PRO_FEATURES.filter(
+    (f) => opts.unsupported || featureSupportsPlatform(f, platform)
+  ).map((f) => ({
+    id: f.route,
+    label: f.label,
+    icon: f.icon,
+    tagline: f.tagline,
+    description: f.description,
+    highlights: f.highlights,
+    group: f.group,
+    where: 'computer',
+    pro: needsPro(f.route),
+    route: f.route as ViewMode,
+    notHere: !featureSupportsPlatform(f, platform) || undefined
+  }))
   return [...shared, ...pro].map((t) => ({ ...t, media: GUIDE_MEDIA[t.id] }))
 }
 

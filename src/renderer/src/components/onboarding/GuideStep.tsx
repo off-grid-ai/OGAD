@@ -77,7 +77,17 @@ export function GuideStep({
       )
     }
     // Onboarding runs before Pro starts, so a Pro feature always shows how to get it.
-    return topic.pro ? <ProOffer /> : null
+    const offer = topic.pro ? <ProOffer /> : null
+    if (!topic.notHere) return offer
+    return (
+      <div className="grid gap-3">
+        <p className="text-sm text-muted-foreground" data-testid="onboarding-not-here">
+          Coming to this {deviceNoun()} soon. Your license also works on the other computers Off
+          Grid AI runs on.
+        </p>
+        {offer}
+      </div>
+    )
   }
   const navFooter = (
     <>

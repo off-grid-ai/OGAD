@@ -220,4 +220,13 @@ describe('desktop onboarding: what you want → which ones → how it works', ()
     expect(onComplete).toHaveBeenCalledOnce()
     expect(localStorage.getItem(ONBOARDING_OPEN_KEY)).toBeTruthy()
   })
+
+  it('a pick this platform does not have yet still shows, with a line saying so', async () => {
+    ;(window as unknown as { api: { platform: string } }).api.platform = 'unknown'
+    localStorage.setItem(PICKS_KEY, JSON.stringify({ groups: ['meetings'], parts: ['meetings'] }))
+    localStorage.setItem('onboarding_step', 'guide')
+    render(<Onboarding onComplete={vi.fn()} />)
+    expect(await screen.findByTestId('onboarding-not-here')).toBeTruthy()
+    expect(screen.getByRole('navigation', { name: 'Features' }).textContent).toMatch(/Meetings/)
+  })
 })
