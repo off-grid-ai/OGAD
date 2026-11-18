@@ -7,6 +7,7 @@ import {
   clearPicks,
   loadPicks,
   savePicks,
+  setupKindsForPicks,
   toggleGroup,
   togglePart
 } from '../picks'
@@ -48,4 +49,20 @@ it('a part toggles on and off', () => {
   const on = togglePart({ groups: ['chat'], parts: [] }, 'web-search')
   expect(on.parts).toEqual(['web-search'])
   expect(togglePart(on, 'web-search').parts).toEqual([])
+})
+
+it('setup checks what the picks need: none picked keeps chat alone, a Pro pick needs Pro', () => {
+  expect(setupKindsForPicks(false)).toBeNull()
+  savePicks({
+    groups: ['chat', 'create', 'meetings'],
+    parts: ['chat', 'images', 'video-studio', 'meetings']
+  })
+  const free = setupKindsForPicks(false)!
+  expect(free).toEqual(expect.arrayContaining(['chat', 'image']))
+  // Meetings and Video Studio are Pro on the desktop: their models are checked only with Pro.
+  expect(free).not.toContain('transcription')
+  expect(free).not.toContain('video')
+  expect(setupKindsForPicks(true)).toEqual(
+    expect.arrayContaining(['chat', 'image', 'video', 'transcription'])
+  )
 })

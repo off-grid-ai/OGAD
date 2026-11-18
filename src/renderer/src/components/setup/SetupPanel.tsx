@@ -24,6 +24,8 @@ import { projectProgress } from '@offgrid/ui'
 import { formatStorageBytes } from './storage-format'
 import { modelSetupErrorMessage } from '@renderer/lib/download-label'
 import { OFF_GRID_DESKTOP_RELEASES_URL } from '../../constants/links'
+import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
+import { setupKindsForPicks } from '../onboarding/picks'
 import {
   totalDownloadGb,
   type RecMode as Mode,
@@ -143,9 +145,12 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const [modeError, setModeError] = useState('')
   const [loadingPlan, setLoadingPlan] = useState(false)
   const [plan, setPlan] = useState<SetupPlan | null>(null)
-  const [selectedKinds, setSelectedKinds] = useState<Partial<Record<ItemKind, boolean>>>({
-    chat: true
-  })
+  const { isPro } = useRendererEntitlement()
+  // What onboarding's picks need is checked; with no picks, chat alone, as before.
+  const [picked] = useState(() => setupKindsForPicks(isPro))
+  const [selectedKinds, setSelectedKinds] = useState<Partial<Record<ItemKind, boolean>>>(() =>
+    Object.fromEntries((picked ?? ['chat']).map((kind) => [kind, true]))
+  )
   const selectedItems =
     plan?.items.filter((item) => selectedKinds[item.kind] && canSetUpItem(item)) ?? []
   const downloadGb = totalDownloadGb(selectedItems)
@@ -446,6 +451,11 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                 void loadPlan(mode).finally(() => setLoadingPlan(false))
               }}
             />
+            {picked && picked.length > 1 ? (
+              <div className="mt-1.5 text-[11.5px] leading-snug text-neutral-500">
+                Checked for what you picked. Add the rest any time.
+              </div>
+            ) : null}
             <div className="mt-1.5 text-[11.5px] leading-snug text-neutral-500">
               Only checked models download. Each video model includes all required files. Your saved
               active choices stay unchanged.

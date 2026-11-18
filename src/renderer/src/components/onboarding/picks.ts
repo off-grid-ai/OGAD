@@ -6,10 +6,13 @@
  */
 import {
   DEFAULT_PICKS,
+  modelKindsFor,
   onboardingGroups,
   partsFor,
+  type ModelKind,
   type OnboardingGroupId
 } from '@offgrid/features'
+import type { SetupItemKind } from '../../../../shared/setup-contract'
 
 export const PICKS_KEY = 'onboarding_picks'
 /** A screen an "Open …" in onboarding's guide asked for: the app opens it once setup is done. */
@@ -72,4 +75,25 @@ export function togglePart(picks: Picks, id: string): Picks {
     groups: picks.groups,
     parts: picks.parts.includes(id) ? picks.parts.filter((p) => p !== id) : [...picks.parts, id]
   }
+}
+
+/** Which setup row each kind of model a feature needs is. */
+const SETUP_KIND: Record<ModelKind, SetupItemKind> = {
+  chat: 'chat',
+  vision: 'chat',
+  image: 'image',
+  video: 'video',
+  speech: 'transcription',
+  voice: 'voice'
+}
+
+/**
+ * The models setup checks for what was picked: chat, plus what each picked feature needs (a Pro
+ * feature only with Pro). Null when nothing was picked (skipped, or set up before onboarding
+ * asked): setup checks chat alone, as it always did.
+ */
+export function setupKindsForPicks(pro: boolean): SetupItemKind[] | null {
+  if (localStorage.getItem(PICKS_KEY) === null) return null
+  const kinds = modelKindsFor(loadPicks().parts, PLATFORM, pro).map((kind) => SETUP_KIND[kind])
+  return [...new Set<SetupItemKind>(['chat', ...kinds])]
 }
