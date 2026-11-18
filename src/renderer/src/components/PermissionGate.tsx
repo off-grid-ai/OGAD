@@ -490,7 +490,7 @@ function SetupNudge({
       className="fixed bottom-14 z-50 flex max-w-[min(560px,calc(100vw-2rem))] items-center gap-4 rounded-xl border border-green-500/30 bg-background/95 px-5 py-4 text-foreground shadow-xl backdrop-blur-xl"
       style={{ right: currentTaskLeft === null ? 16 : window.innerWidth - currentTaskLeft + 16 }}
     >
-      <Cpu className="h-4 w-4 shrink-0 text-green-500" />
+      <Cpu className="mt-px h-4 w-4 shrink-0 self-start text-green-500" />
       <div className="min-w-0 flex-1 text-xs leading-snug">
         <div className="font-medium text-foreground">{title}</div>
         <div className="mt-0.5 text-muted-foreground">{detail}</div>
