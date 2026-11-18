@@ -51,10 +51,11 @@ const TARGETS = {
   }
 }
 // The licences the shipped files carry: sherpa-onnx (Apache-2.0) and ONNX Runtime (MIT), at the
-// versions this release was built from (its CMake pins ONNX Runtime 1.28.2).
+// versions this release was built from (its CMake pins ONNX Runtime 1.28.2). ONNX Runtime's is kept
+// in the repo: its GitHub repository stopped serving (404, 2026-11-18) and failed every release.
 const LICENSES = {
   LICENSE: `https://raw.githubusercontent.com/${repo}/${ref}/LICENSE`,
-  'LICENSE-onnxruntime': 'https://raw.githubusercontent.com/microsoft/onnxruntime/v1.28.2/LICENSE'
+  'LICENSE-onnxruntime': { file: path.join(path.dirname(fileURLToPath(import.meta.url)), 'licenses', 'onnxruntime-1.28.2-LICENSE') }
 }
 
 const target = TARGETS[process.platform]
@@ -165,8 +166,9 @@ try {
     fs.copyFileSync(fs.realpathSync(path.join(work, top, file)), out)
     if (folder === 'bin' && !file.endsWith('.dll')) fs.chmodSync(out, 0o755)
   }
-  for (const [name, licenseUrl] of Object.entries(LICENSES)) {
-    fs.writeFileSync(path.join(dest, name), await download(licenseUrl))
+  for (const [name, source] of Object.entries(LICENSES)) {
+    const text = typeof source === 'string' ? await download(source) : fs.readFileSync(source.file)
+    fs.writeFileSync(path.join(dest, name), text)
   }
   console.log(`[sherpa] staged sherpa-onnx ${ref} (${target.key}) in ${dest}`)
 
