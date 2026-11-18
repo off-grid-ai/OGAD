@@ -27,6 +27,7 @@ import meetingsLight from '@renderer/assets/guide/meetings-light.webp'
 import modelsDark from '@renderer/assets/guide/models-dark.webp'
 import modelsLight from '@renderer/assets/guide/models-light.webp'
 import notesClip from '@renderer/assets/guide/notes.mp4'
+import notifications from '@renderer/assets/guide/notifications.webp'
 import phoneDark from '@renderer/assets/guide/phone-dark.webp'
 import phoneLight from '@renderer/assets/guide/phone-light.webp'
 import phoneVideoDark from '@renderer/assets/guide/phone-video-dark.webp'
@@ -85,6 +86,8 @@ export const GUIDE_MEDIA: Record<string, GuideMedia> = {
   scribe: { kind: 'clip', src: scribeClip },
   search: still(searchDark, searchLight),
   tasks: still(tasksDark, tasksLight),
+  // Approvals and to-dos waiting on you: one light take, used in both themes.
+  notifications: still(notifications, notifications),
   vault: still(vaultDark, vaultLight),
   video: still(videoDark, videoLight),
   voice: still(voiceDark, voiceLight)
