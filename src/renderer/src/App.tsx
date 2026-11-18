@@ -21,6 +21,7 @@ import { ProjectsScreen } from './components/ProjectsScreen'
 import { ConnectorsScreen } from './components/ConnectorsScreen'
 import { GatewayScreen } from './components/GatewayScreen'
 import { Onboarding } from './components/Onboarding'
+import { ONBOARDING_OPEN_KEY } from './components/onboarding/picks'
 import { PermissionGate } from './components/PermissionGate'
 import { PerformancePackGate } from './components/setup/PerformancePackGate'
 import type { SearchHit } from './types'
@@ -1133,6 +1134,15 @@ function AppContent(): React.JSX.Element {
       setReplayTarget(null)
     })
   }
+  // An "Open …" picked in onboarding's guide lands there once, after model setup.
+  useEffect(() => {
+    const view = localStorage.getItem(ONBOARDING_OPEN_KEY)
+    if (!view) return
+    localStorage.removeItem(ONBOARDING_OPEN_KEY)
+    goToView(view as ViewMode)
+    // Once, on the first render after onboarding.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const renderNavItem = (item: {
     label: string
     icon: React.ReactNode
