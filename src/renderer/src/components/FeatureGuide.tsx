@@ -132,17 +132,20 @@ function TopicAction({
   topic,
   isPro,
   onOpen,
-  size = 'default'
+  size = 'default',
+  quiet = false
 }: Readonly<{
   topic: GuideTopic
   isPro: boolean
   onOpen: (view: ViewMode) => void
   size?: 'default' | 'sm'
+  /** Outline, when the screen's one primary action is elsewhere (onboarding's Set up). */
+  quiet?: boolean
 }>): React.ReactElement | null {
   if (topic.route) {
     const route = topic.route
     return (
-      <Button size={size} onClick={() => onOpen(route)}>
+      <Button size={size} variant={quiet ? 'outline' : 'default'} onClick={() => onOpen(route)}>
         {topic.pro && !isPro ? <LockSimpleIcon className="h-4 w-4" /> : null}
         Open {topic.label}
       </Button>
@@ -164,7 +167,8 @@ function TopicDetail({
   onOpen,
   onAsk,
   mediaHeight = 'h-[56vh]',
-  footer
+  footer,
+  quiet = false
 }: Readonly<{
   topic: GuideTopic
   isPro: boolean
@@ -173,6 +177,7 @@ function TopicDetail({
   mediaHeight?: string
   /** Shown under the feature: onboarding puts Get Pro or the connections here. */
   footer?: ReactNode
+  quiet?: boolean
 }>): React.ReactElement {
   return (
     <article className="og-guide-in grid max-w-5xl gap-5" aria-labelledby="guide-topic-title">
@@ -193,7 +198,7 @@ function TopicDetail({
             <ChatCircleIcon className="h-4 w-4" />
             Ask more
           </Button>
-          <TopicAction topic={topic} isPro={isPro} onOpen={onOpen} />
+          <TopicAction topic={topic} isPro={isPro} onOpen={onOpen} quiet={quiet} />
         </div>
       </div>
       <MediaFrame topic={topic} height={mediaHeight} />
@@ -744,6 +749,7 @@ export function FeatureGuide({
               }}
               mediaHeight={picks ? 'h-[34vh]' : undefined}
               footer={picks?.footer?.(selected)}
+              quiet={Boolean(picks)}
             />
           </div>
         ) : null}

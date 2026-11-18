@@ -32,7 +32,7 @@ function ProOffer(): JSX.Element {
         Pro: $119 once or $7.99 a month. One license covers up to 5 devices.
       </p>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => openExternal(OFF_GRID_WEBSITE_URL)}>
+        <Button size="sm" variant="outline" onClick={() => openExternal(OFF_GRID_WEBSITE_URL)}>
           Get Pro
         </Button>
         <Button
