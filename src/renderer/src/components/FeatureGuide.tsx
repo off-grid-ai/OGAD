@@ -633,7 +633,12 @@ export function FeatureGuide({
    * Onboarding's "How it works": only these topics, in this order, as "Your picks", starting on
    * the first. The footer goes under each one (Get Pro, connections).
    */
-  picks?: { ids: string[]; footer?: (topic: GuideTopic) => ReactNode }
+  picks?: {
+    ids: string[]
+    footer?: (topic: GuideTopic) => ReactNode
+    /** Under the list of picks: onboarding's where-it-runs line and opt-in. */
+    navFooter?: ReactNode
+  }
 }>): React.ReactElement {
   const topics = useMemo(() => guideTopics(currentPlatform()), [])
   const picked = useMemo(
@@ -657,7 +662,13 @@ export function FeatureGuide({
   )
   const body = (
     <div className="grid min-h-0 flex-1 gap-8 md:grid-cols-[220px_minmax(0,1fr)]">
-      <nav aria-label="Features" className="grid min-h-0 content-start gap-5 overflow-y-auto pr-1">
+      <nav
+        aria-label="Features"
+        className={cn(
+          'min-h-0 overflow-y-auto pr-1',
+          picks ? 'flex flex-col gap-5' : 'grid content-start gap-5'
+        )}
+      >
         {picks ? null : askRow}
         {picks ? (
           <section aria-labelledby="guide-your-picks">
@@ -682,6 +693,7 @@ export function FeatureGuide({
             </ul>
           </section>
         ) : null}
+        {picks?.navFooter ? <div className="mt-auto grid gap-4">{picks.navFooter}</div> : null}
         {(picks ? [] : GUIDE_GROUPS).map((group) => {
           const inGroup = topics.filter((t) => t.group === group.id)
           if (inGroup.length === 0) return null
@@ -730,7 +742,7 @@ export function FeatureGuide({
                 setPending({ question, at: Date.now() })
                 setSelectedId(ASK)
               }}
-              mediaHeight={picks ? 'h-[38vh]' : undefined}
+              mediaHeight={picks ? 'h-[34vh]' : undefined}
               footer={picks?.footer?.(selected)}
             />
           </div>

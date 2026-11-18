@@ -39,6 +39,7 @@ import {
   WaveformIcon,
   type Icon
 } from '@phosphor-icons/react'
+import { PageHeader } from '@offgrid/operator-ui/operator/experience'
 import { cn } from '@renderer/lib/utils'
 import { BoostPromoLine } from '../BoostPromo'
 import { LicenseActivation } from '../pro/UpgradeScreen'
@@ -92,20 +93,32 @@ function groupIsPro(id: OnboardingGroupId): boolean {
 }
 
 function ProTag(): JSX.Element {
-  return <span className="font-mono text-[10px] tracking-widest text-neutral-500">PRO</span>
+  return (
+    <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+      Pro
+    </span>
+  )
 }
 
-function StepHeading({
-  eyebrow,
-  title,
-  line
-}: Readonly<{ eyebrow: string; title: string; line: string }>): JSX.Element {
-  return (
-    <div className="max-w-xs">
-      <p className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">{eyebrow}</p>
-      <h2 className="mt-3 text-4xl font-light tracking-tight text-white md:text-5xl">{title}</h2>
-      <p className="mt-3 text-sm text-neutral-400">{line}</p>
-    </div>
+/** A choice: a glass tile that shows it is picked within one frame, with a small press. */
+const choice = (on: boolean): string =>
+  cn(
+    'rounded-xl border text-left transition-[transform,border-color,background-color] duration-150 active:scale-[0.98]',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+    on
+      ? 'border-primary/60 bg-primary/[0.06]'
+      : 'border-border bg-card/60 hover:border-foreground/20'
+  )
+
+function Tick({ on, size }: Readonly<{ on: boolean; size: string }>): JSX.Element {
+  return on ? (
+    <CheckCircleIcon
+      weight="fill"
+      aria-hidden="true"
+      className={cn(size, 'shrink-0 text-primary')}
+    />
+  ) : (
+    <CircleIcon aria-hidden="true" className={cn(size, 'shrink-0 text-muted-foreground/50')} />
   )
 }
 
@@ -115,19 +128,16 @@ export function GroupsStep({
   onToggle
 }: Readonly<{ picks: Picks; onToggle: (id: OnboardingGroupId) => void }>): JSX.Element {
   return (
-    <div className="mx-auto grid w-full max-w-6xl gap-10 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-center">
-      <div>
-        <StepHeading
-          eyebrow="Off Grid AI · Setup"
-          title="What do you want to do?"
-          line="Pick any. Next you choose the details."
-        />
-        <BoostPromoLine delay={0.6} className="mt-6 justify-start text-left" />
-      </div>
+    <div className="my-auto grid w-full gap-8">
+      <PageHeader
+        eyebrow="Off Grid AI · Setup"
+        title="What do you want to do?"
+        description="Pick any. Next you choose the details."
+      />
       <div
         role="group"
         aria-label="What you want to do"
-        className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4"
+        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
       >
         {onboardingGroups(PLATFORM).map((g) => {
           const Icon = GROUP_ICONS[g.id]
@@ -140,115 +150,94 @@ export function GroupsStep({
               aria-checked={on}
               data-testid={`onboarding-group-${g.id}`}
               onClick={() => onToggle(g.id)}
-              className={cn(
-                'flex min-h-32 flex-col gap-1 rounded-xl border p-4 text-left backdrop-blur transition-colors duration-100',
-                on
-                  ? 'border-emerald-400/70 bg-emerald-500/[0.07]'
-                  : 'border-white/10 bg-white/[0.03] hover:border-white/20'
-              )}
+              className={cn(choice(on), 'flex min-h-44 flex-col gap-1 p-5')}
             >
-              <span className="mb-auto flex items-center justify-between pb-3">
-                <Icon className="h-6 w-6 text-neutral-300" />
+              <span className="mb-auto flex items-center justify-between pb-4">
+                <Icon aria-hidden="true" className="h-5 w-5 text-foreground" />
                 <span className="flex items-center gap-2">
                   {groupIsPro(g.id) ? <ProTag /> : null}
-                  {on ? (
-                    <CheckCircleIcon weight="fill" className="h-4 w-4 text-emerald-400" />
-                  ) : null}
+                  <Tick on={on} size="h-4 w-4" />
                 </span>
               </span>
-              <span className="text-[15px] text-white">{g.name}</span>
-              <span className="text-xs text-neutral-400">{g.does}</span>
+              <span className="text-sm text-foreground">{g.name}</span>
+              <span className="text-xs text-muted-foreground">{g.does}</span>
             </button>
           )
         })}
       </div>
+      <BoostPromoLine delay={0.6} className="justify-start text-left" />
     </div>
   )
 }
 
-/** Step 2: which ones? The parts of each picked group, in columns. */
+/** Step 2: which ones? The parts of each picked group, a column per group. */
 export function FeaturesStep({
   picks,
   onToggle
 }: Readonly<{ picks: Picks; onToggle: (id: string) => void }>): JSX.Element {
   const groups = onboardingGroups(PLATFORM).filter((g) => picks.groups.includes(g.id))
-  const proPicked = picks.parts.some((id) => {
-    const part = partsFor(picks.groups, PLATFORM).find((p) => p.id === id)
-    return part ? isPro(part) : false
-  })
+  const offered = partsFor(picks.groups, PLATFORM)
+  const proPicked = offered.some((p) => picks.parts.includes(p.id) && isPro(p))
   return (
-    <div className="mx-auto grid w-full max-w-6xl gap-10 lg:grid-cols-[240px_minmax(0,1fr)]">
-      <div>
-        <StepHeading
-          eyebrow="The details"
-          title="Which ones?"
-          line="We only set up what you pick. Add more any time."
-        />
-      </div>
-      <div className="grid content-start gap-6 md:grid-cols-2 xl:grid-cols-3">
+    <div className="my-auto grid w-full gap-8">
+      <PageHeader
+        eyebrow="The details"
+        title="Which ones?"
+        description="We only set up what you pick. Add more any time."
+      />
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] items-start gap-x-4 gap-y-6">
         {groups.map((g) => (
-          <section key={g.id} aria-labelledby={`onboarding-parts-${g.id}`}>
+          <section key={g.id} aria-labelledby={`onboarding-parts-${g.id}`} className="grid gap-2">
             <h3
               id={`onboarding-parts-${g.id}`}
-              className="mb-2 font-mono text-[11px] uppercase tracking-widest text-neutral-500"
+              className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground"
             >
               {g.name}
             </h3>
-            <div className="grid gap-2">
-              {partsFor([g.id], PLATFORM).map((p) => {
-                const Icon = partIcon(p.id)
-                const on = picks.parts.includes(p.id)
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    role="checkbox"
-                    aria-checked={on}
-                    data-testid={`onboarding-part-${p.id}`}
-                    onClick={() => onToggle(p.id)}
-                    className={cn(
-                      'flex min-h-14 items-start gap-3 rounded-lg border px-3 py-2.5 text-left backdrop-blur transition-colors duration-100',
-                      on
-                        ? 'border-emerald-400/50 bg-emerald-500/[0.06]'
-                        : 'border-white/10 bg-white/[0.03] hover:border-white/20'
-                    )}
-                  >
-                    <Icon className="mt-0.5 h-5 w-5 shrink-0 text-neutral-300" />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2 text-sm text-white">
-                        {p.name}
-                        {isPro(p) ? <ProTag /> : null}
-                      </span>
-                      <span className="block text-xs text-neutral-400">{p.does}</span>
-                      {p.platforms[PLATFORM] === 'large' ? (
-                        <span className="block text-xs text-neutral-500">
-                          Needs a large model. It runs best on a computer with lots of memory.
-                        </span>
-                      ) : null}
+            {partsFor([g.id], PLATFORM).map((p) => {
+              const Icon = partIcon(p.id)
+              const on = picks.parts.includes(p.id)
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={on}
+                  data-testid={`onboarding-part-${p.id}`}
+                  onClick={() => onToggle(p.id)}
+                  className={cn(choice(on), 'flex min-h-14 items-start gap-3 px-3 py-2.5')}
+                >
+                  <Icon aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-foreground" />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2 text-sm text-foreground">
+                      {p.name}
+                      {isPro(p) ? <ProTag /> : null}
                     </span>
-                    {on ? (
-                      <CheckCircleIcon
-                        weight="fill"
-                        className="h-5 w-5 shrink-0 text-emerald-400"
-                      />
-                    ) : (
-                      <CircleIcon className="h-5 w-5 shrink-0 text-neutral-600" />
-                    )}
-                  </button>
-                )
-              })}
-            </div>
+                    <span className="block text-xs text-muted-foreground">{p.does}</span>
+                    {p.platforms[PLATFORM] === 'large' ? (
+                      <span className="block text-xs text-muted-foreground">
+                        Needs a large model. It runs best with lots of memory.
+                      </span>
+                    ) : null}
+                  </span>
+                  <Tick on={on} size="h-4 w-4" />
+                </button>
+              )
+            })}
           </section>
         ))}
-        {proPicked ? (
-          <div className="col-span-full grid max-w-md gap-2 pt-2" data-testid="onboarding-have-pro">
-            <LicenseActivation />
-            <p className="text-xs text-neutral-500">
-              Or pair a device that has Pro, from Devices, once you are set up.
-            </p>
-          </div>
-        ) : null}
       </div>
+      {proPicked ? (
+        <div
+          className="grid max-w-md gap-2 border-t border-border pt-6"
+          data-testid="onboarding-have-pro"
+        >
+          <LicenseActivation />
+          <p className="text-xs text-muted-foreground">
+            Or pair a device that has Pro, from Devices, once you are set up.
+          </p>
+        </div>
+      ) : null}
     </div>
   )
 }

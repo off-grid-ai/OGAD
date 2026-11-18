@@ -167,7 +167,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
           <motion.div
             key="groups"
             {...fade}
-            className="flex h-full w-full items-center overflow-y-auto bg-neutral-950 px-12 pb-40 pt-12"
+            className="flex h-full w-full flex-col overflow-y-auto px-12 pb-32 pt-12"
           >
             <GroupsStep
               picks={picks}
@@ -180,18 +180,14 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
           <motion.div
             key="features"
             {...fade}
-            className="h-full w-full overflow-y-auto bg-neutral-950 px-12 pb-40 pt-16"
+            className="flex h-full w-full flex-col overflow-y-auto px-12 pb-32 pt-12"
           >
             <FeaturesStep picks={picks} onToggle={(id) => updatePicks(togglePart(picks, id))} />
           </motion.div>
         )}
 
         {stepId === 'guide' && (
-          <motion.div
-            key="guide"
-            {...fade}
-            className="h-full w-full bg-neutral-950 px-12 pb-32 pt-10"
-          >
+          <motion.div key="guide" {...fade} className="h-full w-full px-12 pb-28 pt-12">
             <GuideStep
               picks={picks}
               shareAnalytics={shareAnalytics}
@@ -204,9 +200,9 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
       </AnimatePresence>
 
       {/* Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/5 bg-neutral-950/80 px-12 py-5 backdrop-blur-xl">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-6">
-          <p className="hidden items-center gap-2 text-xs text-neutral-500 md:flex">
+      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/80 px-12 py-4 backdrop-blur-xl">
+        <div className="flex w-full items-center justify-between gap-6">
+          <p className="hidden items-center gap-2 text-xs text-muted-foreground md:flex">
             <LockSimpleIcon className="h-3.5 w-3.5" aria-hidden="true" />
             Everything runs on your {deviceNoun()}. Nothing leaves it.
           </p>
@@ -227,7 +223,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                   layout={!reducedMotion}
                   transition={{ type: 'spring', stiffness: 380, damping: 34 }}
                   className={cn(
-                    'relative h-1 overflow-hidden rounded-full bg-neutral-800',
+                    'relative h-1 overflow-hidden rounded-full bg-border',
                     index === currentStep ? 'w-10' : 'w-6'
                   )}
                 >
@@ -251,7 +247,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                   animate={{ opacity: 1, y: 0 }}
                   exit={reducedMotion ? undefined : { opacity: 0, y: -4 }}
                   transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-                  className="font-mono text-[11px] uppercase tracking-widest text-neutral-500"
+                  className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground"
                 >
                   {steps[currentStep]!.label}
                 </motion.span>

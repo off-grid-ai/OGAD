@@ -25,10 +25,10 @@ function ProOffer(): JSX.Element {
   const [keyOpen, setKeyOpen] = useState(false)
   return (
     <div
-      className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4"
+      className="grid gap-3 rounded-xl border border-border bg-card/60 p-4"
       data-testid="onboarding-pro-offer"
     >
-      <p className="text-sm text-neutral-300">
+      <p className="text-sm text-foreground">
         Pro: $119 once or $7.99 a month. One license covers up to 5 devices.
       </p>
       <div className="flex flex-wrap gap-2">
@@ -70,7 +70,7 @@ export function GuideStep({
       return (
         <div className="grid gap-2">
           <QuickConnections onBusyChange={onConnectionBusy} />
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-muted-foreground">
             Optional. You can add or change connections in Integrations later.
           </p>
         </div>
@@ -79,49 +79,49 @@ export function GuideStep({
     // Onboarding runs before Pro starts, so a Pro feature always shows how to get it.
     return topic.pro ? <ProOffer /> : null
   }
-  return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-6">
-      <div className="flex min-h-0 flex-1 flex-col">
-        <FeatureGuide isPro={false} onOpen={onOpen} picks={{ ids, footer }} />
+  const navFooter = (
+    <>
+      <div className="grid gap-1.5 text-xs text-muted-foreground" data-testid="onboarding-where">
+        <p className="flex items-start gap-2 text-foreground">
+          <CpuIcon aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Models run in your {deviceNoun()}&apos;s memory.
+        </p>
+        <p className="flex items-start gap-2">
+          <GlobeIcon aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />A model server you
+          add gets prompts only while you select it. Sync never copies its API keys to your phone.
+        </p>
       </div>
-      <div className="grid gap-4 border-t border-white/10 pt-4 md:grid-cols-2">
-        <div className="grid gap-1 text-xs text-neutral-400" data-testid="onboarding-where">
-          <p className="flex items-center gap-2 text-sm text-neutral-200">
-            <CpuIcon aria-hidden="true" className="h-4 w-4" />
-            Models run in your {deviceNoun()}&apos;s memory.
-          </p>
-          <p className="flex items-center gap-2">
-            <GlobeIcon aria-hidden="true" className="h-4 w-4" />A model server you add gets prompts
-            only while you select it. Sync never copies its API keys to your phone.
-          </p>
-        </div>
-        <div className="flex items-start gap-3">
-          <Checkbox
-            id="onboarding-share-analytics"
-            checked={shareAnalytics}
-            onCheckedChange={(checked) => onShareAnalytics(checked === true)}
-            className="mt-0.5"
-          />
-          <div className="min-w-0">
-            <label
-              htmlFor="onboarding-share-analytics"
-              className="cursor-pointer text-sm text-neutral-200"
+      <div className="flex items-start gap-2.5 border-t border-border pt-4">
+        <Checkbox
+          id="onboarding-share-analytics"
+          checked={shareAnalytics}
+          onCheckedChange={(checked) => onShareAnalytics(checked === true)}
+          className="mt-0.5"
+        />
+        <div className="min-w-0">
+          <label
+            htmlFor="onboarding-share-analytics"
+            className="cursor-pointer text-xs text-foreground"
+          >
+            Share anonymous stats and crash reports
+          </label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Helps us fix what breaks. Your chats never leave this {deviceNoun()}.{' '}
+            <button
+              type="button"
+              onClick={() => setSharingOpen(true)}
+              className="text-foreground underline underline-offset-2"
             >
-              Share anonymous stats and crash reports
-            </label>
-            <p className="mt-1 text-xs leading-5 text-neutral-500">
-              Helps us fix what breaks on your computer. Your chats never leave it.{' '}
-              <button
-                type="button"
-                onClick={() => setSharingOpen(true)}
-                className="text-neutral-300 underline underline-offset-2 hover:text-white"
-              >
-                What we share
-              </button>
-            </p>
-          </div>
+              What we share
+            </button>
+          </p>
         </div>
       </div>
+    </>
+  )
+  return (
+    <div className="flex h-full w-full flex-col">
+      <FeatureGuide isPro={false} onOpen={onOpen} picks={{ ids, footer, navFooter }} />
       <WhatWeShareDialog open={sharingOpen} onOpenChange={setSharingOpen} />
     </div>
   )
