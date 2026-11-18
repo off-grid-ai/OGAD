@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowSquareOutIcon,
   CaretRightIcon,
+  ChatCircleIcon,
   CheckIcon,
   LockSimpleIcon,
+  NotePencilIcon,
   PaperPlaneRightIcon,
   SparkleIcon
 } from '@phosphor-icons/react'
@@ -18,7 +20,11 @@ import {
   GUIDE_FIRST_LOOK,
   GUIDE_STARTERS,
   guideAnswerBlocks,
+  guideAnswerLength,
+  guideAnswerReveal,
   guideFlowAnswerById,
+  guideTypingMs,
+  type GuideAnswerBlock,
   guideTurnsToSend,
   guideWhereLabel
 } from '@offgrid/models'
@@ -155,11 +161,13 @@ function TopicAction({
 function TopicDetail({
   topic,
   isPro,
-  onOpen
+  onOpen,
+  onAsk
 }: Readonly<{
   topic: GuideTopic
   isPro: boolean
   onOpen: (view: ViewMode) => void
+  onAsk: (question: string) => void
 }>): React.ReactElement {
   return (
     <article className="og-guide-in grid max-w-5xl gap-5" aria-labelledby="guide-topic-title">
@@ -171,7 +179,17 @@ function TopicDetail({
           </h2>
           <p className="mt-1 text-sm text-neutral-300">{topic.tagline}</p>
         </div>
-        <TopicAction topic={topic} isPro={isPro} onOpen={onOpen} />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => onAsk(`Tell me more about ${topic.label}.`)}
+            data-testid="guide-topic-ask"
+          >
+            <ChatCircleIcon className="h-4 w-4" />
+            Ask more
+          </Button>
+          <TopicAction topic={topic} isPro={isPro} onOpen={onOpen} />
+        </div>
       </div>
       <MediaFrame topic={topic} height="h-[56vh]" />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
@@ -187,6 +205,43 @@ function TopicDetail({
       </div>
     </article>
   )
+}
+
+/**
+ * An answer types out once, when it arrives: text first, then its cards, in under a second
+ * (the pace is shared with the phone's guide). With reduced motion it shows whole.
+ */
+function TypedAnswer({
+  blocks,
+  onGrow,
+  children
+}: {
+  blocks: GuideAnswerBlock<GuideTopic>[]
+  onGrow: () => void
+  children: (blocks: GuideAnswerBlock<GuideTopic>[]) => ReactNode
+}): React.JSX.Element {
+  const total = guideAnswerLength(blocks)
+  const [still] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const [shown, setShown] = useState(still ? total : 0)
+  const grow = useRef(onGrow)
+  useEffect(() => {
+    grow.current = onGrow
+  }, [onGrow])
+  useEffect(() => {
+    if (still) return undefined
+    const start = performance.now()
+    const ms = guideTypingMs(total)
+    let frame = 0
+    const tick = (): void => {
+      const t = Math.min(1, (performance.now() - start) / ms)
+      setShown(Math.ceil(total * t))
+      grow.current()
+      if (t < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [total, still])
+  return <>{children(shown >= total ? blocks : guideAnswerReveal(blocks, shown))}</>
 }
 
 function AnswerCard({
@@ -244,12 +299,15 @@ function AskPane({
   topics,
   isPro,
   onShow,
-  onOpen
+  onOpen,
+  pending
 }: Readonly<{
   topics: GuideTopic[]
   isPro: boolean
   onShow: (id: string) => void
   onOpen: (view: ViewMode) => void
+  /** A feature's "Ask more": asked once, when it comes in. */
+  pending: { question: string; at: number } | null
 }>): React.ReactElement {
   const [turns, setTurns] = useState<Turn[]>([])
   const [draft, setDraft] = useState('')
@@ -316,10 +374,35 @@ function AskPane({
     toEnd()
   }
 
+  useEffect(() => {
+    if (pending) void ask(pending.question)
+    // Asked once per "Ask more"; `at` tells two asks about the same feature apart.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending?.at])
+
   return (
     <section aria-label="Ask about Off Grid AI" className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto pr-2">
         <div className="grid max-w-4xl gap-5 pb-4">
+          {turns.length > 0 ? (
+            <div className="sticky top-0 z-10 flex justify-end">
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label="New question"
+                title="New question"
+                disabled={waiting}
+                onClick={() => {
+                  setTurns([])
+                  setDraft('')
+                  setMissed(null)
+                }}
+                data-testid="guide-new"
+              >
+                <NotePencilIcon className="size-4" />
+              </Button>
+            </div>
+          ) : null}
           {turns.length === 0 ? (
             <div className="og-guide-in grid gap-5">
               <div>
@@ -361,46 +444,56 @@ function AskPane({
               </p>
             ) : (
               <div key={i} className="og-guide-in grid gap-4 text-sm text-neutral-200">
-                {guideAnswerBlocks(answerParts(turn.content, topics)).map((block, j) =>
-                  block.kind === 'text' ? (
-                    <div key={j} className="min-w-0">
-                      <ChatMarkdown content={block.text} />
-                    </div>
-                  ) : block.kind === 'picks' ? (
-                    <div
-                      key={j}
-                      className="grid w-full max-w-xl divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10"
-                    >
-                      {block.picks.map((pick) => (
-                        <button
-                          key={pick.id}
-                          type="button"
-                          disabled={waiting}
-                          onClick={() => void ask(pick.label, false, pick.id)}
-                          className="flex items-center gap-3 px-4 py-2.5 text-left text-neutral-200 transition-colors hover:bg-white/5 active:bg-white/10 disabled:opacity-50"
-                          data-testid={`guide-pick-${pick.id}`}
+                <TypedAnswer
+                  blocks={guideAnswerBlocks(answerParts(turn.content, topics))}
+                  onGrow={() => endRef.current?.scrollIntoView({ block: 'end' })}
+                >
+                  {(blocks) =>
+                    blocks.map((block, j) =>
+                      block.kind === 'text' ? (
+                        <div key={j} className="min-w-0">
+                          <ChatMarkdown content={block.text} />
+                        </div>
+                      ) : block.kind === 'picks' ? (
+                        <div
+                          key={j}
+                          className="grid w-full max-w-xl divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10"
                         >
-                          <span className="min-w-0 flex-1">{pick.label}</span>
-                          <CaretRightIcon className="size-4 shrink-0 text-neutral-500" aria-hidden />
-                        </button>
-                      ))}
-                    </div>
-                  ) : block.topics.length === 1 && block.topics[0] ? (
-                    <AnswerCard
-                      key={j}
-                      topic={block.topics[0]}
-                      isPro={isPro}
-                      onShow={onShow}
-                      onOpen={onOpen}
-                    />
-                  ) : (
-                    <div key={j} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                      {block.topics.map((t) => (
-                        <AnswerTile key={t.id} topic={t} onShow={onShow} />
-                      ))}
-                    </div>
-                  )
-                )}
+                          {block.picks.map((pick) => (
+                            <button
+                              key={pick.id}
+                              type="button"
+                              disabled={waiting}
+                              onClick={() => void ask(pick.label, false, pick.id)}
+                              className="flex items-center gap-3 px-4 py-2.5 text-left text-neutral-200 transition-colors hover:bg-white/5 active:bg-white/10 disabled:opacity-50"
+                              data-testid={`guide-pick-${pick.id}`}
+                            >
+                              <span className="min-w-0 flex-1">{pick.label}</span>
+                              <CaretRightIcon
+                                className="size-4 shrink-0 text-neutral-500"
+                                aria-hidden
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      ) : block.topics.length === 1 && block.topics[0] ? (
+                        <AnswerCard
+                          key={j}
+                          topic={block.topics[0]}
+                          isPro={isPro}
+                          onShow={onShow}
+                          onOpen={onOpen}
+                        />
+                      ) : (
+                        <div key={j} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          {block.topics.map((t) => (
+                            <AnswerTile key={t.id} topic={t} onShow={onShow} />
+                          ))}
+                        </div>
+                      )
+                    )
+                  }
+                </TypedAnswer>
               </div>
             )
           )}
@@ -510,6 +603,7 @@ export function FeatureGuide({
 }: Readonly<{ isPro: boolean; onOpen: (view: ViewMode) => void }>): React.ReactElement {
   const topics = useMemo(() => guideTopics(currentPlatform()), [])
   const [selectedId, setSelectedId] = useState(ASK)
+  const [pending, setPending] = useState<{ question: string; at: number } | null>(null)
   const selected = topics.find((t) => t.id === selectedId)
 
   return (
@@ -560,11 +654,25 @@ export function FeatureGuide({
         </nav>
         <div className="min-h-0 min-w-0">
           <div className={cn('h-full', selected && 'hidden')}>
-            <AskPane topics={topics} isPro={isPro} onShow={setSelectedId} onOpen={onOpen} />
+            <AskPane
+              topics={topics}
+              isPro={isPro}
+              onShow={setSelectedId}
+              onOpen={onOpen}
+              pending={pending}
+            />
           </div>
           {selected ? (
             <div key={selected.id} className="h-full overflow-y-auto pr-2">
-              <TopicDetail topic={selected} isPro={isPro} onOpen={onOpen} />
+              <TopicDetail
+                topic={selected}
+                isPro={isPro}
+                onOpen={onOpen}
+                onAsk={(question) => {
+                  setPending({ question, at: Date.now() })
+                  setSelectedId(ASK)
+                }}
+              />
             </div>
           ) : null}
         </div>
