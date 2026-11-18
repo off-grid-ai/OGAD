@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowSquareOutIcon,
   CaretRightIcon,
@@ -18,7 +18,11 @@ import {
   GUIDE_FIRST_LOOK,
   GUIDE_STARTERS,
   guideAnswerBlocks,
+  guideAnswerLength,
+  guideAnswerReveal,
   guideFlowAnswerById,
+  guideTypingMs,
+  type GuideAnswerBlock,
   guideTurnsToSend,
   guideWhereLabel
 } from '@offgrid/models'
@@ -187,6 +191,43 @@ function TopicDetail({
       </div>
     </article>
   )
+}
+
+/**
+ * An answer types out once, when it arrives: text first, then its cards, in under a second
+ * (the pace is shared with the phone's guide). With reduced motion it shows whole.
+ */
+function TypedAnswer({
+  blocks,
+  onGrow,
+  children
+}: {
+  blocks: GuideAnswerBlock<GuideTopic>[]
+  onGrow: () => void
+  children: (blocks: GuideAnswerBlock<GuideTopic>[]) => ReactNode
+}): React.JSX.Element {
+  const total = guideAnswerLength(blocks)
+  const [still] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const [shown, setShown] = useState(still ? total : 0)
+  const grow = useRef(onGrow)
+  useEffect(() => {
+    grow.current = onGrow
+  }, [onGrow])
+  useEffect(() => {
+    if (still) return undefined
+    const start = performance.now()
+    const ms = guideTypingMs(total)
+    let frame = 0
+    const tick = (): void => {
+      const t = Math.min(1, (performance.now() - start) / ms)
+      setShown(Math.ceil(total * t))
+      grow.current()
+      if (t < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [total, still])
+  return <>{children(shown >= total ? blocks : guideAnswerReveal(blocks, shown))}</>
 }
 
 function AnswerCard({
@@ -361,46 +402,56 @@ function AskPane({
               </p>
             ) : (
               <div key={i} className="og-guide-in grid gap-4 text-sm text-neutral-200">
-                {guideAnswerBlocks(answerParts(turn.content, topics)).map((block, j) =>
-                  block.kind === 'text' ? (
-                    <div key={j} className="min-w-0">
-                      <ChatMarkdown content={block.text} />
-                    </div>
-                  ) : block.kind === 'picks' ? (
-                    <div
-                      key={j}
-                      className="grid w-full max-w-xl divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10"
-                    >
-                      {block.picks.map((pick) => (
-                        <button
-                          key={pick.id}
-                          type="button"
-                          disabled={waiting}
-                          onClick={() => void ask(pick.label, false, pick.id)}
-                          className="flex items-center gap-3 px-4 py-2.5 text-left text-neutral-200 transition-colors hover:bg-white/5 active:bg-white/10 disabled:opacity-50"
-                          data-testid={`guide-pick-${pick.id}`}
+                <TypedAnswer
+                  blocks={guideAnswerBlocks(answerParts(turn.content, topics))}
+                  onGrow={() => endRef.current?.scrollIntoView({ block: 'end' })}
+                >
+                  {(blocks) =>
+                    blocks.map((block, j) =>
+                      block.kind === 'text' ? (
+                        <div key={j} className="min-w-0">
+                          <ChatMarkdown content={block.text} />
+                        </div>
+                      ) : block.kind === 'picks' ? (
+                        <div
+                          key={j}
+                          className="grid w-full max-w-xl divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10"
                         >
-                          <span className="min-w-0 flex-1">{pick.label}</span>
-                          <CaretRightIcon className="size-4 shrink-0 text-neutral-500" aria-hidden />
-                        </button>
-                      ))}
-                    </div>
-                  ) : block.topics.length === 1 && block.topics[0] ? (
-                    <AnswerCard
-                      key={j}
-                      topic={block.topics[0]}
-                      isPro={isPro}
-                      onShow={onShow}
-                      onOpen={onOpen}
-                    />
-                  ) : (
-                    <div key={j} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                      {block.topics.map((t) => (
-                        <AnswerTile key={t.id} topic={t} onShow={onShow} />
-                      ))}
-                    </div>
-                  )
-                )}
+                          {block.picks.map((pick) => (
+                            <button
+                              key={pick.id}
+                              type="button"
+                              disabled={waiting}
+                              onClick={() => void ask(pick.label, false, pick.id)}
+                              className="flex items-center gap-3 px-4 py-2.5 text-left text-neutral-200 transition-colors hover:bg-white/5 active:bg-white/10 disabled:opacity-50"
+                              data-testid={`guide-pick-${pick.id}`}
+                            >
+                              <span className="min-w-0 flex-1">{pick.label}</span>
+                              <CaretRightIcon
+                                className="size-4 shrink-0 text-neutral-500"
+                                aria-hidden
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      ) : block.topics.length === 1 && block.topics[0] ? (
+                        <AnswerCard
+                          key={j}
+                          topic={block.topics[0]}
+                          isPro={isPro}
+                          onShow={onShow}
+                          onOpen={onOpen}
+                        />
+                      ) : (
+                        <div key={j} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          {block.topics.map((t) => (
+                            <AnswerTile key={t.id} topic={t} onShow={onShow} />
+                          ))}
+                        </div>
+                      )
+                    )
+                  }
+                </TypedAnswer>
               </div>
             )
           )}
