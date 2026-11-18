@@ -38,11 +38,15 @@ const commonExcludes = ['e2e/**', 'node_modules/**', 'out/**']
 export default defineConfig({
   // `?asset` imports resolve to the file's path, as electron-vite does in the app.
   plugins: [assetPathPlugin()],
+  // Tests compile JSX against the same i18n runtime as the renderer build (electron.vite.config.ts).
+  esbuild: { jsx: 'automatic', jsxImportSource: '@offgrid/i18n' },
   // Renderer path aliases, mirrored 1:1 from tsconfig.web.json `paths`. Without these
   // a .tsx render test cannot import any renderer module (electron-vite provides them
   // in the app build, but vitest has no tsconfig-paths plugin), so the *.test.tsx glob
   // above is inert until they exist. Additive only — no gate/threshold/include change.
   resolve: {
+    // The i18n JSX runtime lives in the shared repo, which has no React: it must use this app's React.
+    dedupe: ['react'],
     alias: {
       '@renderer': resolve(__dirname, 'src/renderer/src'),
       '@offgrid/core': resolve(__dirname, 'src'),
