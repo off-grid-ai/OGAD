@@ -92,14 +92,12 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
     // Either answer counts as asked, so no prompt asks again soon.
     if (shareAnalytics) {
       // What was picked goes with the opt-in, once consent is on.
-      void analyticsBridge()
-        ?.optIn?.('setup')
-        .then(() =>
-          analyticsBridge()?.capture?.('onboarding_picks', {
-            groups: picks.groups.join(','),
-            features: picks.parts.join(',')
-          })
-        )
+      void Promise.resolve(analyticsBridge()?.optIn?.('setup')).then(() =>
+        analyticsBridge()?.capture?.('onboarding_picks', {
+          groups: picks.groups.join(','),
+          features: picks.parts.join(',')
+        })
+      )
     } else void analyticsBridge()?.dismissPrompt?.()
     onComplete()
   }
