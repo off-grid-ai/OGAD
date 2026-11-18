@@ -141,16 +141,20 @@ export function GroupsStep({
               data-testid={`onboarding-group-${g.id}`}
               onClick={() => onToggle(g.id)}
               className={cn(
-                'relative flex min-h-32 flex-col justify-end gap-1 rounded-xl border p-4 text-left backdrop-blur transition-colors duration-100',
+                'flex min-h-32 flex-col gap-1 rounded-xl border p-4 text-left backdrop-blur transition-colors duration-100',
                 on
                   ? 'border-emerald-400/70 bg-emerald-500/[0.07]'
                   : 'border-white/10 bg-white/[0.03] hover:border-white/20'
               )}
             >
-              <Icon className="absolute left-4 top-4 h-6 w-6 text-neutral-300" />
-              <span className="absolute right-4 top-4 flex items-center gap-2">
-                {groupIsPro(g.id) ? <ProTag /> : null}
-                {on ? <CheckCircleIcon weight="fill" className="h-4 w-4 text-emerald-400" /> : null}
+              <span className="mb-auto flex items-center justify-between pb-3">
+                <Icon className="h-6 w-6 text-neutral-300" />
+                <span className="flex items-center gap-2">
+                  {groupIsPro(g.id) ? <ProTag /> : null}
+                  {on ? (
+                    <CheckCircleIcon weight="fill" className="h-4 w-4 text-emerald-400" />
+                  ) : null}
+                </span>
               </span>
               <span className="text-[15px] text-white">{g.name}</span>
               <span className="text-xs text-neutral-400">{g.does}</span>
@@ -180,14 +184,6 @@ export function FeaturesStep({
           title="Which ones?"
           line="We only set up what you pick. Add more any time."
         />
-        {proPicked ? (
-          <div className="mt-8 grid gap-2" data-testid="onboarding-have-pro">
-            <LicenseActivation />
-            <p className="text-xs text-neutral-500">
-              Or pair a device that has Pro, from DevicesIcon, once you are set up.
-            </p>
-          </div>
-        ) : null}
       </div>
       <div className="grid content-start gap-6 md:grid-cols-2 xl:grid-cols-3">
         {groups.map((g) => (
@@ -244,6 +240,14 @@ export function FeaturesStep({
             </div>
           </section>
         ))}
+        {proPicked ? (
+          <div className="col-span-full grid max-w-md gap-2 pt-2" data-testid="onboarding-have-pro">
+            <LicenseActivation />
+            <p className="text-xs text-neutral-500">
+              Or pair a device that has Pro, from Devices, once you are set up.
+            </p>
+          </div>
+        ) : null}
       </div>
     </div>
   )
