@@ -61,6 +61,10 @@ export default defineConfig({
     // those browser boundaries in one renderer harness so Radix-backed components
     // exercise the real product tree without every suite redefining the platform.
     setupFiles: ['src/renderer/src/__tests__/browser-boundaries.setup.ts'],
+    // The session type is the host's, so a Wayland workstation sent capture through the portal
+    // path the fakes do not cover while CI (no session) did not. Tests that exercise Wayland set
+    // it themselves.
+    env: { XDG_SESSION_TYPE: 'x11', WAYLAND_DISPLAY: '' },
     // The ui/* primitives come from @offgrid/operator-ui; inline it so the suite's
     // motion/react stub reaches those components as it reaches local ones.
     server: { deps: { inline: ['@offgrid/operator-ui'] } },
