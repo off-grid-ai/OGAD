@@ -37,10 +37,13 @@ CONCEPTS = {
   'todos':     ('To-dos and people', 'feature', r'(todo|(^|[/-])crm|people|entity|briefing|identity|dossier)'),
   'agents':    ('Agents', 'feature', r'(computer-use|web-use|automation|operator|(^|[/-])agent|(^|[/-])use([/-]|$)|action-pipeline)'),
   'sync':      ('Devices and sync', 'feature', r'((^|[/-])sync|pair|mesh|transfer|discovery|companion)'),
-  'models':    ('Model library', 'infra', r'(model-(download|manager|browser|catalog|residency|picks)|download|catalog|hugging-?face|huggingface|active-model|engine-pack|device-picks|best-settings|fastest-settings|recommend|boost-promo)'),
+  'models':    ('Model library', 'infra', r'(model-(download|manager|browser|catalog|residency|picks)|download|catalog|hugging-?face|huggingface|active-model|engine-pack|device-picks|best-settings|fastest-settings|recommend|boost-promo|bundled-model|asset-pack|ai-pack|arriving-chat-model)'),
   'licensing': ('Pro licensing', 'infra', r'(licens|keygen|entitlement|fingerprint|paywall|purchase|revenuecat|checkout|pro-pricing|pro-detail|pro-unlock|get-pro)'),
-  'analytics': ('Analytics', 'infra', r'(analytics|session-tally|usage-snapshot)'),
+  'analytics': ('Analytics', 'infra', r'(analytics|session-tally|usage-snapshot|(^|[/-])utm([/-]|\.|$))'),
   'guide': ('What it does for you', 'infra', r'(feature-guide|guide-ask|guide-knowledge|guide-media|product-guide|(?<!mcp-)guide-screen|guide-topic|guide-picture|use-guide-action)'),
+  'share':     ('Share loop', 'infra', r'(share-?card|media-?share)'),
+  'rating':    ('Review prompt', 'infra', r'(share-?prompt|in-app-review|rating-(ask|prompt)|good-reply-run)'),
+  'language':  ('App language', 'infra', r'((^|[/-])i18n([/-]|$)|locale-store|app-language|language-screen)'),
   'onboarding': ('First run: what you want, which ones, how it works', 'infra', r'^(?!articles/).*((?<!mcp-)onboarding|auto-setup|packages/features/src)'),
 }
 
@@ -49,7 +52,9 @@ CONCEPTS = {
 # a feature runs on, unless it is narrowed here with the reason. The map used to list only where code already
 # was, so a product with none (the extension's first run) never got a step and nobody saw the gap.
 PRODUCTS = ['desktop', 'mobile', 'extension']
-NARROW = {'models': (['desktop', 'mobile'], 'the extension runs on the computer app\'s models')}
+NARROW = {'share': (['mobile'], 'the mark says "on my phone"; desktop and the extension have no share loop'),
+          'rating': (['mobile'], 'store review prompts exist only in the phone stores'),
+          'models': (['desktop', 'mobile'], 'the extension runs on the computer app\'s models')}
 
 def expected(k, kind, feats):
     if kind == 'feature' and k in feats:
