@@ -7,6 +7,13 @@
   "file": "screens/v/welcome-2.jpg",
   "versions": [
    {
+    "v": 0,
+    "label": "Before: on main",
+    "at": "2026-11-06T13:52:00Z",
+    "file": "screens/v/welcome-0.jpg",
+    "what": "Welcome on main: one dark slide, then four more steps."
+   },
+   {
     "v": 1,
     "label": "New screen",
     "at": "2026-11-18T12:40:00Z",
@@ -21,6 +28,13 @@
   "what": "Pick any of seven groups. Chat starts picked; picking a group picks its first feature.",
   "file": "screens/v/groups-3.jpg",
   "versions": [
+   {
+    "v": 0,
+    "label": "Before: on main",
+    "at": "2026-11-06T13:52:00Z",
+    "file": "screens/v/groups-0.jpg",
+    "what": "On main: \"Your devices work as one\" was its own step. Now sync is a pick under Private and connected."
+   },
    {
     "v": 1,
     "label": "First build",
@@ -53,6 +67,13 @@
   "what": "The features of each picked group, a column per group. A picked Pro feature brings the license key box.",
   "file": "screens/v/details-3.jpg",
   "versions": [
+   {
+    "v": 0,
+    "label": "Before: on main",
+    "at": "2026-11-06T13:52:00Z",
+    "file": "screens/v/details-0.jpg",
+    "what": "On main: \"What Pro adds\" was its own step. Now the Pro key sits under the feature columns."
+   },
    {
     "v": 1,
     "label": "First build",
@@ -136,6 +157,13 @@
   "file": "screens/v/how-integrations-2.jpg",
   "versions": [
    {
+    "v": 0,
+    "label": "Before: on main",
+    "at": "2026-11-06T13:52:00Z",
+    "file": "screens/v/how-integrations-0.jpg",
+    "what": "On main: \"Connect your work\" was its own step. Now connections show in How it works."
+   },
+   {
     "v": 1,
     "label": "New screen",
     "at": "2026-11-18T12:40:00Z",
@@ -150,6 +178,13 @@
   "what": "Set up my models hands off to model setup as today, with the picks saved. Step 5 makes it use them.",
   "file": "screens/v/handoff-3.jpg",
   "versions": [
+   {
+    "v": 0,
+    "label": "Before: on main",
+    "at": "2026-11-06T13:52:00Z",
+    "file": "screens/v/handoff-0.jpg",
+    "what": "On main: \"Choose what runs locally\" was its own step. Now where models run sits in How it works."
+   },
    {
     "v": 1,
     "label": "First build",
