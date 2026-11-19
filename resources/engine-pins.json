@@ -28,12 +28,12 @@
   },
   "sd": {
     "repo": "leejet/stable-diffusion.cpp",
-    "ref": "master-1104-5dcfa79",
-    "commit": "5dcfa79801213f23e27b3e83617350ebb8ea93aa",
+    "ref": "master-1106-532d2c1",
+    "commit": "532d2c15c430a785a712b2d94281f04e733008a4",
     "sha256": {
-      "win-cuda": "c7132d6f7e36dee6c39d3d51e8970470c615e5c9c8db498d6f73d5c14b4b1f5d",
-      "win-vulkan": "7cec077a90a97ccb4b8988b6e590a470bfe84d839f4c6eccf4d8d08fd2a10771",
-      "win-cpu": "b5297bea319d6247e95e9a6834c190047ab0a493a29539b41f217e9cc440025a"
+      "win-cuda": "b087219145a382cc1b1e826318289e1f672b9bb6965977734ef0deb85fe2d03a",
+      "win-vulkan": "3e66222c87ca27074e1fd8ce79706eef17a8aaf39949906aa1bee7e060f22ecc",
+      "win-cpu": "abef332cfca7861cc567910e79bedb70bfb2920bb4eedac97fcbb6db477f1596"
     }
   },
   "whisper": {
