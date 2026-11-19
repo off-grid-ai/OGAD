@@ -8,6 +8,7 @@
 // The editor (in the parent frame) sends { type: 'offgrid-i18n', locale, strings } as a person types; the
 // screen redraws with the new text. Standalone, ?lang= loads catalogs/<code>/{common,desktop}.json beside
 // this page.
+import './install-api'
 import '../assets/main.css'
 import '../assets/onboarding.css'
 import { StrictMode } from 'react'
@@ -20,10 +21,8 @@ import { applyUiAnimations } from '../ui-animations'
 import { initFocusModality } from '../lib/focus-modality'
 import { cspNonce, initShadowStyleNonce } from '../lib/shadow-style-nonce'
 import { replaceAppLocation } from '../lib/app-location'
-import { createDemoApi } from './demo-api'
 import { Preview } from './Preview'
 
-;(window as unknown as { api: unknown }).api = createDemoApi()
 applyTheme()
 applyUiAnimations()
 initShadowStyleNonce()
