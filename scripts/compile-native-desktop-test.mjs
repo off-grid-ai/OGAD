@@ -55,6 +55,17 @@ for (const file of sources) {
       return `import(${JSON.stringify(specifier + '/index.js')})`
     return match
   })
+  // JSON stays where the repo keeps it; the compiled tree holds only modules.
+  source = source.replace(
+    /(from\s+|import\(|require\()(['"])(\.[^'"]+\.json)\2/g,
+    (_m, lead, _q, specifier) => {
+      let relative = path
+        .relative(path.dirname(target), path.resolve(path.dirname(file), specifier))
+        .replaceAll('\\', '/')
+      if (!relative.startsWith('.')) relative = './' + relative
+      return lead + JSON.stringify(relative)
+    }
+  )
   source = source.replaceAll('import.meta.url', JSON.stringify(pathToFileURL(target).href))
   source = source.replace(
     '../resources/linux-desktop/meeting-recorder.py?raw',
