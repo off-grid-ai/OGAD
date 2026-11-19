@@ -8,13 +8,13 @@ import { join } from 'node:path'
 const source = readFileSync(join(__dirname, '..', 'Settings.tsx'), 'utf8')
 
 function cardTitles(): string[] {
-  return [...source.matchAll(/<SettingsCard\s+title="([^"]+)"/g)].map((m) => m[1])
+  return [...source.matchAll(/<SettingsCard\s+title="([^"]+)"/g)].flatMap((m) => (m[1] ? [m[1]] : []))
 }
 
 function sectionTitles(): Set<string> {
-  const map = source.match(/const SETTINGS_SECTION_TITLES[^{]*\{([\s\S]*?)\n\}/)
-  if (!map) throw new Error('SETTINGS_SECTION_TITLES not found in Settings.tsx')
-  return new Set([...map[1].matchAll(/:\s*'([^']+)'/g)].map((m) => m[1]))
+  const body = source.match(/const SETTINGS_SECTION_TITLES[^{]*\{([\s\S]*?)\n\}/)?.[1]
+  if (!body) throw new Error('SETTINGS_SECTION_TITLES not found in Settings.tsx')
+  return new Set([...body.matchAll(/:\s*'([^']+)'/g)].flatMap((m) => (m[1] ? [m[1]] : [])))
 }
 
 describe('Settings: every card opens', () => {
