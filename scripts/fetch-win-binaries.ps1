@@ -247,6 +247,16 @@ Get-ChildItem -Path $bin -Recurse -Filter '*.exe' -File |
   Select-Object -ExpandProperty DirectoryName -Unique |
   ForEach-Object { Copy-VCRuntime $_ }
 
+# onnxruntime-node's binding and onnxruntime.dll import the VC++ runtime too. Node loads an addon
+# with its own folder as the DLL search path, so the runtime must sit beside it: without it a clean
+# Windows install fails the load with error 126 (0.0.58 crashed at launch this way).
+$onnxBindings = @(
+  (Join-Path $PSScriptRoot '..\node_modules\onnxruntime-node\bin\napi-v6\win32\x64'),
+  (Join-Path $PSScriptRoot '..\node_modules\@huggingface\transformers\node_modules\onnxruntime-node\bin\napi-v6\win32\x64')
+) | Where-Object { Test-Path -LiteralPath $_ }
+if (-not $onnxBindings) { throw 'onnxruntime-node win32/x64 binding folder not found: run npm ci first' }
+$onnxBindings | ForEach-Object { Copy-VCRuntime ([System.IO.Path]::GetFullPath($_)) }
+
 Write-Host 'resources/bin now contains (win64):'
 Get-ChildItem -Path $bin -Recurse -Include *.exe |
   ForEach-Object { Write-Host "  $($_.FullName.Replace($bin, '').TrimStart('\'))" }
