@@ -560,6 +560,14 @@ jobs:
           for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper kev-runtime onnx-cuda; do
             test ! -e "dist/win-unpacked/resources/bin/$folder"
           done
+      - name: Verify every Windows binary finds its DLLs on a clean install
+        shell: bash
+        # A DLL a binary imports must sit beside it or be part of Windows (0.0.58 crashed at launch:
+        # onnxruntime-node's binding shipped without the VC++ runtime). The main process must also
+        # open without loading ONNX Runtime.
+        run: |
+          node scripts/verify-windows-dll-imports.mjs dist/win-unpacked
+          node scripts/verify-main-startup-imports.mjs out/main
       - name: Report Windows native payload sizes
         shell: bash
         run: du -sh resources/bin/* | sort -h | tail -20

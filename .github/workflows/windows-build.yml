@@ -158,6 +158,15 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: npx electron-builder --win --publish never
 
+      - name: Verify every Windows binary finds its DLLs on a clean install
+        shell: bash
+        # A DLL a binary imports must sit beside it or be part of Windows (0.0.58 crashed at launch:
+        # onnxruntime-node's binding shipped without the VC++ runtime). The main process must also
+        # open without loading ONNX Runtime.
+        run: |
+          node scripts/verify-windows-dll-imports.mjs dist/win-unpacked
+          node scripts/verify-main-startup-imports.mjs out/main
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
