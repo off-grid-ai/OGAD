@@ -19,12 +19,12 @@ ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
 import scan  # noqa: E402  (the change map)
 
-PLATFORMS = ['Mac', 'Windows', 'Linux', 'Android', 'iPhone', 'Chrome', 'Firefox']
+PLATFORMS = ['Mac', 'Windows', 'Linux', 'Android', 'iPhone', 'Chrome', 'Firefox', 'Web']
 REPO = {'shared': ('shared', 'Shared rules'), 'ui-library': ('ui-library', 'UI library'), 'desktop': ('OGAD', 'Desktop'),
         'desktop-pro': ('desktop-pro', 'Desktop Pro'), 'mobile': ('OGAM', 'Mobile'), 'mobile-pro': ('mobile-pro', 'Mobile Pro'),
-        'extension': ('browser-extension', 'Extension')}
+        'extension': ('browser-extension', 'Extension'), 'license-worker': ('license-worker', 'Checkout')}
 DIRS = {'shared': 'shared', 'desktop': 'desktop', 'desktop-pro': 'desktop/pro', 'mobile': 'mobile', 'mobile-pro': 'mobile/pro',
-        'extension': 'browser-extension'}
+        'extension': 'browser-extension', 'license-worker': 'license-worker'}
 RANK = {'GO': 0, 'INFO': 0, 'WATCH': 1, 'NO GO': 2}
 
 
@@ -227,7 +227,7 @@ def main(spec_path, out):
 
     repos = {x['dir']: x for x in rel.get('repos', [])}
     order = ['shared', 'ui-library', 'desktop', 'desktop-pro', 'mobile', 'mobile-pro', 'extension']
-    dirmap = {'shared': 'shared', 'ui-library': 'ui-library', 'desktop': 'desktop', 'desktop-pro': 'desktop/pro', 'mobile': 'mobile', 'mobile-pro': 'mobile/pro', 'extension': 'browser-extension'}
+    dirmap = {'shared': 'shared', 'ui-library': 'ui-library', 'desktop': 'desktop', 'desktop-pro': 'desktop/pro', 'mobile': 'mobile', 'mobile-pro': 'mobile/pro', 'extension': 'browser-extension', 'license-worker': 'license-worker'}
     cmap = []
     for s in order:
         x = repos.get(dirmap[s])
