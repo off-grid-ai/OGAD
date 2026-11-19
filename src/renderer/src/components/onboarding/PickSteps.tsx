@@ -3,6 +3,7 @@
  * lists, names and tiers come from @offgrid/features; this file only draws them for the desktop.
  */
 import type { JSX } from 'react'
+import { t } from '@offgrid/i18n'
 import {
   onboardingGroups,
   partsFor,
@@ -131,9 +132,9 @@ export function GroupsStep({
   return (
     <div className="my-auto grid w-full gap-8">
       <PageHeader
-        eyebrow="Off Grid AI · Setup"
+        eyebrow={t('Off Grid AI · Setup')}
         title="What do you want to do?"
-        description="Pick any. Next you choose the details."
+        description={t('Pick any. Next you choose the details.')}
       />
       <div
         role="group"
@@ -184,9 +185,9 @@ export function FeaturesStep({
   return (
     <div className="my-auto grid w-full gap-8">
       <PageHeader
-        eyebrow="The details"
+        eyebrow={t('The details')}
         title="Which ones?"
-        description="We only set up what you pick. Add more any time."
+        description={t('We only set up what you pick. Add more any time.')}
       />
       <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] items-start gap-x-4 gap-y-6">
         {groups.map((g) => (

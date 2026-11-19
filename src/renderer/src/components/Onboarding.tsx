@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type JSX } from 'react'
+import { t } from '@offgrid/i18n'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import { TextMorph } from '@offgrid/operator-ui/operator/motion/text-morph'
 import type { OnboardingGroupId } from '@offgrid/features'
@@ -27,12 +28,10 @@ interface OnboardingProps {
   onComplete: () => void
 }
 
-const steps = [
-  { id: 'welcome', label: 'Welcome' },
-  { id: 'groups', label: 'What you want' },
-  { id: 'features', label: 'The details' },
-  { id: 'guide', label: 'How it works' }
-] as const
+const steps = [{ id: 'welcome' }, { id: 'groups' }, { id: 'features' }, { id: 'guide' }] as const
+// Read when shown, so the label is in the app language (text in code reaches a catalog through t()).
+const stepLabel = (id: (typeof steps)[number]['id']): string =>
+  ({ welcome: t('Welcome'), groups: t('What you want'), features: t('The details'), guide: t('How it works') })[id]
 type StepId = (typeof steps)[number]['id']
 
 const ONBOARDING_STEP_KEY = 'onboarding_step'
@@ -225,7 +224,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
             aria-valuemin={1}
             aria-valuemax={steps.length}
             aria-valuenow={currentStep + 1}
-            aria-valuetext={`Step ${currentStep + 1} of ${steps.length}: ${steps[currentStep]!.label}`}
+            aria-valuetext={`Step ${currentStep + 1} of ${steps.length}: ${stepLabel(steps[currentStep]!.id)}`}
             className="flex flex-col items-center gap-2"
           >
             <div className="flex items-center gap-1.5">
@@ -261,7 +260,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                   transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
                   className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground"
                 >
-                  {steps[currentStep]!.label}
+                  {stepLabel(steps[currentStep]!.id)}
                 </motion.span>
               </AnimatePresence>
             </span>
