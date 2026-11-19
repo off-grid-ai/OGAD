@@ -134,10 +134,10 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
 
   const nextLabel =
     stepId === 'features'
-      ? 'Show me how it works'
+      ? t('Show me how it works')
       : stepId === 'guide'
-        ? 'Set up my models'
-        : 'Continue'
+        ? t('Set up my models')
+        : t('Continue')
   const nothingPicked =
     (stepId === 'groups' && picks.groups.length === 0) ||
     (stepId === 'features' && picks.parts.length === 0)
