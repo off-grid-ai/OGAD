@@ -256,6 +256,26 @@ async function createWindow(): Promise<void> {
   // Own the complete page-zoom shortcut set. Chromium handled Cmd+= here, but
   // not its matching Cmd+-, and its zoom level was lost when the page reloaded.
   mainWindow.webContents.on('before-input-event', (event, input) => {
+    // Back and Forward off macOS: the View menu's Ctrl+[ accelerator does not reliably fire on Linux
+    // while the menu bar is hidden, so catch the keys here. Super+[ is the Mac habit (Cmd sits where
+    // Super is; Toshy turns it into Ctrl+[), and Alt+Left/Right is the Linux and Windows standard.
+    if (process.platform !== 'darwin' && input.type === 'keyDown' && !input.shift) {
+      const bracketModifier = (input.control || input.meta) && !input.alt
+      const arrowModifier = input.alt && !input.control && !input.meta
+      const direction =
+        (bracketModifier && input.code === 'BracketLeft') || (arrowModifier && input.key === 'ArrowLeft')
+          ? 'back'
+          : (bracketModifier && input.code === 'BracketRight') ||
+              (arrowModifier && input.key === 'ArrowRight')
+            ? 'forward'
+            : null
+      if (direction) {
+        event.preventDefault()
+        mainWindow.webContents.send('navigate:history', direction)
+        return
+      }
+    }
+
     const commandModifier =
       process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta
     if (input.type !== 'keyDown' || !commandModifier || input.alt) return

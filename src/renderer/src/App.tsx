@@ -1033,8 +1033,8 @@ function AppContent(): React.JSX.Element {
     [navigateTo]
   )
 
-  // Back and Forward (Cmd+[ / Cmd+], Ctrl on Windows and Linux) come from the app menu, so they
-  // work wherever focus is, even in a text field or a web view.
+  // Back and Forward (Cmd+[ / Cmd+]; on Windows and Linux also Ctrl or Super+[ and Alt+Left/Right)
+  // come from the main process, so they work wherever focus is, even in a text field or a web view.
   useEffect(
     () =>
       window.api.onHistoryNavigate((direction) => {
