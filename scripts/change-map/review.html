@@ -452,7 +452,7 @@ let notes = [];        // every note, all screens
 let current = 0;       // index into shown
 let draft = null;      // {x, y, on, v} in 0..1 of the shot
 let lit = null;        // id of the highlighted note
-let view = "after";   // "before", "after" or "both"
+let view = "both";    // "before", "after" or "both"; Side by side by default (Mac, 2026-11-19)
 // The phone a shot comes from. A version may carry an Android shot beside its main one
 // ({android, androidClip}); with none, Android shows the main shot and says so.
 let platform = "ios";
@@ -1079,7 +1079,7 @@ $("compose").addEventListener("submit", async (e) => {
 $("cancel").onclick = () => { draft = null; renderPins(); renderCompose(); };
 function setView(v) {
   view = v; draft = null; lit = null;
-  try { localStorage.setItem("goc-review-view", v); } catch (_) {}
+  try { localStorage.setItem("goc-review-view-2", v); } catch (_) {}
   renderStage(); renderThread(); renderCompose();
 }
 $("view-before").onclick = () => setView("before");
@@ -1395,7 +1395,7 @@ async function boot() {
     $("plat-ios").setAttribute("aria-pressed", String(platform === "ios"));
     $("plat-android").setAttribute("aria-pressed", String(platform === "android"));
   } else platform = "ios";
-  try { const v = localStorage.getItem("goc-review-view"); view = v === "before" || v === "both" ? v : "after"; } catch (_) {}
+  try { const v = localStorage.getItem("goc-review-view-2"); view = v === "before" || v === "after" ? v : "both"; } catch (_) {}
   try { const v = localStorage.getItem("review-sort"); if (["needs", "newest", "journey", "open"].includes(v)) sortBy = v; } catch (_) {}
   try { if (localStorage.getItem("review-platform") === "android") platform = "android"; } catch (_) {}
   $("sort").value = sortBy;
