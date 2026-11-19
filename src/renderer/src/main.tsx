@@ -4,6 +4,7 @@ import { applyTheme, getThemeMode, onThemeModeChanged } from './theme'
 import { applyUiAnimations, uiAnimationsOn, UI_ANIMATIONS_CHANGED } from './ui-animations'
 import { initFocusModality } from './lib/focus-modality'
 import { initScrollActivity } from './lib/scroll-activity'
+import { applyAppLanguage } from './lib/app-language'
 import { cspNonce, initShadowStyleNonce } from './lib/shadow-style-nonce'
 
 // Apply the saved/system theme (dark default) before first paint.
@@ -26,6 +27,7 @@ import { createRoot } from 'react-dom/client'
 import { AliveProvider, LivingField } from '@offgrid/operator-ui/operator/alive'
 import App from './App'
 import { TooltipProvider } from './components/ui/tooltip'
+import { AppLanguageRoot } from './components/AppLanguageRoot'
 import { AIRequestLogs } from './components/AIRequestLogs'
 
 // The quick-paste popup is a Pro feature; its component lives in the pro package.
@@ -78,6 +80,9 @@ if (!isClipPopup && !isDictation && !isCuSupervisor && !isGodTwin) {
     window.addEventListener(UI_ANIMATIONS_CHANGED, reportAppearance)
   }
 }
+// The app language's catalog is on before the first frame, so no screen draws in English first.
+await applyAppLanguage()
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {/* popLayout exits pin themselves with a <style>; the CSP admits it only with the nonce. */}
@@ -104,7 +109,9 @@ createRoot(document.getElementById('root')!).render(
               overlays above stay transparent. */}
               <LivingField />
               <TooltipProvider delayDuration={300}>
-                <App />
+                <AppLanguageRoot>
+                  <App />
+                </AppLanguageRoot>
               </TooltipProvider>
             </>
           )}
