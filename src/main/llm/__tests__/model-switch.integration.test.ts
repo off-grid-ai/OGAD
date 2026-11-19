@@ -15,6 +15,9 @@ import {
   type FakeLlamaEngine
 } from '../../__tests__/harness/fake-llama-engine'
 
+// Spawning the engine process takes about a second on its own, more on a busy machine.
+const LAUNCH = { timeout: 10_000 }
+
 const PROFILE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-model-switch-'))
 const previousDataDir = process.env.OFFGRID_DATA_DIR
 const previousBinDir = process.env.OFFGRID_BIN_DIR
@@ -68,7 +71,7 @@ describe('model switch during startup', () => {
     await startService(['llama'])
     engine.hold()
     const oldLoad = service.init().catch(() => {})
-    await vi.waitFor(() => expect(engine.launches()).toHaveLength(1))
+    await vi.waitFor(() => expect(engine.launches()).toHaveLength(1), LAUNCH)
     const first = engine.launches()[0]!.pid
 
     service.stop()
@@ -87,7 +90,7 @@ describe('model switch during startup', () => {
     await startService(['llama', 'llama-cpu'])
     engine.hold()
     const load = service.init().catch(() => {})
-    await vi.waitFor(() => expect(engine.launches()).toHaveLength(1))
+    await vi.waitFor(() => expect(engine.launches()).toHaveLength(1), LAUNCH)
     service.stop()
     await load
 
