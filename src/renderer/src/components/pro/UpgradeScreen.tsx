@@ -14,6 +14,7 @@ import { AnimatedGroup } from '@offgrid/operator-ui/operator/motion/animated-gro
 import { Button } from '../ui/button'
 import { PRO_PAY_URL, PRO_FEATURES, featureSupportsPlatform, type ProFeature } from './proCatalog'
 import { OFF_GRID_MOBILE_URL, OFF_GRID_WEBSITE_URL, openExternal } from '../../constants/links'
+import { withUtm } from '@offgrid/core/shared/utm'
 import { deviceNoun, currentPlatform } from '@renderer/lib/device'
 import { projectPersonalMeshActivationFailure } from '@offgrid/sync'
 
@@ -210,7 +211,7 @@ export function UpgradeScreen({
               </p>
               <div className="border-t border-neutral-800" />
               <button
-                onClick={() => openExternal(OFF_GRID_WEBSITE_URL)}
+                onClick={() => openExternal(withUtm(OFF_GRID_WEBSITE_URL, 'upgrade-website'))}
                 className="group flex items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-900/40 px-3 py-2.5 text-left transition-colors hover:border-green-500/30"
               >
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800 transition-colors group-hover:border-green-500/30">
@@ -256,7 +257,7 @@ export function UpgradeScreen({
                     className="w-full"
                     onClick={() => {
                       flow.step('pro_upgrade', 'paywall_viewed')
-                      open(PRO_PAY_URL)
+                      open(withUtm(PRO_PAY_URL, 'upgrade-screen'))
                     }}
                   >
                     Get Pro <ArrowSquareOut weight="bold" className="h-4 w-4" />
@@ -281,7 +282,7 @@ export function UpgradeScreen({
               "Get Off Grid AI Desktop" row on its Pro tab. */}
           <div className="border-t border-neutral-800" />
           <button
-            onClick={() => openExternal(OFF_GRID_MOBILE_URL)}
+            onClick={() => openExternal(withUtm(OFF_GRID_MOBILE_URL, 'upgrade-mobile'))}
             className="group flex items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-900/40 px-3 py-2.5 text-left transition-colors hover:border-green-500/30"
           >
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800 transition-colors group-hover:border-green-500/30">

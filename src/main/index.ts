@@ -113,6 +113,7 @@ import {
 import { registerCoreAnalyticsSources } from './analytics-sources'
 import { nativeSteps } from './native-step-guard'
 import { startLocalCrashEvidence } from './bootstrap/crash-evidence'
+import { withUtm } from '../shared/utm'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
@@ -573,7 +574,7 @@ app.whenReady().then(async () => {
       applicationName: PRODUCT_NAME,
       applicationVersion: app.getVersion(),
       copyright: 'Off Grid AI — private, on-device AI',
-      website: 'https://getoffgridai.co'
+      website: withUtm('https://getoffgridai.co', 'about-panel')
     })
   } catch {
     /* not supported on this platform */
