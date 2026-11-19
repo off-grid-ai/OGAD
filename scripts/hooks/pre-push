@@ -94,6 +94,10 @@ if [ -n "$CHANGED_CODE" ]; then
   PROJECT_ELECTRON=$($PROJECT_NODE -p 'require("electron")')
   echo "[pre-push] testing with Electron's Node runtime (native dependencies stay in place)"
   ./scripts/probe-electron-sqlite.sh '[pre-push]'
+  if [ "$(uname -s)" = "Linux" ]; then
+    # Electron's Node runtime leaves the system GObject unset, so sharp decodes crash.
+    export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--require $(pwd)/scripts/electron-node-glib-init.cjs"
+  fi
   printf '%s\n' "$CHANGED_CODE" | tr '\n' '\0' | \
     xargs -0 env PATH="$PROJECT_PATH" ELECTRON_RUN_AS_NODE=1 "$PROJECT_ELECTRON" ./node_modules/vitest/vitest.mjs \
       related --run --project product-integration --passWithNoTests --bail=1
