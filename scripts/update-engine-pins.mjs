@@ -248,6 +248,23 @@ for (const [engine, update] of Object.entries(updates)) {
 if (changed.length && !values['dry-run']) {
   fs.writeFileSync(PINS_FILE, `${JSON.stringify(pins, null, 2)}\n`)
 }
+/** Desktop's llama.cpp build beside the one mobile ships in @ogai/llama.rn, so the two apps
+ *  cannot drift apart unnoticed. A gap over 50 builds is flagged. */
+async function llamaDriftLine() {
+  const desktop = Number(pins.llama.ref.slice(1))
+  try {
+    const { version } = await json('https://registry.npmjs.org/@ogai%2Fllama.rn/latest')
+    const mobile = Number(/-b(\d+)/.exec(version)?.[1])
+    if (!mobile)
+      return `llama.cpp: desktop \`${pins.llama.ref}\`, @ogai/llama.rn \`${version}\` (no build number)`
+    const gap = Math.abs(desktop - mobile)
+    const flag = gap > 50 ? ' **Over 50 builds apart: update the lagging app.**' : ''
+    return `llama.cpp: desktop \`${pins.llama.ref}\`, @ogai/llama.rn \`${version}\` (${gap} builds apart).${flag}`
+  } catch (error) {
+    return `llama.cpp: desktop \`${pins.llama.ref}\`, @ogai/llama.rn unknown (${error.message})`
+  }
+}
+
 if (values.summary) {
   const body = [
     changed.length
@@ -255,7 +272,9 @@ if (values.summary) {
       : 'Every engine is on its newest release.',
     ...(skipped.length
       ? ['', '**Left on the current pin:**', ...skipped.map((s) => `- ${s.engine}: ${s.reason}`)]
-      : [])
+      : []),
+    '',
+    await llamaDriftLine()
   ].join('\n')
   fs.writeFileSync(values.summary, `${body}\n`)
 }
