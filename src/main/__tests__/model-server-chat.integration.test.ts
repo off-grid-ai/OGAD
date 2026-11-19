@@ -99,7 +99,7 @@ function fixtureDownload(url: string): Response {
     })
   }
   const bytes = fixtureBytes(new URL(url).pathname)
-  return new Response(bytes, {
+  return new Response(new Uint8Array(bytes), {
     status: 200,
     headers: { 'content-length': String(bytes.length) }
   })
