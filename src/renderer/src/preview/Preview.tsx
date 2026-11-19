@@ -36,11 +36,19 @@ export function Preview(): React.JSX.Element {
     const lang = params.get('lang')
     if (lang) void loadCatalog(lang).then((strings) => apply(lang, strings))
     const onMessage = (event: MessageEvent): void => {
-      if (event.source === window.parent && isCatalogMessage(event.data))
+      // The editor serves this preview from its own address, so only that origin may send a catalog.
+      if (
+        event.origin === window.location.origin &&
+        event.source === window.parent &&
+        isCatalogMessage(event.data)
+      )
         apply(event.data.locale, event.data.strings)
     }
     window.addEventListener('message', onMessage)
-    window.parent.postMessage({ type: 'offgrid-i18n:ready', app: 'desktop' }, '*')
+    window.parent.postMessage(
+      { type: 'offgrid-i18n:ready', app: 'desktop' },
+      window.location.origin
+    )
     return () => window.removeEventListener('message', onMessage)
   }, [])
   return (

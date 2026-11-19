@@ -33,7 +33,10 @@ export function createDemoApi(overrides: Record<string, unknown> = {}): Record<s
       localNetwork: true,
       allGranted: true
     }),
-    checkModelStatus: async () => ({ downloaded: true, modelsDir: '/tmp/models' }),
+    checkModelStatus: async () => ({
+      downloaded: true,
+      modelsDir: '/Users/you/Library/Application Support/Off Grid AI/models'
+    }),
     chatHealth: async () => ({ id: 'chat', label: 'Chat model', status: 'ready' }),
     systemHealth: async () => ({ ramGb: 16, components: [{ id: 'chat', status: 'ready' }] }),
     getStagedUpdateVersion: async () => null,
