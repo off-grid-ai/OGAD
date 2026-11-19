@@ -1,12 +1,6 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  AutoModelForSequenceClassification,
-  AutoTokenizer,
-  env,
-  type PreTrainedModel,
-  type PreTrainedTokenizer
-} from '@huggingface/transformers'
+import type { PreTrainedModel, PreTrainedTokenizer } from '@huggingface/transformers'
 import { dataDir, modelsDir } from '../runtime-env'
 
 /**
@@ -36,13 +30,18 @@ export function webRankerInstalled(): boolean {
   return rankerRoot() !== null
 }
 
-function load(): Promise<{ tokenizer: PreTrainedTokenizer; model: PreTrainedModel }> {
-  if (!loading) {
-    // localModelPath is shared with the embeddings: point it at the ranker only while it loads.
-    const previous = env.localModelPath
-    env.localModelPath = rankerRoot() ?? modelsDir()
-    const options = { local_files_only: true }
-    loading = Promise.all([
+async function loadRanker(): Promise<{ tokenizer: PreTrainedTokenizer; model: PreTrainedModel }> {
+  // Loaded on first use: transformers.js opens ONNX Runtime's native addon as it is imported, and
+  // this module sits on the app's startup path, so a static import put ONNX on every app launch.
+  const { AutoModelForSequenceClassification, AutoTokenizer, env } = await import(
+    '@huggingface/transformers'
+  )
+  // localModelPath is shared with the embeddings: point it at the ranker only while it loads.
+  const previous = env.localModelPath
+  env.localModelPath = rankerRoot() ?? modelsDir()
+  const options = { local_files_only: true }
+  try {
+    const [tokenizer, model] = await Promise.all([
       AutoTokenizer.from_pretrained(WEB_RANKER_ID, options),
       AutoModelForSequenceClassification.from_pretrained(WEB_RANKER_ID, {
         ...options,
@@ -50,10 +49,15 @@ function load(): Promise<{ tokenizer: PreTrainedTokenizer; model: PreTrainedMode
         dtype: 'fp32'
       })
     ])
-      .then(([tokenizer, model]) => ({ tokenizer, model }))
-      .finally(() => {
-        env.localModelPath = previous
-      })
+    return { tokenizer, model }
+  } finally {
+    env.localModelPath = previous
+  }
+}
+
+function load(): Promise<{ tokenizer: PreTrainedTokenizer; model: PreTrainedModel }> {
+  if (!loading) {
+    loading = loadRanker()
     loading.catch(() => {
       loading = null
     })
