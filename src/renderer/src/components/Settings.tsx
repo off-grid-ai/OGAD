@@ -20,6 +20,7 @@ import { PRO_SETTINGS_SLOTS } from './pro/proSettingsCatalog'
 import { SettingsCard, ProPlaceholder, SettingsCardsGroup } from './SettingsCard'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
 import { UiSettingsSection } from './UiSettingsSection'
+import { LanguageSettingsSection } from './LanguageSettingsSection'
 import { currentPlatform } from '@renderer/lib/device'
 import { getProFeature, proComingSoonHere, featureSupportsPlatform } from './pro/proCatalog'
 import { SoftwareUpdateSection } from './SoftwareUpdateSection'
@@ -323,6 +324,14 @@ export function Settings({
               delay={0.44}
             >
               <BackupRestoreSection />
+            </SettingsCard>
+
+            <SettingsCard
+              title="Language"
+              summary="The language Off Grid AI shows. It follows your computer unless you pick one."
+              delay={0.446}
+            >
+              <LanguageSettingsSection />
             </SettingsCard>
 
             <SettingsCard
