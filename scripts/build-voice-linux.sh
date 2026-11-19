@@ -9,9 +9,9 @@ PINS="$(cd "$(dirname "$0")/.." && pwd)/resources/engine-pins.json"
 WHISPER_REF="$(node -p "require('$PINS').whisper.ref")"
 WHISPER_COMMIT="$(node -p "require('$PINS').whisper.commit")"
 CUDA_BUILD_IMAGE=nvidia/cuda:12.8.1-devel-ubuntu24.04@sha256:4b9ed5fa8361736996499f64ecebf25d4ec37ff56e4d11323ccde10aa36e0c43
-FFMPEG_ARCHIVE=ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-9.0.tar.xz
-FFMPEG_SHA256=b70078970e033c7e728a0c42d83a39d57f28b471a60866a2c4b0a2f598aec666
-FFMPEG_DIR=ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-9.0
+FFMPEG_ARCHIVE="$(node -p "require('$PINS').ffmpeg.archives['linux-lgpl'].name")"
+FFMPEG_SHA256="$(node -p "require('$PINS').ffmpeg.archives['linux-lgpl'].sha256")"
+FFMPEG_DIR="${FFMPEG_ARCHIVE%.tar.xz}"
 
 if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
   echo '[build-voice-linux] Linux x64 is required' >&2

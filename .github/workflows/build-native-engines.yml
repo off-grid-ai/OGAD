@@ -3,7 +3,8 @@ name: Build native engines
 # Builds the engine archives that macOS and Linux releases unpack, from the versions pinned in
 # resources/engine-pins.json, and smoke-tests each engine on its own platform:
 #   mac-native     llama.cpp, Prism, stable-diffusion.cpp and whisper.cpp from source (universal,
-#                  macOS 13+), plus the Kev runtime carried over from the current archive
+#                  macOS 13+), plus the Kev runtime carried over from the current archive (rebuilt
+#                  when the MLX pin moved)
 #   linux-native   upstream llama.cpp and Prism (Vulkan and CPU), stable-diffusion.cpp (Vulkan) from source,
 #                  plus whisper, FFmpeg, executorch-speech and licences carried over from the
 #                  current archive (or from a new whisper archive when whisper moved)
@@ -320,7 +321,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/base"
           tar -xzf "$RUNNER_TEMP/base.tar.gz" -C "$RUNNER_TEMP/base"
           rm -rf resources/bin/kev-runtime
-          mv "$RUNNER_TEMP/base/kev-runtime" resources/bin/kev-runtime
+          cp -R "$RUNNER_TEMP/base/kev-runtime" resources/bin/kev-runtime
+      - name: Rebuild the Kev runtime when the MLX pin moved
+        id: mlx
+        continue-on-error: true
+        run: |
+          want=$(node -p "require('./resources/engine-pins.json').mlx.version")
+          have=$(resources/bin/kev-runtime/python/bin/python3 -c "import importlib.metadata as m; print(m.version('mlx'))" || true)
+          echo "Kev runtime MLX $have, pin $want"
+          [ "$have" = "$want" ] || bash scripts/build-kev-runtime.sh
       # The same compiler cache as linux-whisper, for the four engines this job compiles.
       - name: Locate the compiler cache
         run: |
@@ -370,6 +379,7 @@ jobs:
           PRISM: ${{ steps.prism.outcome }}
           SD: ${{ steps.sd.outcome }}
           WHISPER: ${{ steps.whisper.outcome }}
+          MLX: ${{ steps.mlx.outcome }}
         run: |
           held=""
           restore() {
@@ -381,6 +391,7 @@ jobs:
           [ "$PRISM" = success ] || restore prism llama-prism
           [ "$SD" = success ] || restore sd sd
           [ "$WHISPER" = success ] || restore whisper whisper
+          [ "$MLX" = success ] || restore mlx kev-runtime
           echo "held=$(echo $held)" >> "$GITHUB_OUTPUT"
       - name: Save the compiler cache
         if: ${{ !cancelled() && steps.ccache.outputs.cache-hit != 'true' }}

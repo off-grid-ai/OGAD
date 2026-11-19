@@ -226,13 +226,14 @@ try {
 # --- ffmpeg (GPL, win64) — single ffmpeg.exe flat in resources/bin -----------
 Write-Host '== ffmpeg =='
 try {
-  # Pinned FFmpeg 9.0.2 build from BtbN, mirrored on our release because BtbN prunes old autobuilds.
+  # Pinned BtbN FFmpeg build (engine-pins.json ffmpeg), mirrored on our release because BtbN prunes old autobuilds.
+  $ffmpegPin = $Pins.ffmpeg.archives.'win-gpl'
   $zip = Join-Path $tmp 'ffmpeg.zip'
   Invoke-WebRequest -Headers @{ 'User-Agent' = 'offgrid-fetch-win' } `
-    -Uri 'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ffmpeg-n9.0.2-28-g669f5ab083-win64-gpl-9.0.zip' `
+    -Uri "https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/$($ffmpegPin.name)" `
     -OutFile $zip
   $ffmpegSha = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
-  if ($ffmpegSha -ne '1bb62cfd4bdc12a63a6a1151458ea5ae7001fd055202afc5463517028882a631') {
+  if ($ffmpegSha -ne $ffmpegPin.sha256) {
     throw "ffmpeg archive SHA256 mismatch: $ffmpegSha"
   }
   $out = Join-Path $tmp 'ffmpeg'

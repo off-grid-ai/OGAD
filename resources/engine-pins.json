@@ -55,6 +55,37 @@
       "win-x64": "dc703575a68594435f53dec93df775ff4913af851a196c0537163f21d8d2364e"
     }
   },
+  "ffmpeg": {
+    "repo": "FFmpeg/FFmpeg",
+    "ref": "n9.0.2",
+    "opusRef": "v1.6.1",
+    "build": "n9.0.2-28-g669f5ab083",
+    "archives": {
+      "linux-lgpl": {
+        "name": "ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-9.0.tar.xz",
+        "sha256": "b70078970e033c7e728a0c42d83a39d57f28b471a60866a2c4b0a2f598aec666"
+      },
+      "win-gpl": {
+        "name": "ffmpeg-n9.0.2-28-g669f5ab083-win64-gpl-9.0.zip",
+        "sha256": "1bb62cfd4bdc12a63a6a1151458ea5ae7001fd055202afc5463517028882a631"
+      }
+    }
+  },
+  "mlx": {
+    "version": "0.32.4",
+    "wheels": {
+      "mlx": {
+        "name": "mlx-0.32.4-cp312-cp312-macosx_14_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/69/b0/e726ce51e1b445e4ed08c2d0e036a01c7532f4d1a856328da546a6f883bd/mlx-0.32.4-cp312-cp312-macosx_14_0_arm64.whl",
+        "sha256": "ff1d7be54758ea3a875b8fe54eff13bed17ad9566505e301f5d7851bf869680f"
+      },
+      "mlx-metal": {
+        "name": "mlx_metal-0.32.4-py3-none-macosx_14_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/77/24/7e5b7ed5d28abacab4577c7a8dd1fca6e9058504f5f95ae4333c09420e2e/mlx_metal-0.32.4-py3-none-macosx_14_0_arm64.whl",
+        "sha256": "8019b2db622599267d66cc168b2f0dbf5af929790a6c3b3913e00eabc42a7947"
+      }
+    }
+  },
   "nvidia": {
     "linux": {
       "nvidia-cuda-runtime": "13.5.37",
