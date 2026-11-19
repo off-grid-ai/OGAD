@@ -76,7 +76,7 @@ vi.mock('electron', () => ({
     on: (channel: string, listener: (event: IpcEvent, ...args: unknown[]) => unknown) =>
       listeners.set(channel, listener)
   },
-  BrowserWindow: { fromWebContents: () => null },
+  BrowserWindow: { fromWebContents: () => null, getAllWindows: () => [] },
   clipboard: { readText: () => '', writeText: () => undefined },
   systemPreferences: {
     isTrustedAccessibilityClient: () => true,
