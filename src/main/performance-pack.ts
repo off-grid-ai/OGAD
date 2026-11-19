@@ -299,10 +299,15 @@ export function performancePackStatus(): PerformancePackStatus {
   }
   const target = newInstallTarget(asset)
   const free = freeBytes(existingAncestor(target.parent))
+  // After a restart, a part already on disk shows as a paused download, not a fresh one.
+  const onDisk =
+    phase === null && fs.existsSync(target.archive)
+      ? Math.min(fs.statSync(target.archive).size, asset.bytes)
+      : 0
   return {
-    phase: phase ?? 'available',
+    phase: phase ?? (onDisk > 0 ? 'paused' : 'available'),
     bytes: asset.bytes,
-    downloadedBytes,
+    downloadedBytes: phase === null ? onDisk : downloadedBytes,
     version: asset.version,
     needBytes: neededBytes(asset, target.archive),
     ...(free === null ? {} : { freeBytes: free }),
@@ -354,13 +359,94 @@ async function readWithStall<T>(read: Promise<T>): Promise<T> {
   }
 }
 
-/** Download the rest of the archive. A complete archive is left as it is. */
+/** Times a resume is asked again when the server sends the whole file instead of the rest. */
+const RANGE_RETRIES = 3
+/** Dropped or stalled connections resumed in a row before the user is asked to resume. */
+const RESUME_RETRIES = 5
+
+/** Write one response body to the archive, dropping the first `skip` bytes (already on disk). */
+async function receive(
+  asset: PerformancePackAsset,
+  archive: string,
+  response: Response,
+  from: { append: boolean; skip: number },
+  signal: AbortSignal
+): Promise<void> {
+  const stream = fs.createWriteStream(archive, { flags: from.append ? 'a' : 'w' })
+  let toSkip = from.skip
+  let lastProgressPublishedAt = Date.now()
+  try {
+    const reader = response.body!.getReader()
+    for (;;) {
+      const { done, value } = await readWithStall(reader.read())
+      if (done) break
+      if (signal.aborted) throw signal.reason
+      let chunk = value
+      if (toSkip > 0) {
+        const dropped = Math.min(toSkip, chunk.byteLength)
+        toSkip -= dropped
+        chunk = chunk.subarray(dropped)
+        if (chunk.byteLength === 0) continue
+      }
+      if (!stream.write(chunk)) {
+        await new Promise<void>((resolve, reject) => {
+          stream.once('drain', resolve)
+          stream.once('error', reject)
+        })
+      }
+      downloadedBytes += chunk.byteLength
+      if (downloadedBytes > asset.bytes) throw new Error('The download is larger than expected.')
+      const now = Date.now()
+      if (now - lastProgressPublishedAt >= 250 || downloadedBytes === asset.bytes) {
+        publish()
+        lastProgressPublishedAt = now
+      }
+    }
+    await new Promise<void>((resolve, reject) => {
+      stream.once('error', reject)
+      stream.end(resolve)
+    })
+  } catch (error) {
+    // Whatever arrived stays on disk, so the next attempt resumes from it.
+    await new Promise<void>((resolve) => {
+      stream.once('error', () => resolve())
+      stream.end(() => resolve())
+    })
+    throw error
+  }
+}
+
+/** What a response holds: the rest of the file, the whole file, a fresh start, or a wrong range. */
+function resumeAnswer(
+  response: Response,
+  existing: number,
+  asset: PerformancePackAsset
+): 'resumed' | 'whole' | 'fresh' | 'invalid' {
+  if (existing === 0) return 'fresh'
+  if (response.status === 206)
+    return response.headers.get('content-range')?.startsWith(`bytes ${existing}-`)
+      ? 'resumed'
+      : 'invalid'
+  return Number(response.headers.get('content-length')) === asset.bytes ? 'whole' : 'invalid'
+}
+
+/**
+ * Download the rest of the archive. A complete archive is left as it is.
+ *
+ * Bytes already on disk are never thrown away by a resume. A CDN cache miss can answer a Range
+ * request with the whole file (200): that request is asked again, and if the server keeps doing it,
+ * the part already on disk is read past instead of overwritten. A connection that drops or stalls
+ * resumes on its own, so a 7 GB download does not wait for a click at 92%.
+ */
 async function download(
   asset: PerformancePackAsset,
   archive: string,
   signal: AbortSignal
 ): Promise<void> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let refused416 = false
+  let wholeFileAnswers = 0
+  let resumes = 0
+  for (;;) {
     let existing = fs.existsSync(archive) ? fs.statSync(archive).size : 0
     if (existing > asset.bytes) {
       fs.rmSync(archive, { force: true })
@@ -374,50 +460,38 @@ async function download(
     })
     // 416: the server has nothing past what is on disk. Start over once.
     if (response.status === 416) {
+      await response.body?.cancel()
+      if (refused416) throw new Error('The download could not be resumed. Try again.')
+      refused416 = true
       fs.rmSync(archive, { force: true })
       continue
     }
     if (!response.ok || !response.body)
       throw new Error(`The download failed (HTTP ${response.status}). Try again.`)
-    const append = existing > 0 && response.status === 206
-    if (append && !response.headers.get('content-range')?.startsWith(`bytes ${existing}-`)) {
+    const answer = resumeAnswer(response, existing, asset)
+    if (answer === 'invalid') {
+      await response.body.cancel()
       throw new Error('The server returned an invalid resume range.')
     }
-    const stream = fs.createWriteStream(archive, { flags: append ? 'a' : 'w' })
-    downloadedBytes = append ? existing : 0
-    publish()
-    let lastProgressPublishedAt = Date.now()
-    try {
-      const reader = response.body.getReader()
-      for (;;) {
-        const { done, value } = await readWithStall(reader.read())
-        if (done) break
-        if (signal.aborted) throw signal.reason
-        if (!stream.write(value)) {
-          await new Promise<void>((resolve, reject) => {
-            stream.once('drain', resolve)
-            stream.once('error', reject)
-          })
-        }
-        downloadedBytes += value.byteLength
-        if (downloadedBytes > asset.bytes) throw new Error('The download is larger than expected.')
-        const now = Date.now()
-        if (now - lastProgressPublishedAt >= 250 || downloadedBytes === asset.bytes) {
-          publish()
-          lastProgressPublishedAt = now
-        }
-      }
-      await new Promise<void>((resolve, reject) => {
-        stream.once('error', reject)
-        stream.end(resolve)
-      })
-    } catch (error) {
-      stream.destroy()
-      throw error
+    // The whole file instead of the rest: ask again, then read past the part on disk.
+    if (answer === 'whole' && ++wholeFileAnswers <= RANGE_RETRIES) {
+      await response.body.cancel()
+      continue
     }
-    return
+    publish()
+    const before = existing
+    try {
+      const skip = answer === 'whole' ? existing : 0
+      await receive(asset, archive, response, { append: existing > 0, skip }, signal)
+      return
+    } catch (error) {
+      if (signal.aborted || !(error instanceof StalledDownload || error instanceof TypeError))
+        throw error
+      // A connection that delivered something earns a fresh set of resumes.
+      if (downloadedBytes > before) resumes = 0
+      if (++resumes > RESUME_RETRIES) throw error
+    }
   }
-  throw new Error('The download could not be resumed. Try again.')
 }
 
 /** Windows ships bsdtar in System32; a GNU tar earlier on PATH (Git for Windows) reads "C:\…" as

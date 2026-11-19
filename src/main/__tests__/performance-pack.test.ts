@@ -5,7 +5,11 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import type * as FsModule from 'node:fs'
-import { startFakeDownloadHost, type FakeDownloadHost } from './harness/fake-download-host'
+import {
+  startFakeDownloadHost,
+  type FakeDownloadHost,
+  type HostedFile
+} from './harness/fake-download-host'
 
 // The GPU driver boundary: the kernel's /dev/nvidiaN nodes and /proc/driver/nvidia/version, read
 // through the real nvidia-driver module. Every other path is the real disk.
@@ -40,9 +44,10 @@ let host: FakeDownloadHost | undefined
 /** Serve the pack from a local host that answers Range requests as `range` says. */
 async function serve(
   bytes: Buffer,
-  range: 'honest' | 'refuse-416' | 'wrong-range' = 'honest'
+  range: 'honest' | 'refuse-416' | 'wrong-range' = 'honest',
+  behaviour: Pick<HostedFile, 'wholeFileAnswers' | 'dropAfter'> = {}
 ): Promise<FakeDownloadHost> {
-  host = await startFakeDownloadHost({ [packPath]: { bytes, range } })
+  host = await startFakeDownloadHost({ [packPath]: { bytes, range, ...behaviour } })
   vi.stubGlobal('fetch', host.fetchFor(PACK_ORIGIN))
   return host
 }
@@ -294,6 +299,69 @@ describe('optional NVIDIA performance pack', () => {
     pack.startPerformancePack()
     expect((await settled('installed')).bytes).toBe(bytes.length)
     expect(host.requests).toEqual([{ path: packPath, range: `bytes=${prefix}-` }])
+  })
+
+  /** A pack whose first half is already on disk, as a download cut off part way leaves it. */
+  function halfDownloaded(bytes: Buffer): number {
+    const hash = createHash('sha256').update(bytes).digest('hex')
+    manifest(bytes, hash)
+    const part = path.join(
+      fixture.root,
+      'performance-packs',
+      `cuda-${version}-${hash.slice(0, 12)}.tar.gz.part`
+    )
+    fs.mkdirSync(path.dirname(part), { recursive: true })
+    const prefix = Math.floor(bytes.length / 2)
+    fs.writeFileSync(part, bytes.subarray(0, prefix))
+    return prefix
+  }
+
+  it('shows a part already on disk as a paused download after a restart', async () => {
+    const bytes = archive()
+    const prefix = halfDownloaded(bytes)
+    const pack = await import('../performance-pack')
+    const status = pack.performancePackStatus()
+    expect(status.phase).toBe('paused')
+    expect(status.downloadedBytes).toBe(prefix)
+  })
+
+  it('asks again when a resume is answered with the whole file, keeping the part on disk', async () => {
+    // A CDN cache miss answers `Range: bytes=N-` with 200 and the whole file. Writing that over
+    // the part threw away 6.7 GB of a 7.3 GB pack on every resume.
+    const bytes = archive()
+    const prefix = halfDownloaded(bytes)
+    const host = await serve(bytes, 'honest', { wholeFileAnswers: 1 })
+    const pack = await import('../performance-pack')
+    pack.startPerformancePack()
+    expect((await settled('installed')).bytes).toBe(bytes.length)
+    expect(host.requests).toEqual([
+      { path: packPath, range: `bytes=${prefix}-` },
+      { path: packPath, range: `bytes=${prefix}-` }
+    ])
+  })
+
+  it('reads past the part on disk when the server never resumes', async () => {
+    const bytes = archive()
+    const prefix = halfDownloaded(bytes)
+    const host = await serve(bytes, 'honest', { wholeFileAnswers: 100 })
+    const pack = await import('../performance-pack')
+    pack.startPerformancePack()
+    expect((await settled('installed')).bytes).toBe(bytes.length)
+    expect(host.requests.every((request) => request.range === `bytes=${prefix}-`)).toBe(true)
+  })
+
+  it('resumes by itself when the connection drops part way', async () => {
+    const bytes = archive()
+    manifest(bytes)
+    const cut = Math.floor(bytes.length / 3)
+    const host = await serve(bytes, 'honest', { dropAfter: cut })
+    const pack = await import('../performance-pack')
+    pack.startPerformancePack()
+    expect((await settled('installed')).bytes).toBe(bytes.length)
+    expect(host.requests).toEqual([
+      { path: packPath, range: null },
+      { path: packPath, range: `bytes=${cut}-` }
+    ])
   })
 
   it('rejects a response with the wrong resume range', async () => {
