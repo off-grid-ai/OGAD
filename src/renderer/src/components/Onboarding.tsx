@@ -12,6 +12,7 @@ import { analyticsBridge } from '@renderer/lib/analytics'
 import { ArrowRightIcon, CheckIcon, LockSimpleIcon } from '@phosphor-icons/react'
 import { FeaturesStep, GroupsStep } from './onboarding/PickSteps'
 import { GuideStep } from './onboarding/GuideStep'
+import { LanguageSelect } from './LanguageSettingsSection'
 import {
   ONBOARDING_OPEN_KEY,
   clearPicks,
@@ -146,7 +147,11 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
     <div className="fixed inset-0 overflow-hidden">
       <AnimatePresence mode="wait">
         {stepId === 'welcome' && (
-          <motion.div key="welcome" {...fade} className="h-full w-full bg-neutral-950">
+          <motion.div key="welcome" {...fade} className="relative h-full w-full bg-neutral-950">
+            {/* The language, set to the computer's; the same list as Settings → Language. */}
+            <div className="absolute right-6 top-6 z-10 w-48">
+              <LanguageSelect id="onboarding-language" />
+            </div>
             <LampContainer className="min-h-screen bg-neutral-950">
               <motion.div
                 initial={{ opacity: 0.5, y: 100 }}
