@@ -19,7 +19,8 @@
     "at": "2026-11-18T12:40:00Z",
     "file": "screens/v/welcome-2.jpg"
    }
-  ]
+  ],
+  "step": "welcome"
  },
  {
   "id": "groups",
@@ -58,7 +59,8 @@
     "clip": "screens/v/groups-3.mp4"
    }
   ],
-  "clip": "screens/v/groups-3.mp4"
+  "clip": "screens/v/groups-3.mp4",
+  "step": "groups"
  },
  {
   "id": "details",
@@ -94,7 +96,8 @@
     "file": "screens/v/details-3.jpg",
     "what": "Without Pro, a Pro pick shows where to enter a licence. With Pro active it no longer shows."
    }
-  ]
+  ],
+  "step": "details"
  },
  {
   "id": "how-chat",
@@ -125,7 +128,8 @@
     "clip": "screens/v/how-chat-3.mp4"
    }
   ],
-  "clip": "screens/v/how-chat-3.mp4"
+  "clip": "screens/v/how-chat-3.mp4",
+  "step": "guide"
  },
  {
   "id": "how-meetings",
@@ -204,7 +208,8 @@
     "file": "screens/v/handoff-3.jpg",
     "what": "Setup comes checked for the picks (chat and image here; Pro picks wait for Pro)."
    }
-  ]
+  ],
+  "step": "setup"
  },
  {
   "id": "sidebar",
@@ -220,7 +225,8 @@
     "what": "The menu leads with Your picks; the other groups stay closed."
    }
   ],
-  "file": "screens/v/sidebar-1.jpg"
+  "file": "screens/v/sidebar-1.jpg",
+  "step": "home"
  },
  {
   "id": "what-you-use",
@@ -238,6 +244,7 @@
    }
   ],
   "clip": "screens/v/what-you-use-1.mp4",
-  "file": "screens/v/what-you-use-1.jpg"
+  "file": "screens/v/what-you-use-1.jpg",
+  "step": "what-you-use"
  }
 ]
