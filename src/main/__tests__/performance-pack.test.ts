@@ -314,4 +314,19 @@ describe('optional NVIDIA performance pack', () => {
     expect((await settled('failed')).error).toMatch(/invalid resume range/)
     expect(fs.statSync(`${packRoot}.tar.gz.part`).size).toBe(prefix)
   })
+
+  it("removes an older pack's unfinished download", async () => {
+    const parent = path.join(fixture.root, 'performance-packs')
+    fs.mkdirSync(parent, { recursive: true })
+    fs.writeFileSync(
+      path.join(parent, 'cuda-2026-11-15-scribe-r1-d356061371d8.tar.gz.part'),
+      'half a download'
+    )
+
+    const { activateInstalledPerformancePack } = await import('../performance-pack')
+    activateInstalledPerformancePack()
+
+    // The download is a file with no marker inside; treating it as a folder left it behind.
+    expect(fs.readdirSync(parent)).toEqual([])
+  })
 })

@@ -188,9 +188,12 @@ function pruneOldPacks(asset: PerformancePackAsset | null, bin: string | null): 
       )
         continue
       try {
+        const target = path.join(parent, entry)
         // The marker goes first, so a folder a locked file keeps half-deleted is never used again.
-        fs.rmSync(path.join(parent, entry, 'verified.sha256'), { force: true })
-        fs.rmSync(path.join(parent, entry), { recursive: true, force: true })
+        // An unfinished download (`.tar.gz.part`) is a file and has no marker.
+        if (fs.lstatSync(target).isDirectory())
+          fs.rmSync(path.join(target, 'verified.sha256'), { force: true })
+        fs.rmSync(target, { recursive: true, force: true })
       } catch (error) {
         console.warn('[performance-pack] could not remove', entry, error)
       }
