@@ -48,6 +48,7 @@ const SETTINGS_SECTION_TITLES: Record<string, string> = {
   privacy: 'Data & privacy',
   analytics: 'Analytics',
   backup: 'Backup & restore',
+  language: 'Language',
   ui: 'UI',
   shortcuts: 'Keyboard shortcuts',
   update: 'Software update'
