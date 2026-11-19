@@ -155,6 +155,15 @@ button, textarea { font: inherit; color: inherit; }
 .pane { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 0 1 auto; }
 .pane .cap { color: var(--muted); font: 11px/1.4 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
 .shots.split .pane { flex: 1 1 0; }
+/* Compare: the same step on each product, one column each, its Before above its After. */
+.shots.compare { align-items: stretch; }
+.shots.compare .pane { flex: 1 1 0; min-width: 0; }
+.cshot { line-height: 0; }
+.cshot img { max-width: 100%; max-height: calc(100vh - var(--chrome)); border-radius: 6px; display: block; margin: 0 auto; cursor: zoom-in; }
+.shots.compare.two .cshot img { max-height: calc((100vh - var(--chrome)) / 2 - 24px); }
+.cshot .none { line-height: 1.4; border: 1px dashed var(--line); border-radius: 6px; padding: 18px 10px; color: var(--muted); font: 11px var(--mono); text-align: center; }
+.pane .cap .open { margin-left: 8px; }
+#cmp button[aria-pressed="false"] { opacity: .55; }
 .shots.split .shot img { max-height: calc(100vh - var(--chrome)); }
 .pin.later { opacity: 0; pointer-events: none; }
 .shot { position: relative; max-width: 100%; max-height: 100%; cursor: crosshair; line-height: 0; }
@@ -403,6 +412,7 @@ svg.focus .rib.on { stroke-opacity: .55; }
             <button type="button" id="plat-ios" aria-pressed="true">iPhone</button>
             <button type="button" id="plat-android" aria-pressed="false">Android</button>
           </div>
+          <div class="views" id="cmp" role="group" aria-label="Show on" hidden></div>
           <div class="views" id="views" role="group" aria-label="Before or after">
             <button type="button" id="view-before" aria-pressed="false">Before</button>
             <button type="button" id="view-after" aria-pressed="true">After</button>
@@ -673,11 +683,86 @@ function renderList() {
   renderChange();
 }
 
+// Compare: screens that share a `step` (screens.json) are one step of the change on different products.
+// `picked` holds the platforms shown together; null means all of them.
+let picked = null;
+function platsOf(m) { return m.platform === "iPhone" && hasAndroid(m) ? ["iPhone", "Android"] : [m.platform || "iPhone"]; }
+function compareCols(s) {
+  const mates = s?.step ? shown.filter((x) => x.step === s.step) : [s];
+  return mates.flatMap((m) => platsOf(m).map((p) => ({ m, p })));
+}
+function activeCols(s) { const all = compareCols(s); const on = all.filter((c) => !picked || picked.has(c.p)); return on.length ? on : all.slice(0, 1); }
+function setPicked(next) {
+  picked = next;
+  try { localStorage.setItem("review-compare", JSON.stringify(next ? [...next] : null)); } catch (_) {}
+  draft = null; lit = null;
+  renderStage(); renderThread(); renderCompose();
+}
+function renderCompareSwitch(s) {
+  const box = $("cmp"); box.textContent = "";
+  const all = compareCols(s);
+  box.hidden = all.length < 2;
+  const names = [...new Set(all.map((c) => c.p))];
+  for (const p of names) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = p;
+    const on = !picked || picked.has(p);
+    b.setAttribute("aria-pressed", String(on));
+    b.onclick = () => {
+      const next = new Set(picked || names);
+      if (on && next.size > 1) next.delete(p); else next.add(p);
+      setPicked(next.size === names.length ? null : next);
+    };
+    box.append(b);
+  }
+}
+function openCol(c) {
+  // Notes are pinned on one product at a time: open that screen with only that platform showing.
+  platform = c.p === "Android" ? "android" : "ios";
+  picked = new Set([c.p]);
+  try { localStorage.setItem("review-compare", JSON.stringify([c.p])); localStorage.setItem("review-platform", platform); } catch (_) {}
+  const i = shown.indexOf(c.m);
+  i >= 0 && i !== current ? go(i) : (renderStage(), renderThread(), renderCompose());
+}
+function renderCompare(s, cols) {
+  const stage = $("shot");
+  const two = shownView(s) === "both";
+  stage.classList.add("split", "compare"); stage.classList.toggle("two", two);
+  for (const c of cols) {
+    const pane = document.createElement("div"); pane.className = "pane";
+    const cap = document.createElement("div"); cap.className = "cap"; cap.textContent = `${c.p} · ${c.m.name}`;
+    const open = document.createElement("button"); open.type = "button"; open.className = "linkbtn open"; open.textContent = "Notes";
+    open.title = `Open ${c.m.name} on ${c.p} to read and pin notes`;
+    open.onclick = () => openCol(c);
+    cap.append(open); pane.append(cap);
+    for (const v of panes(c.m)) {
+      const sh = shotOf(c.m, v);
+      const sub = document.createElement("div"); sub.className = "cap";
+      sub.textContent = `${v === "before" ? "Before" : "After"} · v${sh?.n ?? "?"}${sh?.label ? " · " + sh.label : ""}`;
+      const box = document.createElement("div"); box.className = "cshot";
+      const file = c.p === "Android" ? sh?.android : sh?.file;
+      if (file) {
+        const img = document.createElement("img"); img.src = file; img.alt = `${c.m.name} on ${c.p} (${v})`; img.draggable = false;
+        img.onclick = () => openCol(c);
+        box.append(img);
+      } else {
+        const none = document.createElement("div"); none.className = "none"; none.textContent = `No ${c.p} shot of v${sh?.n ?? "?"}`; box.append(none);
+      }
+      pane.append(sub, box);
+    }
+    stage.append(pane);
+  }
+}
+
 function renderStage() {
   const s = shown[current];
   const stage = $("shot");
   stage.textContent = "";
+  stage.classList.remove("compare", "two");
   if (!s) { $("title").textContent = "No screens yet"; return; }
+  renderCompareSwitch(s);
+  const cols = activeCols(s);
+  if (cols.length === 1 && cols[0].m !== s && shown.includes(cols[0].m)) { openCol(cols[0]); return; }
+  if (cols.length === 1) platform = cols[0].p === "Android" ? "android" : "ios";
   $("title").textContent = s.name;
   const vs = versions(s), a = afterIdx(s);
   // On Android, a version with no Android shot says the shot is the iPhone's (judged per version:
@@ -700,9 +785,18 @@ function renderStage() {
   const sum = [];
   if (vs.length > 1) sum.push(`v${vs[a].n}${vs[a].label ? " · " + vs[a].label : ""}`);
   if (a > 0) sum.push({ before: "Before", after: "After", both: "Side by side" }[shownView(s)]);
-  if (!$("plats").hidden) sum.push(platform === "android" ? "Android" : "iPhone");
+  if (compareCols(s).length > 1) sum.push(activeCols(s)[0].p);
   $("ctl").hidden = !sum.length;
   $("ctl-sum").textContent = "View · " + sum.join(" · ");
+  if (cols.length > 1) {
+    $("ctl").hidden = false;
+    $("ctl-sum").textContent = "View · " + [...new Set(cols.map((c) => c.p))].join(" + ") + (a > 0 || cols.some((c) => afterIdx(c.m) > 0) ? " · " + { before: "Before", after: "After", both: "Side by side" }[view] : "");
+    $("views").hidden = !cols.some((c) => afterIdx(c.m) > 0);
+    for (const k of Object.keys(players)) delete players[k];
+    renderCompare(s, cols);
+    renderPins(); playLabel();
+    return;
+  }
   const list = panes(s);
   for (const k of Object.keys(players)) delete players[k];
   stage.classList.toggle("split", list.length > 1);
@@ -1390,7 +1484,7 @@ async function boot() {
   try { change = await (await fetch("change.json")).json(); } catch (_) { change = {}; }
   if (change.title) document.title = change.title;
   // The phone switch shows only when some screen has an Android shot.
-  if (screens.some(hasAndroid)) {
+  if (false) {
     $("plats").hidden = false;
     $("plat-ios").setAttribute("aria-pressed", String(platform === "ios"));
     $("plat-android").setAttribute("aria-pressed", String(platform === "android"));
@@ -1398,6 +1492,7 @@ async function boot() {
   try { const v = localStorage.getItem("goc-review-view-2"); view = v === "before" || v === "after" ? v : "both"; } catch (_) {}
   try { const v = localStorage.getItem("review-sort"); if (["needs", "newest", "journey", "open"].includes(v)) sortBy = v; } catch (_) {}
   try { if (localStorage.getItem("review-platform") === "android") platform = "android"; } catch (_) {}
+  try { const c = JSON.parse(localStorage.getItem("review-compare") || "null"); picked = Array.isArray(c) && c.length ? new Set(c) : null; } catch (_) {}
   $("sort").value = sortBy;
   // New since last time: remember this visit for the next one.
   try { lastVisit = +localStorage.getItem("review-last-visit") || 0; localStorage.setItem("review-last-visit", String(Date.now())); } catch (_) {}
