@@ -250,9 +250,11 @@ def main(spec_path, out):
         for app in c.get('apps', []):
             for pl in PLAT_OF.get(app, []):
                 name = f"{c['name']} · {pl}"
-                if pl in shots or any(x['name'] == name for x in missing):
+                unbuilt = app in c.get('missing', [])
+                # Shots of today's screens never close a product that has nothing built yet.
+                if (pl in shots and not unbuilt) or any(x['name'] == name for x in missing):
                     continue
-                missing.append({'name': name, 'why': f'not built on the {app} yet' if app in c.get('missing', []) else 'not shot yet'})
+                missing.append({'name': name, 'why': f'not built on the {app} yet' if unbuilt else 'not shot yet'})
                 if not any(x['name'] == pl for x in platforms):
                     platforms.append({'name': pl, 'shown': False})
     col = defaultdict(int)
