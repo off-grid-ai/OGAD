@@ -9,6 +9,7 @@ import { CpuIcon, GlobeIcon } from '@phosphor-icons/react'
 import { Checkbox } from '@offgrid/operator-ui/operator/coss/checkbox'
 import { deviceNoun } from '@renderer/lib/device'
 import { OFF_GRID_WEBSITE_URL, openExternal } from '@renderer/constants/links'
+import { withUtm } from '@offgrid/core/shared/utm'
 import type { ViewMode } from '@renderer/lib/view-modes'
 import { FeatureGuide } from '../FeatureGuide'
 import { QuickConnections } from '../QuickConnections'
@@ -32,7 +33,7 @@ function ProOffer(): JSX.Element {
         Pro: $119 once or $7.99 a month. One license covers up to 5 devices.
       </p>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" onClick={() => openExternal(OFF_GRID_WEBSITE_URL)}>
+        <Button size="sm" variant="outline" onClick={() => openExternal(withUtm(OFF_GRID_WEBSITE_URL, 'onboarding-guide'))}>
           Get Pro
         </Button>
         <Button
