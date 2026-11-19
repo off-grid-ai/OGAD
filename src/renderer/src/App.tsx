@@ -77,6 +77,7 @@ import {
 } from '@tabler/icons-react'
 import { PushPin, PushPinSlash } from '@phosphor-icons/react'
 import { OFF_GRID_MOBILE_URL, openExternal } from './constants/links'
+import { withUtm } from '@offgrid/core/shared/utm'
 import { cn } from './lib/utils'
 import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pro-navigation'
 import { navigateSearchHit } from './lib/search-navigation'
@@ -1501,7 +1502,7 @@ function AppContent(): React.JSX.Element {
               {/* Cross-sell to the companion phone app — opens the /mobile page
                   (App Store + Google Play). Mirrors mobile's link back to desktop. */}
               <button
-                onClick={() => openExternal(OFF_GRID_MOBILE_URL)}
+                onClick={() => openExternal(withUtm(OFF_GRID_MOBILE_URL, 'mobile-nav'))}
                 aria-label="Mobile app"
                 title={!sidebarOpen ? 'Get the mobile app' : undefined}
                 data-slot="button"

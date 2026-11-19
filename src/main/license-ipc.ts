@@ -29,6 +29,7 @@ import {
   type ProLicenseInfo
 } from './licensing/license-service'
 import { effectiveProLicenseInfo } from './licensing/effective-license'
+import { withUtm } from '../shared/utm'
 import { trackFlow } from './analytics'
 
 export function setupLicenseIpc(): void {
@@ -95,8 +96,8 @@ export function setupLicenseIpc(): void {
   ipcMain.handle('license:clear', () => {
     clearPro()
   })
-  ipcMain.handle('license:pay-url', () => PRO_PAY_PAGE_URL)
-  ipcMain.handle('license:open-pay', () => shell.openExternal(PRO_PAY_PAGE_URL))
+  ipcMain.handle('license:pay-url', () => withUtm(PRO_PAY_PAGE_URL, 'license'))
+  ipcMain.handle('license:open-pay', () => shell.openExternal(withUtm(PRO_PAY_PAGE_URL, 'license')))
   // Kept for device-reset and update flows that still require a full process restart.
   ipcMain.handle('license:relaunch', () => {
     requestApplicationRelaunch(app)
