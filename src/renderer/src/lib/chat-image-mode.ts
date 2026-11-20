@@ -4,15 +4,32 @@ import { openModelsTab } from '@/components/ReadinessNotice'
 export const CHAT_IMAGE_MODE_EVENT = 'og:chat-image-mode'
 let pending = false
 
-/** Opens chat in image mode, or Models on the Image tab when there is no image model. */
-export async function openImageChat(openChat: () => void): Promise<void> {
-  const status = await window.api.imageGenStatus().catch(() => null)
-  if (!status?.available) {
+/**
+ * Opens chat in image mode, or Models on the Image tab when there is no image model. Either way the
+ * screen is left through xdg-open - opens a file or URL in the user's preferred application
+
+Synopsis
+
+xdg-open { file | URL }
+
+xdg-open { --help | --manual | --version }
+
+Use 'man xdg-open' or 'xdg-open --manual' for additional info., so a caller that finishes on leaving (onboarding) still does.
+ */
+export async function openImageChat(open: (view: 'memory-chat' | 'models') => void): Promise<void> {
+  let available = false
+  try {
+    available = Boolean((await window.api.imageGenStatus?.())?.available)
+  } catch {
+    available = false
+  }
+  if (!available) {
+    open('models')
     openModelsTab('image')
     return
   }
   pending = true
-  openChat()
+  open('memory-chat')
   window.dispatchEvent(new Event(CHAT_IMAGE_MODE_EVENT))
 }
 

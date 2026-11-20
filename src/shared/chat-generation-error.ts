@@ -1,4 +1,6 @@
-import { explainFailure } from '@offgrid/failures'
+import { explainFailure, type FailureCode } from '@offgrid/failures'
+
+const MISSING_MODEL = new Set<FailureCode>(['no-text-model', 'no-image-model', 'no-video-model'])
 
 /**
  * The words a failed reply keeps. A known reason (no chat model, disk full, ...) becomes the shared plain
@@ -13,6 +15,8 @@ export function generationErrorContent(error: unknown): string {
     .trim()
     .slice(0, 800)
   if (!message) return 'Sorry, something went wrong while generating a response.'
+  // Only a missing model is swapped for its plain line; anything else (an engine that is down) keeps
+  // the real reason, which names what failed.
   const known = explainFailure(message)
-  return known.code === 'unknown' ? message : known.line
+  return MISSING_MODEL.has(known.code) ? known.line : message
 }

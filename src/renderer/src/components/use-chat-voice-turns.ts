@@ -289,7 +289,10 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         console.error('Transcription failed', cause)
         if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
         setError(
-          transcriptionRecoveryMessage(cause) ?? explainFailure(cause).line
+          transcriptionRecoveryMessage(cause) ??
+            (explainFailure(cause).code === 'no-speech-model'
+              ? explainFailure(cause).line
+              : 'Transcription failed. Check the speech-to-text model in Settings > Setup & health.')
         )
         updateSuspended(optionsRef.current.mode === 'handsfree')
         updatePhase('idle')

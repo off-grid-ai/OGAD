@@ -149,7 +149,7 @@ function TopicAction({
     // Images opens chat in image mode; with no image model, Models on the Image tab instead.
     const open = (): void => {
       if (topic.id !== 'images') return onOpen(route)
-      void openImageChat(() => onOpen(route))
+      void openImageChat(onOpen)
     }
     return (
       <Button size={size} variant={quiet ? 'outline' : 'default'} onClick={open}>
