@@ -73,6 +73,7 @@ import {
 } from './performance-pack'
 import { engineUpdater } from './engine-updates-service'
 import { notifyRagConversationChanged } from './rag-conversation-events'
+import { keepTaskResultsLast } from './tasks/task-result-chat'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 // Generate the answer for a rag:chat turn. When a streamId + sender are present,
@@ -504,7 +505,12 @@ export function setupIPC(): void {
     'rag:update-message',
     async (_e, conversationId: string, messageId: string, content: string, context?: unknown) => {
       const { updateRagMessage } = await import('./database')
-      return updateRagMessage(conversationId, messageId, content, context)
+      const updated = updateRagMessage(conversationId, messageId, content, context)
+      // A streamed reply lands here: a task that ended before it keeps its outcome last.
+      if (updated && keepTaskResultsLast(getDB(), conversationId)) {
+        notifyRagConversationChanged({ conversationId })
+      }
+      return updated
     }
   )
 
@@ -559,7 +565,12 @@ export function setupIPC(): void {
       // standing beside it. Read from the one owner of "what this device is generating", so no caller
       // has to pass it and none can forget to.
       const streamed = role === 'assistant' ? takeChatStreamMessageId(conversationId) : undefined
-      return addRagMessage(conversationId, role, content, context, streamed, placement)
+      const added = addRagMessage(conversationId, role, content, context, streamed, placement)
+      // A task that ended before this reply was saved keeps its outcome as the Chat's last word.
+      if (role === 'assistant' && keepTaskResultsLast(getDB(), conversationId)) {
+        notifyRagConversationChanged({ conversationId })
+      }
+      return added
     }
   )
 

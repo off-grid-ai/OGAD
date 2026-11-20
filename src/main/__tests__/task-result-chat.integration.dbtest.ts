@@ -20,7 +20,8 @@ vi.mock('electron', () => ({
   ipcMain: { handle: vi.fn() }
 }))
 
-import { createRagConversation, getDB, getRagMessages } from '../database'
+import { addRagMessage, createRagConversation, getDB, getRagMessages } from '../database'
+import { keepTaskResultsLast } from '../tasks/task-result-chat'
 import { recordTaskRun, resetTaskHistoryForTests } from '../tasks/task-history'
 import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
 
@@ -195,5 +196,35 @@ describe('task results in Chat', () => {
         content: 'Task stopped: Stopped before the message was sent.'
       }
     ])
+  })
+
+  it('keeps the outcome last when the task ended before the reply that started it was saved', () => {
+    // Found live: the task stopped 47 ms after it started, and the Chat kept saying "started".
+    const conversationId = 'early-stop-chat'
+    createRagConversation(conversationId, 'Early stop')
+    addRagMessage(conversationId, 'user', 'Summarise the top story on Hacker News')
+    recordTaskRun({
+      taskId: 'early-stop-task',
+      journeyId: conversationId,
+      kind: 'web_use',
+      title: 'Summarise the top story',
+      status: 'stopped',
+      summary: 'Allow screen images before you try again.'
+    })
+    addRagMessage(
+      conversationId,
+      'assistant',
+      'Task reference: early-stop-task. Web Use started.',
+      { toolCalls: [{ name: 'web_use', result: 'Task reference: early-stop-task.' }] }
+    )
+    expect(keepTaskResultsLast(getDB(), conversationId)).toBe(true)
+    expect(getRagMessages(conversationId).map((message) => message.content)).toEqual([
+      'Summarise the top story on Hacker News',
+      'Task reference: early-stop-task. Web Use started.',
+      'Task stopped: Allow screen images before you try again.'
+    ])
+    // A later, unrelated reply leaves it where it is.
+    addRagMessage(conversationId, 'assistant', 'Anything else?')
+    expect(keepTaskResultsLast(getDB(), conversationId)).toBe(false)
   })
 })
