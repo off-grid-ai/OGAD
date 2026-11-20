@@ -1384,139 +1384,148 @@ function AppContent(): React.JSX.Element {
           under every screen, so nothing here may paint an opaque or competing backdrop. */}
 
       <div className="flex h-full relative z-10">
-        {/* Aceternity Sidebar */}
-        <Sidebar open={sidebarOpen} setOpen={setSidebarHovered}>
-          <SidebarBody
-            role="navigation"
-            aria-label="Primary navigation"
-            aria-expanded={sidebarOpen}
-            className="justify-between gap-3 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800"
-            onMouseEnter={() => setSidebarHovered(true)}
-            onMouseLeave={() => setSidebarHovered(false)}
-            onFocusCapture={() => setSidebarHovered(true)}
-            onBlurCapture={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) setSidebarHovered(false)
-            }}
-          >
-            <div className="flex min-h-0 flex-1 flex-col">
-              {/* The rail expands only while hovered or keyboard-focused. */}
-              <div
-                className={cn('flex items-center py-2', sidebarOpen ? 'gap-2' : 'justify-center')}
-              >
-                <img src={logo} alt="Off Grid AI" className="h-8 w-8 shrink-0 rounded-lg" />
-                {sidebarOpen ? (
-                  <span className="flex-1 text-left font-semibold text-white whitespace-pre">
-                    Off Grid AI
-                  </span>
-                ) : null}
-              </div>
-
-              {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
-              <div
-                className={cn(
-                  'mt-3 flex h-9 shrink-0 items-center gap-1',
-                  !sidebarOpen && 'justify-center'
-                )}
-              >
-                {sidebarOpen && (
-                  <SidebarPinButton pinned={sidebarPinned} onToggle={toggleSidebarPinned} />
-                )}
-                <button
-                  onClick={navigateBack}
-                  disabled={!canGoBack}
-                  aria-label="Back"
-                  title={`Back (${primaryModifier()}+[)`}
-                  data-slot="button"
-                  className={cn(
-                    'flex items-center justify-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-800/40 text-neutral-300 hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40',
-                    sidebarOpen ? 'flex-1 px-2 py-1.5' : 'h-9 w-9'
-                  )}
-                >
-                  <IconArrowLeft className="h-4 w-4 shrink-0" />
-                </button>
-                {sidebarOpen && (
-                  <button
-                    onClick={navigateForward}
-                    disabled={!canGoForward}
-                    aria-label="Forward"
-                    title={`Forward (${primaryModifier()}+])`}
-                    data-slot="button"
-                    className="flex items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 px-2 py-1.5 text-neutral-300 hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40"
-                  >
-                    <IconArrowRight className="h-4 w-4 shrink-0" />
-                  </button>
-                )}
-              </div>
-              {/* What it does for you: a sidebar row under Back, so it is always there and its icon
-                  stays put when the rail opens on hover, like every other row. */}
-              <div className="mt-1 flex w-full shrink-0 flex-col">{renderNavItem(guideNav)}</div>
-
-              {/* Navigation (scrolls; Settings is pinned to the bottom) */}
-              <div
-                className={cn(
-                  // Side padding (offset by the negative margin) keeps the selected row's glow
-                  // inside this scroll area's clip instead of cut at the edges.
-                  'mt-5 -mx-4 flex flex-1 flex-col overflow-y-auto overflow-x-hidden px-4',
-                  !sidebarOpen && 'sidebar-nav-scroll-collapsed'
-                )}
-              >
-                {/* Kept at both widths so expanding on hover never shifts the item under the cursor. */}
+        {/* The rail keeps its 60px place in the row. Opened by hover it widens over the screen
+            instead of pushing it, so the workspace is not laid out again on every frame of the
+            width spring. Pinned, it takes its full width in the row. */}
+        <div className={cn('relative h-full shrink-0', !sidebarPinned && 'w-[60px]')}>
+          <Sidebar open={sidebarOpen} setOpen={setSidebarHovered}>
+            <SidebarBody
+              role="navigation"
+              aria-label="Primary navigation"
+              aria-expanded={sidebarOpen}
+              className={cn(
+                'justify-between gap-3 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800',
+                !sidebarPinned && 'absolute inset-y-0 left-0 z-40'
+              )}
+              onMouseEnter={() => setSidebarHovered(true)}
+              onMouseLeave={() => setSidebarHovered(false)}
+              onFocusCapture={() => setSidebarHovered(true)}
+              onBlurCapture={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setSidebarHovered(false)
+              }}
+            >
+              <div className="flex min-h-0 flex-1 flex-col">
+                {/* The rail expands only while hovered or keyboard-focused. */}
                 <div
-                  aria-hidden={!sidebarOpen}
+                  className={cn('flex items-center py-2', sidebarOpen ? 'gap-2' : 'justify-center')}
+                >
+                  <img src={logo} alt="Off Grid AI" className="h-8 w-8 shrink-0 rounded-lg" />
+                  {sidebarOpen ? (
+                    <span className="flex-1 text-left font-semibold text-white whitespace-pre">
+                      Off Grid AI
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
+                <div
                   className={cn(
-                    'px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-500',
-                    !sidebarOpen && 'invisible'
+                    'mt-3 flex h-9 shrink-0 items-center gap-1',
+                    !sidebarOpen && 'justify-center'
                   )}
                 >
-                  Menu
+                  {sidebarOpen && (
+                    <SidebarPinButton pinned={sidebarPinned} onToggle={toggleSidebarPinned} />
+                  )}
+                  <button
+                    onClick={navigateBack}
+                    disabled={!canGoBack}
+                    aria-label="Back"
+                    title={`Back (${primaryModifier()}+[)`}
+                    data-slot="button"
+                    className={cn(
+                      'flex items-center justify-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-800/40 text-neutral-300 hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40',
+                      sidebarOpen ? 'flex-1 px-2 py-1.5' : 'h-9 w-9'
+                    )}
+                  >
+                    <IconArrowLeft className="h-4 w-4 shrink-0" />
+                  </button>
+                  {sidebarOpen && (
+                    <button
+                      onClick={navigateForward}
+                      disabled={!canGoForward}
+                      aria-label="Forward"
+                      title={`Forward (${primaryModifier()}+])`}
+                      data-slot="button"
+                      className="flex items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 px-2 py-1.5 text-neutral-300 hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40"
+                    >
+                      <IconArrowRight className="h-4 w-4 shrink-0" />
+                    </button>
+                  )}
                 </div>
-                <SidebarNavigationMenu
-                  // Picks appearing or going away start the sections afresh.
-                  key={pickedItems.length ? 'picks' : 'all'}
-                  activeView={viewMode}
-                  expanded={sidebarOpen}
-                  groups={navigationGroups}
-                  renderItem={renderNavItem}
-                  // With picks, only they start open: the rest is one click away, not in the way.
-                  initiallyOpen={pickedItems.length ? ['Your picks'] : undefined}
-                />
-              </div>
-            </div>
+                {/* What it does for you: a sidebar row under Back, so it is always there and its icon
+                  stays put when the rail opens on hover, like every other row. */}
+                <div className="mt-1 flex w-full shrink-0 flex-col">{renderNavItem(guideNav)}</div>
 
-            {/* Pinned bottom */}
-            {/* neutral-800 is the surface token, theme-aware on its own - neutral-200 is the TEXT
+                {/* Navigation (scrolls; Settings is pinned to the bottom) */}
+                <div
+                  className={cn(
+                    // Side padding (offset by the negative margin) keeps the selected row's glow
+                    // inside this scroll area's clip instead of cut at the edges.
+                    'mt-5 -mx-4 flex flex-1 flex-col overflow-y-auto overflow-x-hidden px-4',
+                    !sidebarOpen && 'sidebar-nav-scroll-collapsed'
+                  )}
+                >
+                  {/* Kept at both widths so expanding on hover never shifts the item under the cursor. */}
+                  <div
+                    aria-hidden={!sidebarOpen}
+                    className={cn(
+                      'px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-500',
+                      !sidebarOpen && 'invisible'
+                    )}
+                  >
+                    Menu
+                  </div>
+                  <SidebarNavigationMenu
+                    // Picks appearing or going away start the sections afresh.
+                    key={pickedItems.length ? 'picks' : 'all'}
+                    activeView={viewMode}
+                    expanded={sidebarOpen}
+                    groups={navigationGroups}
+                    renderItem={renderNavItem}
+                    // With picks, only they start open: the rest is one click away, not in the way.
+                    initiallyOpen={pickedItems.length ? ['Your picks'] : undefined}
+                  />
+                </div>
+              </div>
+
+              {/* Pinned bottom */}
+              {/* neutral-800 is the surface token, theme-aware on its own - neutral-200 is the TEXT
                 token, which drew a hard black rule here in light mode. See navRowClass. */}
-            <div className="flex flex-col gap-1 border-t border-neutral-800 pt-2">
-              <ModelStatusDot
-                open={sidebarOpen}
-                onClick={() => {
-                  navigateTo('settings', () => {
-                    setNavigationSubroute(null)
-                    setSettingsSection('setup')
-                    setSettingsNavigationKey((key) => key + 1)
-                  })
-                }}
-              />
-              <NavThemeToggle expanded={sidebarOpen} />
-              {bottomNav.map(renderNavItem)}
-              {/* Cross-sell to the companion phone app — opens the /mobile page
+              <div className="flex flex-col gap-1 border-t border-neutral-800 pt-2">
+                <ModelStatusDot
+                  open={sidebarOpen}
+                  onClick={() => {
+                    navigateTo('settings', () => {
+                      setNavigationSubroute(null)
+                      setSettingsSection('setup')
+                      setSettingsNavigationKey((key) => key + 1)
+                    })
+                  }}
+                />
+                <NavThemeToggle expanded={sidebarOpen} />
+                {bottomNav.map(renderNavItem)}
+                {/* Cross-sell to the companion phone app — opens the /mobile page
                   (App Store + Google Play). Mirrors mobile's link back to desktop. */}
-              <button
-                onClick={() => openExternal(withUtm(OFF_GRID_MOBILE_URL, 'mobile-nav'))}
-                aria-label="Mobile app"
-                title={!sidebarOpen ? 'Get the mobile app' : undefined}
-                data-slot="button"
-                className={navRowClass(sidebarOpen)}
-              >
-                <IconDeviceMobile className="h-5 w-5 shrink-0" />
-                {sidebarOpen && <span className="flex-1 text-left whitespace-pre">Mobile app</span>}
-                {sidebarOpen && (
-                  <IconExternalLink className="h-3.5 w-3.5 shrink-0 text-neutral-400/60" />
-                )}
-              </button>
-            </div>
-          </SidebarBody>
-        </Sidebar>
+                <button
+                  onClick={() => openExternal(withUtm(OFF_GRID_MOBILE_URL, 'mobile-nav'))}
+                  aria-label="Mobile app"
+                  title={!sidebarOpen ? 'Get the mobile app' : undefined}
+                  data-slot="button"
+                  className={navRowClass(sidebarOpen)}
+                >
+                  <IconDeviceMobile className="h-5 w-5 shrink-0" />
+                  {sidebarOpen && (
+                    <span className="flex-1 text-left whitespace-pre">Mobile app</span>
+                  )}
+                  {sidebarOpen && (
+                    <IconExternalLink className="h-3.5 w-3.5 shrink-0 text-neutral-400/60" />
+                  )}
+                </button>
+              </div>
+            </SidebarBody>
+          </Sidebar>
+        </div>
 
         <div className="min-w-0 flex-1" data-testid="main-workspace">
           <div className="flex h-full flex-col overflow-hidden">
