@@ -5,6 +5,7 @@ import { GATEWAY_HOST, GATEWAY_PORT } from '@offgrid/core/shared/ports'
 import { CopyButton } from './ui/CopyButton'
 import { GatewayApiKeysSettings } from './GatewayApiKeysSettings'
 import { GatewayKeepLoaded } from './GatewayKeepLoaded'
+import { GatewayStatus } from './GatewayStatus'
 import { Segmented } from '@offgrid/operator-ui/operator/segmented'
 import { AnimatedGroup } from '@offgrid/operator-ui/operator/motion/animated-group'
 import { Section } from '@offgrid/operator-ui/operator/experience'
@@ -219,16 +220,19 @@ export function GatewayScreen(): React.ReactElement {
       title="Gateway"
       description="One OpenAI-compatible API for every model on this Mac."
       actions={
-        <IconTip label="Interactive playground">
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label="Interactive playground"
-            onClick={() => open('/docs')}
-          >
-            <IconExternalLink className="h-4 w-4" />
-          </Button>
-        </IconTip>
+        <div className="flex items-center gap-2">
+          <GatewayStatus />
+          <IconTip label="Interactive playground">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Interactive playground"
+              onClick={() => open('/docs')}
+            >
+              <IconExternalLink className="h-4 w-4" />
+            </Button>
+          </IconTip>
+        </div>
       }
     >
       {/* A landscape screen: how to connect on the left, who may connect on the right. */}
