@@ -17,13 +17,13 @@
     "id": "phone-chat-no-model",
     "name": "Chat: no model",
     "group": "Phone · Chat",
-    "what": "A new chat with no model says \"Needs a chat model.\" with Choose model (a model is on the phone) or Get a model (opens Models, Text tab).",
-    "file": null,
+    "what": "With no model, the Chats list says \"Needs a chat model.\" with Get a model (opens Models, Text tab). New opens the model picker.",
+    "file": "phone-chat-no-model.png",
     "step": "chat-no-model",
-    "shot": null,
+    "shot": "phone-chat-no-model.png",
     "steps": [
-      "Have no model chosen (eject every model from the Models sheet).",
-      "Chats > New and look at the centre card."
+      "Have no model on the phone.",
+      "Open Chats."
     ]
   },
   {
@@ -43,9 +43,9 @@
     "name": "Gallery: no image model",
     "group": "Phone · Gallery",
     "what": "Gallery with no images and no image model says \"Needs an image model.\" with Get a model (opens Models, Image tab).",
-    "file": null,
+    "file": "phone-gallery-no-image-model.png",
     "step": "gallery-empty",
-    "shot": null,
+    "shot": "phone-gallery-no-image-model.png",
     "steps": [
       "Have no image model and no generated images.",
       "Home > Gallery."
