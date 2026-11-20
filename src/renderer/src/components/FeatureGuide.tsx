@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { openImageChat } from '@/lib/chat-image-mode'
 import {
   ArrowSquareOutIcon,
   CaretRightIcon,
@@ -145,8 +146,13 @@ function TopicAction({
 }>): React.ReactElement | null {
   if (topic.route) {
     const route = topic.route
+    // Images opens chat in image mode; with no image model, Models on the Image tab instead.
+    const open = (): void => {
+      if (topic.id !== 'images') return onOpen(route)
+      void openImageChat(() => onOpen(route))
+    }
     return (
-      <Button size={size} variant={quiet ? 'outline' : 'default'} onClick={() => onOpen(route)}>
+      <Button size={size} variant={quiet ? 'outline' : 'default'} onClick={open}>
         {topic.pro && !isPro ? <LockSimpleIcon className="h-4 w-4" /> : null}
         Open {topic.label}
       </Button>
