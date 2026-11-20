@@ -139,7 +139,7 @@
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron/asar": "3.4.1",
     "@offgrid/executorch-speech": "file:../executorch-speech",
-    "@offgrid/operator-ui": "github:off-grid-ai/ui-library#3169efdfbf6a5f808090a0f3aeb28759daaa8c13",
+    "@offgrid/operator-ui": "github:off-grid-ai/ui-library#b46d7f293cae96b213f3a6b856c0aac691d75976",
     "@phosphor-icons/react": "^2.1.10",
     "@playwright/test": "^1.61.1",
     "@scure/bip39": "^2.2.0",
