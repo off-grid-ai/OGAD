@@ -37,6 +37,7 @@ import { Input } from '@offgrid/operator-ui/operator/coss/input'
 import { Textarea } from '@offgrid/operator-ui/operator/coss/textarea'
 import Counter from '@offgrid/operator-ui/operator/bits/counter'
 import { Segmented } from '@offgrid/operator-ui/operator/segmented'
+import { SideScrollRow } from '@offgrid/operator-ui/operator/side-scroll'
 import ElasticSlider from '@offgrid/operator-ui/operator/bits/elastic-slider'
 import { Switch } from '@offgrid/operator-ui/operator/animate/switch'
 import { TextMorph } from '@offgrid/operator-ui/operator/motion/text-morph'
@@ -674,7 +675,12 @@ export function SettingsPanel({
 
       <BestSettingsCard onApplied={reloadAfterBestSettings} />
 
-      <div className="flex flex-nowrap items-center gap-1 overflow-x-auto border-b border-neutral-800 px-3 py-2">
+      <SideScrollRow
+        label="settings sections"
+        wrapperClassName="border-b border-neutral-800"
+        arrowClassName="border border-border bg-background/90 text-muted-foreground shadow-sm hover:text-foreground"
+        className="flex flex-nowrap items-center gap-1 overflow-x-auto px-3 py-2 [scrollbar-width:none]"
+      >
         <Segmented
           label="Settings sections"
           size="sm"
@@ -699,7 +705,7 @@ export function SettingsPanel({
             icon: <span className="capitalize">{t === 'model' ? 'Text' : t}</span>
           }))}
         />
-      </div>
+      </SideScrollRow>
 
       <div
         key={settingsVersion}

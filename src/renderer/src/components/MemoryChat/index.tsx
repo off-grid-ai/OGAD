@@ -20,6 +20,7 @@ import {
   type RunStopTarget
 } from '@renderer/lib/chat-run-lifecycle'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { SideScrollRow } from '@offgrid/operator-ui/operator/side-scroll'
 import { queuedCount } from '@renderer/lib/chat-queue'
 import {
   submitQueuedTurn,
@@ -5063,7 +5064,13 @@ export function MemoryChat({
                 <div className="flex h-full min-w-0 flex-col">
                   {/* Chat tabs — quick-switch between open conversations */}
                   {(openTabs.length > 0 || activeConversationId) && (
-                    <div className="flex items-center gap-1 overflow-x-auto border-b border-neutral-900 px-2 py-1">
+                    <SideScrollRow
+                      label="open chats"
+                      layoutKey={`${openTabs.join(',')}|${activeConversationId ?? ''}`}
+                      wrapperClassName="border-b border-neutral-900"
+                      arrowClassName="border border-border bg-background/90 text-muted-foreground shadow-sm hover:text-foreground"
+                      className="flex items-center gap-1 overflow-x-auto px-2 py-1 [scrollbar-width:none]"
+                    >
                       <AnimatePresence initial={false}>
                         {openTabs.map((id) => {
                           const t = conversations.find((c) => c.id === id)
@@ -5107,7 +5114,7 @@ export function MemoryChat({
                       >
                         +
                       </button>
-                    </div>
+                    </SideScrollRow>
                   )}
                   {/* Messages */}
                   <div className="relative min-h-0 flex-1">
