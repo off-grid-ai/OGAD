@@ -163,12 +163,12 @@ describe('<SettingsPanel/> tool settings', () => {
 
     render(<SettingsPanel embedded initialTab="tools" onClose={() => {}} />)
 
-    expect(await screen.findByRole('heading', { name: 'God' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Assistant' })).toBeTruthy()
     expect(await screen.findByRole('heading', { name: 'Calendar' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Utilities' })).toBeTruthy()
     expect(screen.queryByRole('switch', { name: 'Enable computer_use' })).toBeNull()
 
-    await userEvent.click(screen.getByRole('button', { name: /^God/ }))
+    await userEvent.click(screen.getByRole('button', { name: /^Assistant/ }))
 
     expect(screen.getByRole('switch', { name: 'Enable computer_use' })).toBeTruthy()
     expect(screen.getByRole('switch', { name: 'Enable web_use' })).toBeTruthy()
