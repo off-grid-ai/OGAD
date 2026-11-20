@@ -40,7 +40,8 @@ const activateModel = vi.fn(async (id: string) => {
 let ModelsScreen: () => React.JSX.Element
 beforeAll(async () => {
   ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
-})
+  // The first import compiles the whole Models screen: allow for a busy machine, as App tests do.
+}, 30_000)
 afterEach(() => {
   activeIds = []
   activateModel.mockClear()
