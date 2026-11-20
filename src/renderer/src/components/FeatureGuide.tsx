@@ -14,6 +14,7 @@ import { Button } from './ui/button'
 import { ChatMarkdown } from './ChatMarkdown'
 import { currentPlatform } from '@renderer/lib/device'
 import { openExternal } from '@renderer/constants/links'
+import { productAction } from '@offgrid/features'
 import { cn } from '@renderer/lib/utils'
 import type { ViewMode } from '@renderer/lib/view-modes'
 import {
@@ -151,13 +152,28 @@ function TopicAction({
       </Button>
     )
   }
-  if (!topic.url) return null
-  const url = topic.url
+  if (!topic.get) return null
+  // It lives in another Off Grid AI app: the shared Get / Open <app> action. The extension's
+  // store depends on this computer's default browser, which the main process works out.
+  const action = productAction({ product: topic.get })
+  const get = (): void => {
+    if (topic.get === 'extension') void window.api.getExtension?.()
+    else if (action.url) openExternal(action.url)
+  }
   return (
-    <Button size={size} variant="outline" onClick={() => openExternal(url)}>
-      Get it
-      <ArrowSquareOutIcon className="h-4 w-4" />
-    </Button>
+    <span className="flex flex-wrap gap-2">
+      <Button size={size} variant="outline" onClick={get}>
+        {action.label}
+        <ArrowSquareOutIcon className="h-4 w-4" />
+      </Button>
+      {topic.get === 'mobile' ? (
+        // Already have the phone app: pairing it is in Sync, on this computer.
+        <Button size={size} variant="ghost" onClick={() => onOpen('devices')}>
+          {isPro ? null : <LockSimpleIcon className="h-4 w-4" />}
+          Pair your phone
+        </Button>
+      ) : null}
+    </span>
   )
 }
 

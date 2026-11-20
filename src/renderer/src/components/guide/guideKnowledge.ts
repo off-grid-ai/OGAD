@@ -11,9 +11,9 @@ import {
   SpeakerHighIcon
 } from '@phosphor-icons/react'
 import type { ComponentType } from 'react'
+import type { OtherProduct } from '@offgrid/features'
 import {
   DESKTOP_BEYOND_GROUP,
-  GUIDE_LINKS,
   guideAnswerParts,
   guideFlowAnswer,
   guideFlowAnswerById,
@@ -52,8 +52,8 @@ export interface GuideTopic {
   pro: boolean
   /** The screen in this app that opens it. */
   route?: ViewMode
-  /** The page to get it, for things that live outside this app. */
-  url?: string
+  /** The other Off Grid AI app it lives in: its action is the shared Get / Open <app> rule. */
+  get?: OtherProduct
   media?: GuideMedia
   /** Not on this computer's platform yet (shown only where a pick asks for it). */
   notHere?: boolean
@@ -103,7 +103,7 @@ export function guideTopics(
     where: t.where,
     pro: t.pro,
     route: ROUTES[t.id],
-    url: t.get ? GUIDE_LINKS[t.get] : undefined
+    get: t.get
   }))
   const pro: GuideTopic[] = PRO_FEATURES.filter(
     (f) => opts.unsupported || featureSupportsPlatform(f, platform)
