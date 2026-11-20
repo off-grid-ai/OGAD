@@ -1,0 +1,54 @@
+[
+  {
+    "id": "phone-composer-mic-off",
+    "name": "Composer: microphone off",
+    "group": "Phone · Chat",
+    "what": "With the microphone refused, the composer says \"Microphone access is off.\" with Open Settings beside the crossed-out mic (was a crossed-out mic with no word).",
+    "file": null,
+    "step": "composer-permission",
+    "shot": null,
+    "steps": [
+      "Android Settings > Apps > Off Grid AI > Permissions > Microphone > Don't allow.",
+      "Open any chat and look above the composer."
+    ]
+  },
+  {
+    "id": "phone-composer-camera-off",
+    "name": "Composer: camera off",
+    "group": "Phone · Chat",
+    "what": "Take photo with the camera refused says \"Camera access is off.\" with Open Settings above the composer (was nothing).",
+    "file": null,
+    "step": "composer-permission",
+    "shot": null,
+    "steps": [
+      "Refuse Camera for Off Grid AI in Android Settings.",
+      "In a chat with a vision model: Attach > Take photo."
+    ]
+  },
+  {
+    "id": "phone-sync-not-on-wifi",
+    "name": "Sync: not on Wi-Fi",
+    "group": "Phone · Sync",
+    "what": "Off Wi-Fi, the Sync devices card says \"This phone is not on Wi-Fi.\" with Try again (was a bare Offline).",
+    "file": null,
+    "step": "sync-wifi",
+    "shot": null,
+    "steps": [
+      "Turn Wi-Fi off (mobile data on); Pro on.",
+      "Settings > Sync."
+    ]
+  },
+  {
+    "id": "phone-screenshot-photos-off",
+    "name": "Screenshot sharing: photo access off",
+    "group": "Phone · Sync",
+    "what": "Screenshot sharing turned on with photo access refused shows \"Photo access is off.\" with Open Settings on its row.",
+    "file": null,
+    "step": "sync-sharing",
+    "shot": null,
+    "steps": [
+      "Refuse Photos and videos for Off Grid AI in Android Settings.",
+      "Settings > Sync > Automatic sharing > Screenshots: choose Ask or Auto."
+    ]
+  }
+]

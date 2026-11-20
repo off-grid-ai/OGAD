@@ -1,0 +1,67 @@
+[
+  {
+    "id": "phone-chat-offline-computer",
+    "name": "Chat: computer offline",
+    "group": "Phone · Chat",
+    "what": "A chat whose computer is asleep says \"<computer> is offline. Wake it, or get a model here.\" above the composer, with Try again and Choose model or Get a model (was Text \"—\" with no reason).",
+    "file": null,
+    "step": "chat-no-model",
+    "shot": null,
+    "steps": [
+      "Pair the phone with a computer and choose one of its text models in a chat.",
+      "Sleep or quit Off Grid AI on the computer.",
+      "Open that chat on the phone and look above the composer."
+    ]
+  },
+  {
+    "id": "phone-chat-no-model",
+    "name": "Chat: no model",
+    "group": "Phone · Chat",
+    "what": "A new chat with no model says \"Needs a chat model.\" with Choose model (a model is on the phone) or Get a model (opens Models, Text tab).",
+    "file": null,
+    "step": "chat-no-model",
+    "shot": null,
+    "steps": [
+      "Have no model chosen (eject every model from the Models sheet).",
+      "Chats > New and look at the centre card."
+    ]
+  },
+  {
+    "id": "phone-models-sheet-readiness",
+    "name": "Models sheet: chat line",
+    "group": "Phone · Models",
+    "what": "The Models sheet shows the chat model's line at the top (computer offline, or no model) with its step.",
+    "file": null,
+    "step": "models-sheet",
+    "shot": null,
+    "steps": [
+      "With the computer asleep (as above), Home > tap the model chip to open the Models sheet."
+    ]
+  },
+  {
+    "id": "phone-gallery-no-image-model",
+    "name": "Gallery: no image model",
+    "group": "Phone · Gallery",
+    "what": "Gallery with no images and no image model says \"Needs an image model.\" with Get a model (opens Models, Image tab).",
+    "file": null,
+    "step": "gallery-empty",
+    "shot": null,
+    "steps": [
+      "Have no image model and no generated images.",
+      "Home > Gallery."
+    ]
+  },
+  {
+    "id": "phone-voice-hero-no-speech-model",
+    "name": "Voice mode: no speech model",
+    "group": "Phone · Voice",
+    "what": "Voice mode's big Tap to speak says \"Needs a speech model.\" with Get a model, and the tap opens Models (Transcription tab) instead of doing nothing.",
+    "file": null,
+    "step": "voice-hero",
+    "shot": null,
+    "steps": [
+      "Have no speech (Whisper) model downloaded; Pro on.",
+      "Chats > New > switch to Voice mode and look under Tap to speak."
+    ]
+  }
+]
