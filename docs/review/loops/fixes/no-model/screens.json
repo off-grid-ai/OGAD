@@ -63,5 +63,95 @@
       "Have no speech (Whisper) model downloaded; Pro on.",
       "Chats > New > switch to Voice mode and look under Tap to speak."
     ]
+  },
+  {
+    "id": "desktop-chat-no-model",
+    "name": "Chat: no model",
+    "group": "Desktop · Chat",
+    "what": "With no chat model the composer shows a Get a model chip (opens Models, Text); the sidebar dot says No model and opens Models; a send that fails says \"No chat model yet.\" with Get a model (was a dead bubble asking to finish onboarding).",
+    "file": null,
+    "step": "chat-no-model",
+    "shot": null,
+    "steps": [
+      "Remove every text model in Models.",
+      "Open Chat and look at the composer and the sidebar dot.",
+      "Send a message."
+    ]
+  },
+  {
+    "id": "desktop-chat-image-video-no-model",
+    "name": "Chat: Image and Video with no model",
+    "group": "Desktop · Chat",
+    "what": "Image and Video (chip and + menu) open Models on the Image or Video tab when no model is there; the menu items stay, dimmed, with a reason (were greyed with no word, or turned on a dead mode).",
+    "file": null,
+    "step": "chat-image-no-model",
+    "shot": null,
+    "steps": [
+      "Have no image model.",
+      "Open Chat, click Image, then + > Generate image."
+    ]
+  },
+  {
+    "id": "desktop-chat-mic-no-speech-model",
+    "name": "Chat: mic with no speech model",
+    "group": "Desktop · Chat",
+    "what": "The mic error names the real reason (No speech model yet) with Get a speech model (was a generic Check Settings line).",
+    "file": null,
+    "step": "chat-voice-no-model",
+    "shot": null,
+    "steps": [
+      "Remove every transcription model.",
+      "Open Chat and record with the mic."
+    ]
+  },
+  {
+    "id": "desktop-guide-images",
+    "name": "Guide: Open Images",
+    "group": "Desktop · Guide",
+    "what": "Open Images starts chat in image mode, or opens Models on Image when no image model is there (was a plain chat).",
+    "file": null,
+    "step": "guide-images",
+    "shot": null,
+    "steps": [
+      "Open the Guide, Images topic, click Open Images."
+    ]
+  },
+  {
+    "id": "desktop-meetings-no-speech-model",
+    "name": "Meetings: no speech model",
+    "group": "Desktop · Meetings",
+    "what": "Beside Record: Needs a speech model. Get a model. A failed transcription keeps that reason with its step; a failed summary says why with Try again, never a cut of the transcript.",
+    "file": null,
+    "step": "meeting-no-model",
+    "shot": null,
+    "steps": [
+      "Remove every transcription model.",
+      "Open Meetings and look beside Record; record a short meeting."
+    ]
+  },
+  {
+    "id": "desktop-dictation-readiness",
+    "name": "Dictation: what is missing",
+    "group": "Desktop · Dictation",
+    "what": "One line per missing piece: speech model (Get a model), microphone (Allow / Open Settings), shortcut in use (Change shortcut), Accessibility for hold (Open Settings); the header says Tap when hold cannot work.",
+    "file": null,
+    "step": "dictation-no-model",
+    "shot": null,
+    "steps": [
+      "Remove every transcription model, or turn microphone access off.",
+      "Open Dictation."
+    ]
+  },
+  {
+    "id": "desktop-send-model-failure",
+    "name": "Send model: failure and empty list",
+    "group": "Desktop · Sync",
+    "what": "A failed model send says one plain line (Pixel already has this model. Open Models there…); the empty list says No models here can run on <device> yet (was raw engine text and an OGAM jargon line).",
+    "file": null,
+    "step": "send-model",
+    "shot": null,
+    "steps": [
+      "Sync > a paired phone > Send model; send one the phone already has."
+    ]
   }
 ]

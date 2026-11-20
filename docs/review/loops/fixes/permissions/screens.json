@@ -50,5 +50,66 @@
       "Refuse Photos and videos for Off Grid AI in Android Settings.",
       "Settings > Sync > Automatic sharing > Screenshots: choose Ask or Auto."
     ]
+  },
+  {
+    "id": "desktop-memory-capture-state",
+    "name": "Day, Reflect, Entities, Search: capture state",
+    "group": "Desktop · Memory",
+    "what": "Each header shows capture state with its control (Paused / Permission required / Stopped with Resume / Review permissions / Restart), so capture off never reads as a quiet day.",
+    "file": null,
+    "step": "capture-state",
+    "shot": null,
+    "steps": [
+      "Pause capture.",
+      "Open Day, Reflect, Entities and Search."
+    ]
+  },
+  {
+    "id": "desktop-load-failure",
+    "name": "Replay, Reflect, Day, Meetings calendar: failed load",
+    "group": "Desktop · Memory",
+    "what": "A failed read says why with Try again instead of No frames / No activity / No meetings.",
+    "file": null,
+    "step": "load-failure",
+    "shot": null,
+    "steps": [
+      "Make the database busy or unreadable, then open each screen."
+    ]
+  },
+  {
+    "id": "desktop-clipboard-capture-off",
+    "name": "Clipboard: capture off",
+    "group": "Desktop · Clipboard",
+    "what": "With capture off the empty state says Clipboard capture is off. with Turn on (was Nothing copied yet).",
+    "file": null,
+    "step": "clipboard-capture",
+    "shot": null,
+    "steps": [
+      "Clipboard > Settings > turn capture off, go back."
+    ]
+  },
+  {
+    "id": "desktop-clipboard-quick-paste",
+    "name": "Clipboard: quick paste cannot work",
+    "group": "Desktop · Clipboard",
+    "what": "Under the search: The quick paste shortcut is in use by another app, or Accessibility access is off. Open Settings after a paste that could not type.",
+    "file": null,
+    "step": "clipboard-quick-paste",
+    "shot": null,
+    "steps": [
+      "Hold Ctrl/Cmd+Shift+C in another app, then open Off Grid AI; or paste from the popup without Accessibility."
+    ]
+  },
+  {
+    "id": "desktop-dictation-hotkey",
+    "name": "Dictation: shortcut and hold",
+    "group": "Desktop · Dictation",
+    "what": "Shortcut in use by another app: Change shortcut. Hold without Accessibility: Accessibility access is off. Open Settings, and the header says Tap.",
+    "file": null,
+    "step": "dictation-hotkey",
+    "shot": null,
+    "steps": [
+      "Revoke Accessibility, set mode to Hold, open Dictation."
+    ]
   }
 ]
