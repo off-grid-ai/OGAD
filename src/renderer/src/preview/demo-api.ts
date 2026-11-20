@@ -20,6 +20,17 @@ const eventSubscription = (): (() => void) => () => {}
 export function createDemoApi(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   const values: Record<string, unknown> = {
     isPro: false,
+    // Licence (preload `license`): says what isPro says, with no ended licence, so no licence line shows.
+    license: {
+      status: async () => ({
+        isPro: Boolean(overrides.isPro),
+        tier: overrides.isPro ? 'lifetime' : null,
+        expiry: null,
+        verifiedAt: 0
+      }),
+      onChanged: eventSubscription,
+      listDevices: async (): Promise<unknown[]> => []
+    },
     // Documents in a chat (preload `documents`): none attached.
     documents: {
       list: async (): Promise<unknown[]> => [],
