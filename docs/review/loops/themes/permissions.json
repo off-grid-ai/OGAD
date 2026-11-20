@@ -1,0 +1,229 @@
+{
+ "id": "permissions",
+ "title": "Show permission and capture state where it blocks",
+ "problem": "Capture off, Accessibility, microphone, Local Network and site access are only visible in Settings, or only logged.",
+ "fix": "Put the existing state controls (CaptureToggle, permission rows) on the screens they block, with Allow or Open Settings.",
+ "count": 11,
+ "items": [
+  {
+   "id": "dm-phone-media-permission-silent",
+   "product": "desktop+mobile",
+   "direction": "mobile->desktop",
+   "platform": null,
+   "screen": "Mobile Sync sharing (Screenshots); desktop Files",
+   "kind": "cross-product",
+   "title": "Refused photo permission: screenshots silently never arrive",
+   "what": "If the phone's media permission is refused, the screenshot watcher returns and sets no issue. The rule still reads as on. Desktop states its own case, 'Folder access was not granted. Sharing stays Off.' Source problems stay on the local screen and never reach the other device.",
+   "risk": "The user turns on screenshot sharing on the phone. Nothing arrives on the computer and neither device says why.",
+   "rec": "mobile: when permission is refused, set the screenshot source issue and a setup action that opens Settings. Later, shared: include source state in the peer state message.",
+   "files": [
+    "mobile/pro/sync/screenshotSyncSource.ts:74",
+    "mobile/pro/sync/syncControlCenterData.ts:88",
+    "desktop/pro/main/sync-ipc.ts:2074",
+    "desktop/pro/main/sync-ipc.ts:1317"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-capture-state-missing-on-memory-screens",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Day (day), Reflect (reflect), Entities (entities), Search (search)",
+   "kind": "state-elsewhere",
+   "title": "Empty memory screens never say capture is off",
+   "what": "Capture state is read only by Replay's header and Settings. Day says 'No activity captured yet.' Reflect and Entities say the same kind of line. Search says 'Turn on capture and your activity shows up here' as text with no control. None of them show whether capture is paused, stopped or missing Screen Recording permission.",
+   "risk": "Capture paused or blocked looks the same as a quiet day. Day is the landing screen, so the user thinks the product does nothing.",
+   "rec": "Put the existing CaptureToggle in these headers or empty states. It already shows Paused / Permission required / Stopped with Resume / Review permissions / Restart.",
+   "files": [
+    "pro/renderer/screens/DayView.tsx:874",
+    "pro/renderer/screens/DayView.tsx:1682",
+    "pro/renderer/screens/ReflectScreen.tsx:257",
+    "pro/renderer/screens/EntitiesScreen.tsx:965",
+    "pro/renderer/screens/SearchResultGrid.tsx:102",
+    "pro/renderer/CaptureToggle.tsx:47"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-dictation-hotkey-state-hidden",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Voice (voice) header",
+   "kind": "state-elsewhere",
+   "title": "Dictation shortcut fails or changes mode silently",
+   "what": "If the hold-to-talk helper cannot run (Accessibility not granted) the app only logs it and falls back to tap. If no shortcut can be bound it only logs 'no hotkey source available'. The Voice header still says 'Hold \u2325Space to dictate'.",
+   "risk": "The user presses the key and nothing happens, or 'hold' acts as 'tap'. No reason, no fix.",
+   "rec": "Return bound / mode in effect / Accessibility in the dictation state call. Show one status row on Voice with 'Allow' (the same row Scribe uses for Accessibility) and 'Change shortcut'.",
+   "files": [
+    "pro/main/dictation/controller.ts:313",
+    "pro/main/dictation/controller.ts:329",
+    "pro/renderer/screens/VoiceScreen.tsx:1035",
+    "pro/renderer/components/voice/voiceApi.ts:43",
+    "pro/renderer/screens/ScribeScreen.tsx:254"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "desktop-load-failure-reads-as-empty",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Replay (replay), Reflect (reflect), Day (day), Meetings calendar",
+   "kind": "dead-end",
+   "title": "A failed load says 'nothing captured'",
+   "what": "Replay logs a load error and shows 'No frames captured yet today.' Reflect has no catch and shows its empty text. Day's block load has no error handling. The Meetings calendar turns any error into 'No meetings in this range.'",
+   "risk": "The user thinks their history is gone. There is no retry.",
+   "rec": "Add an error state with Retry on each, the way MeetingActivitySection and SearchResultGrid already separate 'failed' from 'empty'.",
+   "files": [
+    "pro/renderer/screens/ReplayScreen.tsx:317",
+    "pro/renderer/screens/ReplayScreen.tsx:628",
+    "pro/renderer/screens/ReflectScreen.tsx:147",
+    "pro/renderer/screens/DayView.tsx:1351",
+    "pro/renderer/screens/MeetingsCalendar.tsx:85",
+    "pro/renderer/screens/MeetingActivitySection.tsx:124"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-clipboard-capture-off",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Clipboard (clipboard)",
+   "kind": "state-elsewhere",
+   "title": "Clipboard capture off looks like 'nothing copied'",
+   "what": "The Clipboard screen never reads the capture switch (it lives in the Clipboard settings drawer). With capture off the empty state says 'Nothing copied yet. Copy anything and it shows up here.'",
+   "risk": "The user copies things, nothing appears, and the feature looks broken.",
+   "rec": "Read the setting on the screen. When off, the empty state says 'Clipboard capture is off' with a 'Turn on' button.",
+   "files": [
+    "pro/renderer/screens/ClipboardScreen.tsx:298",
+    "pro/renderer/components/clipboard/ClipboardSettingsPanel.tsx:93",
+    "pro/main/clipboard.ts:469"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-clipboard-quick-paste-silent",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Clipboard (clipboard) header and quick paste popup",
+   "kind": "state-elsewhere",
+   "title": "Quick paste shortcut can fail without a word",
+   "what": "The shortcut is fixed (Ctrl/Cmd+Shift+C). If another app holds it, the failure is only logged and the screen still shows the key. Pasting reports success before the keystroke is sent; a failed keystroke (no Accessibility) is only logged.",
+   "risk": "The popup never opens, or closes and pastes nothing. No reason shown.",
+   "rec": "Return the registration and paste result to the screen. Show 'Shortcut in use' or 'Allow Accessibility' on the Clipboard header.",
+   "files": [
+    "pro/main/clipboard.ts:48",
+    "pro/main/clipboard.ts:480",
+    "pro/main/text-injection.ts:19",
+    "pro/renderer/screens/ClipboardScreen.tsx:224"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "extension-shortcut-fill-silent",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Keyboard shortcuts and right-click menu: Fill login, Generate and fill password",
+   "kind": "dead-end",
+   "title": "Fill shortcut does nothing and says nothing",
+   "what": "The shortcut and the menu item ask Desktop for logins. If the vault is locked, the browser is not paired, Desktop is closed, the page cannot be filled or no login is saved, the code just returns. Nothing shows on the page or in the panel. The fill result is also thrown away.",
+   "risk": "The user presses the shortcut on a login page and nothing happens. They cannot tell whether the vault is locked, the site has no login, or the extension is broken.",
+   "rec": "Give every non-fill outcome a visible answer. Reuse the in-field menu's notice (noticeFor already has the words and the Unlock action) via the existing autofill.choose message, or open the panel's Vault for the site as chooseLogin already does.",
+   "files": [
+    "browser-extension/src/background/shortcuts.ts:20",
+    "browser-extension/src/background/shortcuts.ts:51",
+    "browser-extension/src/shared/shortcuts.ts:84",
+    "browser-extension/src/shared/inline/view-model.ts:43"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "mobile-local-network-wifi-not-named",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Sync, Remote servers, Advanced setup",
+   "kind": "state-elsewhere",
+   "title": "Local Network refusal and no Wi-Fi are never named",
+   "what": "iPhone: the app declares the Local Network permission but never detects a refusal. Discovery errors are only logged. The texts say 'check the network'. With saved devices the status line is hidden, so the computer just reads 'Offline'. Both platforms: a helper that checks for Wi-Fi exists, and nothing in Sync calls it. The Remote servers scan has the same blind spot.",
+   "risk": "After one tap on 'Don't Allow' on iPhone, the computer is offline forever and the app blames Wi-Fi. On mobile data every device reads 'Offline' with no word that this phone is not on Wi-Fi.",
+   "rec": "On iPhone add 'Settings > Off Grid AI > Local Network' and an Open Settings button to the could-not-reach and nothing-found lines (the clipboard permission sheet already has this block). Add one line 'This phone is not on Wi-Fi' in the Devices card when the Wi-Fi check fails.",
+   "files": [
+    "mobile/ios/OffgridMobile/Info.plist:86",
+    "mobile/src/services/sync/nativeSync.ts:259",
+    "mobile/pro/ui/SyncScreen/index.tsx:71",
+    "mobile/pro/ui/SyncScreen/index.tsx:83",
+    "mobile/pro/ui/SyncScreen/KnownDevicesSection.tsx:122",
+    "mobile/src/utils/network.ts:36",
+    "mobile/src/screens/RemoteServersScreen.tsx:138",
+    "mobile/pro/ui/SyncScreen/ClipboardPermissionGuideSheet.tsx:21"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "mobile-camera-permission-silent",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Chat composer, Take photo",
+   "kind": "state-elsewhere",
+   "title": "'Take photo' does nothing without camera permission",
+   "what": "Take photo calls the camera and reads only the picture. It never reads the error code and never asks for camera permission. On Android the picker refuses when the permission is declared but not granted, so nothing opens. On iPhone a refused camera is not reported to the app.",
+   "risk": "On Android you tap Take photo and nothing happens, unless you once allowed the camera in the QR scanner. On iPhone there is no message and no path to Settings.",
+   "rec": "Ask for the camera permission first on Android. On refusal show the same 'Cancel / Open Settings' alert the mic button and the QR scanner already use.",
+   "files": [
+    "mobile/src/components/ChatInput/Attachments.tsx:88",
+    "mobile/src/components/ChatInput/Attachments.tsx:96",
+    "mobile/android/app/src/main/AndroidManifest.xml:16",
+    "mobile/node_modules/react-native-image-picker/android/src/main/java/com/imagepicker/ImagePickerModuleImpl.java:66",
+    "mobile/pro/ui/QrScanner.tsx:133",
+    "mobile/src/components/VoiceRecordButton/index.tsx:117"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-clipboard-pairing-and-paste",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Clipboard",
+   "kind": "state-elsewhere",
+   "title": "Clipboard ignores pairing and iPhone paste permission",
+   "what": "Clipboard has its own switch and reads nothing about paired computers. The empty text is always 'shows up here once Clipboard sync is on', even when the switch is on. iPhone: the paste permission guide opens only from Sync sharing, and only the first time.",
+   "risk": "Switch on, list empty, and the text tells you to turn on what is already on. With no computer paired, nothing says so. On iPhone, after one 'Don't Allow Paste', nothing is captured and no screen shows the fix again.",
+   "rec": "Three empty texts: off; on with no paired computer plus a 'Pair a computer' button to Sync; on and waiting. On iPhone mount the existing paste guide sheet here and keep a 'Paste access' link under the switch.",
+   "files": [
+    "mobile/pro/ui/ClipboardScreen/index.tsx:78",
+    "mobile/pro/ui/ClipboardScreen/index.tsx:179",
+    "mobile/pro/ui/ClipboardScreen/index.tsx:231",
+    "mobile/pro/ui/SyncScreen/SyncSharingSettingsScreen.tsx:131"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-permission-refused-silent",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Making (film), Automatic sharing (screenshots), Pro tools (calendar)",
+   "kind": "state-elsewhere",
+   "title": "Three features go quiet when a permission is refused",
+   "what": "Film: the notification permission answer is thrown away, and the screen always says 'We send a notification when it is ready'. Screenshot sharing (Android): a refused photo permission makes the watcher return, and the rule still reads as on. Calendar tools: a refusal becomes the tool error 'Calendar permission denied', and the tool switches show no permission state.",
+   "risk": "You leave the app and no notification comes. Screenshots set to Auto never send. Every calendar request fails. None of the three offers Settings.",
+   "rec": "Keep each permission answer. When refused, show one line ('Notifications are off', 'Allow photo access', 'Calendar access is off') with an Open Settings button, as the mic button does.",
+   "files": [
+    "mobile/pro/video/studio/filmComposer.ts:80",
+    "mobile/pro/video/ui/studio/MakingScreen.tsx:56",
+    "mobile/pro/sync/screenshotSyncSource.ts:74",
+    "mobile/pro/tools/EmailCalendarExtension.ts:136",
+    "mobile/src/components/VoiceRecordButton/index.tsx:117"
+   ],
+   "effort": "M"
+  }
+ ]
+}

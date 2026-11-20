@@ -1,0 +1,480 @@
+[
+  {
+    "id": "extension-shortcut-fill-silent",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Vault autofill",
+    "screen": "Keyboard shortcuts and right-click menu: Fill login, Generate and fill password",
+    "kind": "dead-end",
+    "title": "Fill shortcut does nothing and says nothing",
+    "what": "The shortcut and the menu item ask Desktop for logins. If the vault is locked, the browser is not paired, Desktop is closed, the page cannot be filled or no login is saved, the code just returns. Nothing shows on the page or in the panel. The fill result is also thrown away.",
+    "risk": "The user presses the shortcut on a login page and nothing happens. They cannot tell whether the vault is locked, the site has no login, or the extension is broken.",
+    "rec": "Give every non-fill outcome a visible answer. Reuse the in-field menu's notice (noticeFor already has the words and the Unlock action) via the existing autofill.choose message, or open the panel's Vault for the site as chooseLogin already does.",
+    "files": [
+      "browser-extension/src/background/shortcuts.ts:20",
+      "browser-extension/src/background/shortcuts.ts:51",
+      "browser-extension/src/shared/shortcuts.ts:84",
+      "browser-extension/src/shared/inline/view-model.ts:43"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "extension-save-offer-silent-when-away",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Save password prompt",
+    "screen": "Web page after a login is submitted",
+    "kind": "state-elsewhere",
+    "title": "No save prompt when Desktop is away",
+    "what": "After a login is submitted the worker asks Desktop if it is new. If Desktop does not answer (closed, not paired, no Pro, error) nothing is offered and nothing is shown. Only a locked vault still gets the offer.",
+    "risk": "The user signs up on a site while Desktop is closed. No save card appears. They believe the password was saved and lose it.",
+    "rec": "When there is no Desktop answer, still show the save card with one line: \"Open Off Grid AI Desktop to save this login\" and the existing Open Off Grid AI action. Keep the held login for its two minutes so Save works once Desktop is back.",
+    "files": [
+      "browser-extension/src/shared/inline/save-offer.ts:55",
+      "browser-extension/src/shared/inline/save-offer.ts:60",
+      "browser-extension/src/background/inline.ts:119"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "extension-site-access-switch-hidden",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Site access (all sites)",
+    "screen": "Panel > Settings",
+    "kind": "not-named",
+    "title": "Site access switch hides under Tasks",
+    "what": "The access card says \"Revoke any time in Settings\". The only switch is Settings > Tasks > \"Let Off Grid AI tasks use this browser\". That one switch also turns off page reading, vault icons, save prompts and Scribe on every site. It sits inside the Desktop-backed section, so it is not shown at all when Desktop is away. The setup-only Settings has no Tasks tab.",
+    "risk": "A user who wants to check or remove site access cannot find it. A user who turns off \"tasks\" also loses autofill and writing help without being told. With Desktop closed there is no switch at all.",
+    "rec": "Add a \"Site access\" row to Settings > General (always shown) using the existing useSiteAccess grant and revoke. List what it powers in the hint. Keep the Tasks row as a pointer to the same state.",
+    "files": [
+      "browser-extension/src/sidepanel/EmptyState.tsx:205",
+      "browser-extension/src/sidepanel/BrowserTasksRow.tsx:23",
+      "browser-extension/src/sidepanel/TasksSettings.tsx:115",
+      "browser-extension/src/sidepanel/DesktopSection.tsx:26",
+      "browser-extension/src/sidepanel/useSiteAccess.ts:47",
+      "browser-extension/src/sidepanel/SettingsScreen.tsx:81"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-context-menu-prompt-dropped",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Right-click: Ask about selection, Summarize this page",
+    "screen": "Right-click menu, then the panel in setup, offline or no-model state",
+    "kind": "dead-end",
+    "title": "Right-click prompt is dropped without a word",
+    "what": "The menu items are always there, paired or not. The prompt is stored for 60 seconds and only the chat view reads it, and only when a model is active and no reply is running. In setup, offline or no-model state the panel opens and the prompt quietly expires.",
+    "risk": "The user picks \"Summarize this page\", the panel opens on a pairing or empty screen, and nothing is sent. After they fix the block the question is gone.",
+    "rec": "Keep the pending prompt until it is sent or dismissed, and show it as a banner: \"Waiting to send: Summarize this page\" with the blocking reason and its fix button. Send it as soon as the panel is ready.",
+    "files": [
+      "browser-extension/src/sidepanel/Panel.tsx:153",
+      "browser-extension/src/sidepanel/usePendingPrompt.ts:8",
+      "browser-extension/src/shared/shortcuts.ts:33",
+      "browser-extension/src/shared/shortcuts.ts:67",
+      "browser-extension/src/background/shortcuts.ts:130"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "extension-no-model-no-next-step",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Chat",
+    "screen": "Panel > Chat with no active text model",
+    "kind": "blocked-no-reason",
+    "title": "No model: Send is off, no next step",
+    "what": "With no active model the header shows a static \"No model\" pill. Send and the four starters are disabled with no reason. The model menu is not rendered. The error text says to open Desktop and activate a model, but the panel's own Models screen can do it.",
+    "risk": "A new user sees a chat they cannot type into and a grey pill. Nothing tells them to pick a model or that one tap in Models fixes it.",
+    "rec": "Make the \"No model\" pill a button that opens Models on the Text tab (onManage already does this). Put one line above the composer: \"Choose a model to start\" with the same action. Point the no-model error at the panel's Models screen.",
+    "files": [
+      "browser-extension/src/sidepanel/Header.tsx:31",
+      "browser-extension/src/sidepanel/Header.tsx:65",
+      "browser-extension/src/sidepanel/Panel.tsx:260",
+      "browser-extension/src/sidepanel/Panel.tsx:309",
+      "browser-extension/src/sidepanel/Composer.tsx:157",
+      "browser-extension/src/shared/gateway/errors.ts:43"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-first-run-no-desktop-link",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Pairing / first run",
+    "screen": "Panel on first open: setup screen and \"Start Off Grid AI Desktop\" screen",
+    "kind": "dead-end",
+    "title": "First run: no way to get or open Desktop",
+    "what": "The first screen is titled \"Off Grid AI Pro\" with a \"Pair with desktop\" button, or \"Start Off Grid AI Desktop\" with a spinner. Neither has a download link or an Open button. The panel has no link to the website anywhere. Scribe's badge already opens the app with offgrid://open.",
+    "risk": "Someone who installed the extension from the store without the desktop app has no path forward. Someone with the app must go and find it by hand.",
+    "rec": "On both screens add \"Open Off Grid AI Desktop\" (the existing offgrid://open) and \"Get Off Grid AI Desktop\" (website link). Title the unpaired screen \"Connect to Off Grid AI Desktop\"; keep \"Off Grid AI Pro\" for the no-Pro state only.",
+    "files": [
+      "browser-extension/src/sidepanel/SettingsScreen.tsx:75",
+      "browser-extension/src/sidepanel/DesktopPairing.tsx:186",
+      "browser-extension/src/sidepanel/DesktopPairing.tsx:134",
+      "browser-extension/src/sidepanel/DesktopOffline.tsx:51",
+      "browser-extension/src/content/scribe-actions.ts:30"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-pro-required-dead-end",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Pro licence",
+    "screen": "Panel when paired with a Desktop that has no Pro; Vault; in-field menu",
+    "kind": "cross-product",
+    "title": "Needs Pro: no link to get or activate it",
+    "what": "Without Pro on Desktop the whole panel is replaced by one line: \"Activate Pro in Off Grid AI Desktop, then check again.\" The vault and the in-field menu say the same in their own words. None links to the Pro page or opens Desktop's licence screen. Scribe's badge is simply not drawn.",
+    "risk": "A free user who installs the extension hits a wall with no price, no buy link and no path to the place where Pro is activated.",
+    "rec": "Add two actions to the one PairingCard Pro state: \"See Off Grid AI Pro\" (website) and \"Open Off Grid AI Desktop\" (offgrid://open, ideally to its licence screen). Reuse that card in the vault's pro_required notice.",
+    "files": [
+      "browser-extension/src/sidepanel/DesktopPairing.tsx:145",
+      "browser-extension/src/sidepanel/panel-gate.ts:25",
+      "browser-extension/src/sidepanel/vault/VaultGateNotice.tsx:15",
+      "browser-extension/src/shared/inline/view-model.ts:55",
+      "browser-extension/src/shared/writing/badge.ts:28"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-desktop-lost-mid-session",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Chat",
+    "screen": "Panel > Chat after Desktop quits or the network drops",
+    "kind": "state-elsewhere",
+    "title": "Desktop drops mid-session: blank chat, weak notice",
+    "what": "The friendly \"Start Off Grid AI Desktop\" page only shows if Desktop is away on the first check. If it goes away later the panel stays on chat. The empty state is hidden, so a new chat is blank. The banner is text only (\"Check its address in Settings\"), its close button is the retry, and when the worker gives no answer there is no banner at all.",
+    "risk": "The user sees an empty panel or a vague banner and cannot tell that Desktop was closed, or what to press.",
+    "rec": "When the gateway is down in chat, show the existing DesktopOffline block in the empty area (it already has Check now and Change desktop address) and give the banner a Retry and a Settings action.",
+    "files": [
+      "browser-extension/src/sidepanel/panel-gate.ts:11",
+      "browser-extension/src/sidepanel/Panel.tsx:259",
+      "browser-extension/src/sidepanel/ChatBanner.tsx:38",
+      "browser-extension/src/sidepanel/useGateway.ts:67",
+      "browser-extension/src/shared/gateway/errors.ts:33"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "extension-settings-says-pair-when-offline",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Settings (Text, Image, Voice, Transcription, Remote, Tasks, Tools, Connectors)",
+    "screen": "Panel > Settings > any Desktop-backed tab when Desktop does not answer",
+    "kind": "blocked-no-reason",
+    "title": "Settings tabs say \"pair\" when Desktop is just closed",
+    "what": "Eight tabs share one fallback. When the read returns nothing (not paired, or paired but Desktop away) it always says \"Pair with Off Grid AI Desktop in Settings > Desktop\". It is plain text with no button, and the user is usually paired already.",
+    "risk": "A paired user whose Desktop is closed is told to pair again. They open the Desktop tab, see \"Paired\", and are stuck.",
+    "rec": "Let DesktopSection read the link state (usePairing already has it). Not paired: show the PairingCard in place. Paired but away: \"Off Grid AI Desktop is not running\" with Open and Retry.",
+    "files": [
+      "browser-extension/src/sidepanel/DesktopSection.tsx:26",
+      "browser-extension/src/sidepanel/useDesktopSettings.ts:11",
+      "browser-extension/src/background/requests.ts:90"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-vault-unlock-no-feedback",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Vault",
+    "screen": "Panel > Vault, locked",
+    "kind": "blocked-no-reason",
+    "title": "Unlock button gives no sign it worked",
+    "what": "Unlock asks Desktop to show its password window, then waits. The button has no pressed or waiting state and no line says where to look. If the wait ends still locked, nothing is said.",
+    "risk": "The Desktop window may open behind the browser. The user presses Unlock, sees no change, and presses again.",
+    "rec": "Reuse what VaultFillOffer already does: disable the button while waiting, show \"Unlock the vault in the Off Grid AI Desktop window\", and \"The vault is still locked\" with Try again if the wait ends.",
+    "files": [
+      "browser-extension/src/sidepanel/vault/VaultParts.tsx:27",
+      "browser-extension/src/sidepanel/vault/VaultScreen.tsx:143",
+      "browser-extension/src/sidepanel/vault/useVault.ts:117",
+      "browser-extension/src/sidepanel/vault/VaultFillOffer.tsx:53"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-infield-unlock-closes",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Vault autofill (in-field menu)",
+    "screen": "Web page: key icon menu, vault locked",
+    "kind": "dead-end",
+    "title": "In-field Unlock closes the menu and forgets",
+    "what": "Pressing \"Unlock in Off Grid AI Desktop\" sends the request and hides the menu. The page does not wait for the unlock. After unlocking in Desktop the user must come back and click the key icon again.",
+    "risk": "The user unlocks, returns to the page, and nothing is offered. The login they asked for does not appear.",
+    "rec": "Keep the menu open with \"Waiting for Off Grid AI Desktop\", poll inline.matches for a short while (the panel's waitForUnlock rule), then show the logins by itself.",
+    "files": [
+      "browser-extension/src/content/inline.ts:180",
+      "browser-extension/src/background/inline.ts:256",
+      "browser-extension/src/shared/vault/wait-unlock.ts:17"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-vault-fill-hidden-no-access",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Vault",
+    "screen": "Panel > Vault list and item view, when the tab cannot be read",
+    "kind": "blocked-no-reason",
+    "title": "Fill disappears with no reason",
+    "what": "If the tab cannot be scanned (no site access yet, a browser page, not HTTPS) the site origin is null. Then the \"On this site\" list is not drawn and the Fill button is removed from every item. No line says why.",
+    "risk": "The user opens the vault on a login page and sees no logins for the site and no Fill button. They copy the password by hand or think the vault has nothing.",
+    "rec": "Carry the scan's failure reason to the vault screen. Show one line where \"On this site\" would be: needs access gets the existing \"Allow on all sites\" action; a browser page or non-HTTPS page gets its reason.",
+    "files": [
+      "browser-extension/src/sidepanel/vault/VaultScreen.tsx:57",
+      "browser-extension/src/sidepanel/vault/VaultScreen.tsx:174",
+      "browser-extension/src/sidepanel/vault/VaultItemView.tsx:259",
+      "browser-extension/src/background/vault.ts:34",
+      "browser-extension/src/sidepanel/vault/useVault.ts:73"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-infield-notices-no-action",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Vault autofill (in-field menu)",
+    "screen": "Web page: key icon menu when not paired, Desktop closed, vault not set up, or no login saved",
+    "kind": "dead-end",
+    "title": "In-field vault notices have no button",
+    "what": "Only the locked state has an action. \"Pair this browser ... in the Off Grid AI panel\", \"Open Off Grid AI Desktop to fill\", \"Set up your vault\" and \"No saved logins for this site\" are text only. The worker can already open the panel from this menu.",
+    "risk": "The user reads what is wrong and then has to find the panel or the app on their own. With no saved login there is no way to add one from where they are.",
+    "rec": "Add one action per notice using what exists: not paired and no logins open the panel (inline.openVault); Desktop closed uses offgrid://open.",
+    "files": [
+      "browser-extension/src/shared/inline/view-model.ts:43",
+      "browser-extension/src/content/inline-view.ts:127",
+      "browser-extension/src/background/inline.ts:105"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-composer-features-vanish",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Chat: screenshot, voice input, read aloud",
+    "screen": "Panel > Chat composer and answer actions",
+    "kind": "not-named",
+    "title": "Screenshot, mic and read-aloud vanish silently",
+    "what": "\"Attach screenshot\" is left out of the + menu when the model has no vision. The mic is not drawn when no transcription model is installed. Read aloud is not offered when there is no speech model or Desktop's voice switch is off. \"Create image\" in the same menu does it right: it stays, greyed, with \"Install an image model\" and opens Models.",
+    "risk": "A user who saw the mic or screenshot yesterday cannot find it today and has no idea a model or a Desktop setting controls it.",
+    "rec": "Apply the Create image pattern to all three: keep the control, mark it unavailable with a one-line hint, and open Models on the right tab (vision text model, Transcription, Voice) or Settings > Voice.",
+    "files": [
+      "browser-extension/src/sidepanel/Composer.tsx:57",
+      "browser-extension/src/sidepanel/ChatComposer.tsx:164",
+      "browser-extension/src/sidepanel/ChatComposer.tsx:206",
+      "browser-extension/src/sidepanel/Panel.tsx:282"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-scribe-no-settings-home",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Scribe writing help",
+    "screen": "Panel > Settings",
+    "kind": "not-named",
+    "title": "Scribe has no place in Settings",
+    "what": "Settings has ten tabs and none is Writing. Sites where Scribe was turned off are stored but listed nowhere. The copy \"Off on this site. Turn it back on in Settings.\" exists but no such setting does. The all-sites ask for Scribe is shown once on the badge and never again; later it can only be granted from the chat's access card or Settings > Tasks.",
+    "risk": "A user who turned Scribe off on a site, or dismissed the one-time ask, cannot find where to turn it back on. A user who wants Scribe off everywhere has no switch.",
+    "rec": "Add a Writing tab (or a Writing group in General): \"Check writing on every site\" bound to the same site-access state, and the list of turned-off sites with a remove button (the stored list and writing.siteOn already exist).",
+    "files": [
+      "browser-extension/src/sidepanel/SettingsScreen.tsx:43",
+      "browser-extension/src/shared/writing/copy.ts:16",
+      "browser-extension/src/background/scribe.ts:83",
+      "browser-extension/src/content/scribe-badge.ts:29"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "extension-writing-failure-no-action",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Scribe writing help",
+    "screen": "Panel > Writing after a failed Check or Rewrite",
+    "kind": "dead-end",
+    "title": "Writing screen failures have no next step",
+    "what": "A failed review shows only the message (offline, not paired, no model, grammar model downloading). A failed rewrite sets a note only. The page overlay for the same failures has \"Open Off Grid AI\" or \"Try again\".",
+    "risk": "\"No model\" in the Writing screen leaves the user to guess that Models is two taps away in the same panel.",
+    "rec": "Give the notice the same actions the page overlay has, plus the in-panel ones: no model opens Models, not paired opens Settings > Desktop, others get Try again.",
+    "files": [
+      "browser-extension/src/sidepanel/writing/WritingScreen.tsx:138",
+      "browser-extension/src/sidepanel/writing/useRewrites.ts:78",
+      "browser-extension/src/content/scribe-rewrite.ts:72"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-web-tasks-hint-points-away",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Web Use in this browser",
+    "screen": "Panel > Settings > Tasks, access granted but Desktop set to another browser",
+    "kind": "state-elsewhere",
+    "title": "Web tasks hint sends you to Desktop needlessly",
+    "what": "The hint says \"Turn on Tasks > Web Use > Default browser in Off Grid AI Desktop to use it.\" The same Desktop setting is the \"Browser\" select a few rows lower on this very screen.",
+    "risk": "The user leaves the browser to change a setting they could change in one tap right here.",
+    "rec": "When access is granted and Desktop does not want this browser, show a \"Use this browser\" button in the row that sets web.browserTarget to default_browser (the same change the select makes).",
+    "files": [
+      "browser-extension/src/shared/desktop/summary.ts:36",
+      "browser-extension/src/sidepanel/BrowserTasksRow.tsx:24",
+      "browser-extension/src/sidepanel/TasksSettings.tsx:145"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-vault-gate-no-retry",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Vault",
+    "screen": "Panel > Vault when Desktop is closed, outdated, or the vault is not set up",
+    "kind": "dead-end",
+    "title": "Vault blocked states have no retry or open",
+    "what": "\"Open it on this computer\", \"Update it\" and \"Set up your vault in Off Grid AI Desktop first\" are text only. The screen re-checks only when the panel window regains focus. An unknown failure shows the \"Pair this browser\" text and pairing card even when already paired.",
+    "risk": "The user fixes the cause in Desktop, looks back at the side panel, and still sees the old notice. An already paired user is asked to pair.",
+    "rec": "Add \"Open Off Grid AI Desktop\" and \"Check again\" to these notices, re-check on a short timer while the notice shows, and give the unknown case its own line (\"Could not reach the vault\") with Retry.",
+    "files": [
+      "browser-extension/src/sidepanel/vault/VaultGateNotice.tsx:8",
+      "browser-extension/src/sidepanel/vault/VaultGateNotice.tsx:28",
+      "browser-extension/src/sidepanel/vault/useVault.ts:88",
+      "browser-extension/src/shared/vault/gate.ts:21"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-agent-disabled-no-step",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Agent mode",
+    "screen": "Panel > Chat > + menu, Agent unavailable",
+    "kind": "blocked-no-reason",
+    "title": "Agent is greyed out with no way forward",
+    "what": "When Desktop says the active model cannot run Agent, the item is disabled and its click does nothing. The hint is Desktop's reason, or \"Update Off Grid AI Desktop\" when none came. Nothing leads to a model that can.",
+    "risk": "The user sees Agent is off and cannot tell which model would turn it on or where to pick one.",
+    "rec": "Make the item open Models on the Text tab, like Create image does, with the hint \"Needs a model that supports tools\" when Desktop gives no reason.",
+    "files": [
+      "browser-extension/src/sidepanel/ChatComposer.tsx:171",
+      "browser-extension/src/shared/features.ts:46"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-models-error-no-retry",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Models",
+    "screen": "Panel > Models when the list cannot be read or a switch fails",
+    "kind": "dead-end",
+    "title": "Models screen errors have no retry",
+    "what": "If the inventory read fails the screen shows one status line (\"Off Grid AI Desktop is not reachable.\") and an empty list. There is no retry button and no re-read on a timer. A failed switch shows the reason the same way.",
+    "risk": "The user must leave the screen and come back to try again.",
+    "rec": "Add a Retry icon button beside the status line (refresh already exists) and re-read when the panel regains focus.",
+    "files": [
+      "browser-extension/src/sidepanel/ModelsScreen.tsx:53",
+      "browser-extension/src/sidepanel/ModelsScreen.tsx:119",
+      "browser-extension/src/sidepanel/ModelsScreen.tsx:138"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-pointers-to-other-tabs",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Pairing and connection settings",
+    "screen": "Panel > Settings > Desktop and General; chat error text",
+    "kind": "not-named",
+    "title": "Messages name another tab but do not go there",
+    "what": "The pairing card says \"Check the desktop address in General settings\". Saving the address says \"Open Desktop settings to check the link or pair\". Both are plain text one tab away. One error tells the user to \"change the gateway URL in the extension settings\"; the field is called \"Desktop address\".",
+    "risk": "Small detours at the exact moment the user is already stuck on connecting. \"Gateway URL\" is a name they will not find.",
+    "rec": "Turn the two pointers into buttons that switch the tab (setTab is local to SettingsScreen). After a saved address, run the link check at once and show the result. Rename \"gateway URL\" to \"Desktop address\".",
+    "files": [
+      "browser-extension/src/sidepanel/DesktopPairing.tsx:134",
+      "browser-extension/src/sidepanel/SettingsScreen.tsx:135",
+      "browser-extension/src/shared/gateway/errors.ts:40"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-set-up-in-desktop-pointers",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Models, Image, Remote, Tools, Text settings, Vault export",
+    "screen": "Panel empty states that need a Desktop-only step",
+    "kind": "cross-product",
+    "title": "\"Do it in Desktop\" notes have no link",
+    "what": "Six places tell the user to do something in Desktop and stop: download a model, download an image model, add a remote server, add accounts, edit the system prompt, export the vault. None opens Desktop or the right screen.",
+    "risk": "Each one is a manual trip: find the app, find the screen, come back. Noted here because the user meets them inside the extension; the Desktop side belongs to the cross-product thread.",
+    "rec": "One shared \"Open in Off Grid AI Desktop\" link for these notes (offgrid://open, with a screen path if Desktop supports one).",
+    "files": [
+      "browser-extension/src/sidepanel/ModelsScreen.tsx:149",
+      "browser-extension/src/sidepanel/MediaSettings.tsx:59",
+      "browser-extension/src/sidepanel/RemoteSettings.tsx:24",
+      "browser-extension/src/sidepanel/ToolsSettings.tsx:223",
+      "browser-extension/src/sidepanel/TextSettings.tsx:97",
+      "browser-extension/src/sidepanel/vault/VaultTransfer.tsx:65"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-desktop-feature-rows-no-step",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Desktop link summary",
+    "screen": "Panel > Settings > Desktop, paired",
+    "kind": "state-elsewhere",
+    "title": "Feature list shows \"off\" with no next step",
+    "what": "The paired screen lists four features with a tick or a dash and a note: \"Off in the desktop\", \"None set up\", \"None available\", \"Not set up\". None says where to turn it on. Writing help and web tasks are not in the list at all.",
+    "risk": "The user learns that chats do not sync or the vault is not set up, but not what to do. They cannot see here whether Scribe or web tasks are available.",
+    "rec": "Give each off row its step: Vault opens the panel's Vault screen (it already explains setup), Connectors opens Settings > Connectors, chats names the Desktop setting. Add rows for Writing and Web tasks from the same features object.",
+    "files": [
+      "browser-extension/src/shared/desktop/summary.ts:14",
+      "browser-extension/src/sidepanel/DesktopPairing.tsx:230"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "extension-vault-empty-no-action",
+    "product": "extension",
+    "direction": "extension",
+    "platform": "both",
+    "feature": "Vault",
+    "screen": "Panel > Vault, unlocked with no items or no search match",
+    "kind": "dead-end",
+    "title": "Empty vault says only \"Nothing here yet\"",
+    "what": "An empty list and a search with no match both show \"Nothing here yet.\" Add is a small + icon above, and Import is two taps away in the tools menu.",
+    "risk": "A new user with an empty vault is not shown the two things they most likely want: add a login or import from another manager.",
+    "rec": "In the empty note add two buttons, \"Add login\" and \"Import\" (both views exist). For a search with no match say \"No items match\" instead.",
+    "files": [
+      "browser-extension/src/sidepanel/vault/VaultItemList.tsx:27",
+      "browser-extension/src/sidepanel/vault/VaultScreen.tsx:229",
+      "browser-extension/src/sidepanel/vault/VaultParts.tsx:57"
+    ],
+    "effort": "S"
+  }
+]

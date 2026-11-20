@@ -1,0 +1,640 @@
+{
+ "id": "errors",
+ "title": "Failures say why in one line, with a next step",
+ "problem": "Errors are built but never shown, raw engine text is printed, or the action does nothing and says nothing.",
+ "fix": "shared: map known failure reasons to one plain line and a step. Every product renders that line where the action was taken.",
+ "count": 33,
+ "items": [
+  {
+   "id": "dm-transfer-refusal-raw-text",
+   "product": "desktop+mobile",
+   "direction": "both",
+   "platform": null,
+   "screen": "Desktop Transfer activity; mobile Sync activity",
+   "kind": "cross-product",
+   "title": "Refused transfers show raw engine text",
+   "what": "A receiver with a kind turned off answers 'declined by receiver'. Both apps print that string unchanged beside a Retry button. Other raw strings: 'device is not connected', 'transfer timed out'.",
+   "risk": "Retry fails again. The user does not learn that Receiving is off on the other device.",
+   "rec": "shared: map known reasons to one line and a step, for example '<device> has Screenshots receiving off. Turn it on in Sync, Receiving there.' Both apps render that line.",
+   "files": [
+    "shared/packages/sync/src/transfer/manager.ts:964",
+    "desktop/pro/renderer/screens/DevicesScreen.tsx:2101",
+    "mobile/pro/ui/SyncScreen/TransferActivitySection.tsx:167"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "dm-silent-join-refusal-logs-only",
+   "product": "desktop+mobile",
+   "direction": "both",
+   "platform": null,
+   "screen": "Desktop Devices; mobile Sync device list",
+   "kind": "cross-product",
+   "title": "Auto-join refusals go to logs only",
+   "what": "Devices on one licence should join without a code. Four refusal reasons exist: not on roster, roster stale, at capacity, no mesh secret. Both apps write them to logs. Both screens show plain 'Not paired' and 'Pair'.",
+   "risk": "Two devices on the same licence do not join. Nobody says why, for example that the licence is full.",
+   "rec": "shared: project the refusal reason onto the device row in control-center.ts with one line and a step. Both apps already render row issues.",
+   "files": [
+    "shared/packages/sync/src/mesh-admission.ts:59",
+    "desktop/pro/main/sync-ipc.ts:703",
+    "mobile/pro/sync/meshAdmission.ts:50"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-meeting-recorder-error-hidden",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Meetings (meetings) and the app-wide recording pill",
+   "kind": "state-elsewhere",
+   "title": "Meeting recording errors show in one pane only",
+   "what": "A recorder error (could not start, could not save, the other side is no longer being recorded) renders only inside the Recorded list pane, and only while that pane is open. The app-wide recording pill shows only 'Recording' or 'Transcribing'.",
+   "risk": "Meetings record on their own while the user is on another screen. A failed or one-sided recording goes unseen until the call is over.",
+   "rec": "Show rec.error in the existing recording pill in App.tsx and keep the pill visible while an error is set. Also render it above the tab switch in Meetings so the Calendar tab shows it too.",
+   "files": [
+    "pro/renderer/screens/MeetingsScreen.tsx:472",
+    "src/renderer/src/App.tsx:1274",
+    "pro/main/meeting-native.ts:225",
+    "pro/main/meeting-controller.ts:173"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-google-connectors-dead-in-free",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Integrations (connectors) gallery",
+   "kind": "blocked-no-reason",
+   "title": "Gmail and Calendar Connect is dead on free",
+   "what": "Gmail and Google Calendar need a Google client set up first. The setup form comes from Pro. Without Pro the form does not render, so Connect stays disabled for good. The only reason is a hover title: 'Set up your Google client first'.",
+   "risk": "A free user sees two headline integrations with a dead button, no Pro badge and nowhere to set it up.",
+   "rec": "When the Pro setup slot is empty, show a Pro lock on these two cards that opens the Upgrade page. Show the reason as text, not only on hover.",
+   "files": [
+    "src/renderer/src/components/ConnectorsScreen.tsx:57",
+    "src/renderer/src/components/ConnectorsScreen.tsx:208",
+    "src/renderer/src/components/ConnectorsScreen.tsx:217",
+    "src/renderer/src/components/connectorCatalog.ts:74",
+    "src/renderer/src/components/connectorCatalog.ts:88"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-vault-recovery-phrase-state",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Vault (vault) gate and Vault security panel",
+   "kind": "state-elsewhere",
+   "title": "Vault can have no recovery phrase, unseen",
+   "what": "When the vault is created, if making the recovery phrase fails the vault just opens with no phrase and no message. Vault security offers only Change password. The 'has a phrase?' check exists in the API but no screen calls it. 'Forgot password' only works with a phrase.",
+   "risk": "The user believes they can recover the vault. A forgotten password then means a lost vault.",
+   "rec": "In VaultSecurityPanel show 'Recovery phrase: set / not set' with a 'Create' button that calls the existing recoverySetup and shows RecoveryPhraseReveal. Show the failure at creation.",
+   "files": [
+    "pro/renderer/screens/use-vault-gate.ts:33",
+    "pro/renderer/screens/VaultSecurityPanel.tsx:130",
+    "pro/renderer/vaultApi.ts:81",
+    "pro/renderer/screens/VaultGate.tsx:136"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-replay-failed-frame-wrong-action",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Replay (replay) frame panel",
+   "kind": "blocked-no-reason",
+   "title": "Failed frames hide the reason, offer wrong fix",
+   "what": "A failed or blocked frame shows only 'Processing failed' or 'Processing blocked'; the reason is a hover title. The only action is 'Reprocess this frame'. Only one of five outcomes gets a message. The notice that says 'retry will not help, change the model or raise context' exists, but only in Settings.",
+   "risk": "The user presses Reprocess again and again and nothing changes.",
+   "rec": "Show the reason inline. For blocked frames reuse BlockedFrameNotice with a 'Get a model' link. Report every reprocess outcome.",
+   "files": [
+    "pro/renderer/screens/ReplayScreen.tsx:793",
+    "pro/renderer/screens/ReplayScreen.tsx:515",
+    "pro/main/crm/reprocess.ts:68",
+    "pro/renderer/CaptureFailureRecovery.tsx:15",
+    "pro/renderer/settings-sections.tsx:289"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-broken-connector-wrong-advice",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Integrations (connectors) detail; chat Settings drawer > connectors",
+   "kind": "dead-end",
+   "title": "Broken connector: wrong advice, hidden elsewhere",
+   "what": "Any 401 becomes 'Sign-in required \u2014 click Test to authorize in your browser', also for connectors that use a token. 'Change token' appears only after the user opens Edit. In the chat settings drawer the connector rows show On/Off and Remove but no status, so a dead token still reads 'On'. A custom server is added without a test and a failed add shows nothing.",
+   "risk": "The user clicks Test forever. Chat silently loses a tool while the switch says On.",
+   "rec": "For token connectors in error, show 'Change token' beside the error (the form is already wired). Show the status chip in the chat settings rows with an 'Open Integrations' link. Run the existing test after adding a custom server.",
+   "files": [
+    "src/renderer/src/components/ConnectorsScreen.tsx:150",
+    "src/renderer/src/components/ConnectorsScreen.tsx:884",
+    "src/renderer/src/components/ConnectorsScreen.tsx:523",
+    "src/renderer/src/components/SettingsPanel.tsx:1453"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-setup-plan-failure-dead-button",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "First run 'Set up your local AI' and Settings > Setup & health",
+   "kind": "blocked-no-reason",
+   "title": "Setup list fails to load, button goes dead",
+   "what": "If the setup plan cannot be loaded, the error is swallowed. The model list is hidden and 'Set up selected' is disabled because nothing is selected. No message, no retry.",
+   "risk": "A first-run user sees a dead main button. The only way out is a small 'browse & pick a model yourself' link.",
+   "rec": "Keep the error and show the existing Alert with a 'Check again' button (the recheck pattern is already in this file).",
+   "files": [
+    "src/renderer/src/components/setup/SetupPanel.tsx:160",
+    "src/renderer/src/components/setup/SetupPanel.tsx:274",
+    "src/renderer/src/components/setup/SetupPanel.tsx:334"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-calendar-empty-not-connected",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Day (day) calendar card; Meetings (meetings) Calendar tab",
+   "kind": "state-elsewhere",
+   "title": "Empty calendar does not say none is connected",
+   "what": "Day says 'Nothing on your calendar today.' Meetings says 'No meetings in this range.' Neither checks whether a calendar is connected or offers Connect.",
+   "risk": "The user cannot tell an empty week from a calendar that was never connected.",
+   "rec": "When no calendar is connected, show the existing GoogleQuickConnection / MicrosoftQuickConnection buttons in the empty state.",
+   "files": [
+    "pro/renderer/screens/DayView.tsx:394",
+    "pro/renderer/screens/MeetingsCalendar.tsx:140",
+    "pro/renderer/QuickProviderConnections.tsx:22"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-failed-document-looks-ready",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Chat (memory-chat) attachments; Projects (projects) knowledge base",
+   "kind": "dead-end",
+   "title": "A document that failed to read looks ready",
+   "what": "In chat, an attached document whose indexing fails keeps its 'ready' pill. In the 'Documents in this chat' list a failed row says 'Could not be read' with no retry. In Projects a failed document says 'Couldn't read'; the reason is hover-only and the only way back is delete and add again.",
+   "risk": "The user asks about a document the model never read and gets answers with no grounding.",
+   "rec": "Map the 'failed' phase to the error pill in chat. Show the reason as a second line in both lists. Add a retry icon (needs a small re-index call; none exists today).",
+   "files": [
+    "src/renderer/src/components/MemoryChat/helper.tsx:425",
+    "src/renderer/src/components/MemoryChat/components/ChatDocuments.tsx:110",
+    "src/renderer/src/components/ProjectsScreen.tsx:927",
+    "src/preload/index.ts:886"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "desktop-suggest-actions-failure-green",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Actions (actions)",
+   "kind": "dead-end",
+   "title": "'Suggest actions' failure shows in green, no link",
+   "what": "With nothing connected, Suggest actions returns 'No connected tools yet \u2014 connect an integration first.' The screen shows errors and successes in the same green box, and has no link to Integrations. Entities > Organize has the same shape: it ends with no result and no error.",
+   "risk": "The user reads a failure as success, then has to find Integrations alone.",
+   "rec": "Use error styling for errors and add a 'Connect' link (og:navigate to Integrations). Give Organize a one-line result.",
+   "files": [
+    "pro/main/crm/agent.ts:197",
+    "pro/renderer/screens/ActionsScreen.tsx:265",
+    "pro/renderer/screens/ActionsScreen.tsx:426",
+    "pro/renderer/screens/EntitiesScreen.tsx:163"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "xa-scribe-off-looks-clean",
+   "product": "extension+desktop",
+   "direction": "desktop->extension",
+   "platform": "both",
+   "screen": "Any text box in the browser (Scribe badge)",
+   "kind": "cross-product",
+   "title": "Scribe off on desktop shows as clean text",
+   "what": "The desktop Scribe switch 'Scribe on everywhere' turns checks off. A browser check then gets an empty issue list. The extension only reads features.writing (Pro and the hook), never the switch. So the badge shows 'No writing issues'.",
+   "risk": "The user thinks the text was checked and is clean. It was not checked. Nothing in the browser says Scribe is off on the desktop.",
+   "rec": "Desktop: add the switch to the bridge state (or answer the check with a 'scribe-off' code). Extension: show the badge as off with one line, 'Scribe is off in Off Grid AI Desktop', and a button that turns it on over the bridge.",
+   "files": [
+    "desktop/pro/main/writing/scribe.ts:106",
+    "desktop/src/main/extension-bridge/bridge-electron.ts:248",
+    "browser-extension/src/shared/writing/state.ts:27",
+    "browser-extension/src/shared/writing/badge.ts:37"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "xa-pair-timeout-says-declined",
+   "product": "extension+desktop",
+   "direction": "extension->desktop",
+   "platform": "both",
+   "screen": "Extension pairing card",
+   "kind": "cross-product",
+   "title": "Pairing timeout and retry block give wrong reasons",
+   "what": "The desktop dialog closes itself after 120 seconds and answers 'declined'. The desktop then refuses that address for 30 seconds with 'rate_limited', and refuses a second request with 'busy' while a dialog is open. The extension shows 'Pairing was declined in the desktop' for the timeout and 'Pairing did not finish. Try again.' for the other two.",
+   "risk": "A user who missed the dialog is told they declined. A retry within 30 seconds fails again with no reason, so pairing looks broken.",
+   "rec": "Desktop: answer the timeout with its own code. Extension: map timeout to 'The desktop did not get an answer. Try again.', busy to 'Answer the dialog open in Off Grid AI Desktop.', and rate_limited to 'Wait 30 seconds, then try again.'",
+   "files": [
+    "desktop/src/main/extension-bridge/bridge-electron.ts:213",
+    "desktop/src/main/extension-bridge/bridge-service.ts:95",
+    "desktop/src/main/extension-bridge/bridge-service.ts:102",
+    "desktop/src/main/extension-bridge/bridge-service.ts:111",
+    "browser-extension/src/shared/desktop/bridge-link.ts:155",
+    "browser-extension/src/sidepanel/DesktopPairing.tsx:178"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "xa-vault-gate-no-button",
+   "product": "extension+desktop",
+   "direction": "extension->desktop",
+   "platform": "both",
+   "screen": "Extension Vault screen and in-field menu when the vault is not set up or needs Pro",
+   "kind": "cross-product",
+   "title": "Vault 'set up in Desktop' has no button",
+   "what": "For a vault that is not set up, needs Pro, or needs the desktop opened, the extension shows text only. Only 'not paired' gets an action. The bridge call 'requestUnlock' already brings the desktop window to its Vault screen for any state that is not unlocked, but the extension uses it only for a locked vault.",
+   "risk": "The user must find the desktop app and its Vault screen alone. The one-click path exists and is not offered.",
+   "rec": "Extension: add an 'Open Vault in Desktop' button to the not_initialized and pro_required notices (panel and in-field menu) that sends requestUnlock, then wait for the state to change as Unlock does.",
+   "files": [
+    "browser-extension/src/sidepanel/vault/VaultGateNotice.tsx:19",
+    "browser-extension/src/sidepanel/vault/VaultGateNotice.tsx:28",
+    "browser-extension/src/shared/inline/view-model.ts:53",
+    "desktop/pro/main/vault/extension-vault.ts:202",
+    "desktop/pro/main/vault/extension-vault-host.ts:29"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "xa-desktop-silent-after-pairing",
+   "product": "extension+desktop",
+   "direction": "extension->desktop",
+   "platform": "both",
+   "screen": "Desktop, after the Pair dialog",
+   "kind": "cross-product",
+   "title": "Desktop shows nothing after a browser pairs",
+   "what": "After Pair, the dialog closes and the desktop shows no result. The paired browser list lives only under Settings > Tasks > Web Use and renders nothing when empty. Vault and Scribe screens do not show it. An eleventh browser drops the oldest one with no message.",
+   "risk": "The user does not know where the browser is listed or how to remove it later. A browser can lose its pairing with no reason shown on either side.",
+   "rec": "Desktop: after Pair, show a toast 'Chrome paired' with a 'Manage' action that opens the list. Give the list a one-line empty state. When the limit is hit, say which browser was removed.",
+   "files": [
+    "desktop/src/main/extension-bridge/bridge-electron.ts:215",
+    "desktop/pro/renderer/components/PairedBrowserList.tsx:23",
+    "desktop/pro/renderer/components/ComputerUseSettingsSection.tsx:459",
+    "desktop/src/main/extension-bridge/bridge-service.ts:121"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "xa-vault-browser-actions-untraced",
+   "product": "extension+desktop",
+   "direction": "extension->desktop",
+   "platform": "both",
+   "screen": "Desktop Vault screen",
+   "kind": "cross-product",
+   "title": "Desktop vault does not say the browser asked",
+   "what": "A login saved in the browser is added to the desktop vault with no event to the window. The Vault screen reloads only on window focus. An unlock request from the browser brings the desktop window to the vault gate, which shows the normal password form with no word that a browser is waiting.",
+   "risk": "A desktop window that suddenly comes to the front asking for the master password, with no reason, looks suspicious. A new entry appears with no sign of where it came from.",
+   "rec": "Desktop: pass the browser name with the navigate event and show one line on the gate, 'Chrome is waiting for your vault'. Send a vault-changed event after a browser save so the list updates and the new row is marked.",
+   "files": [
+    "desktop/pro/main/vault/extension-vault-host.ts:24",
+    "desktop/pro/main/vault/extension-vault.ts:161",
+    "desktop/pro/main/vault/extension-vault.ts:202",
+    "desktop/pro/renderer/screens/VaultScreen.tsx:431"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "xa-extension-silent-on-phone",
+   "product": "extension+mobile",
+   "direction": "extension->mobile",
+   "platform": "both",
+   "screen": "Extension Vault save offer and chat history",
+   "kind": "cross-product",
+   "title": "Extension never says what reaches the phone",
+   "what": "No direct link exists between the extension and the phone; the mobile source has no bridge code. Everything goes through the desktop: a login saved in the browser lands in the desktop vault, and reaches the phone only if Vault sync is on there. The panel shows phone chats with a 'Phone' label, so that hop works. The extension has no line about the phone for the vault, and cannot see the desktop's sync state.",
+   "risk": "A user saves a password in the browser and expects it on the phone. If Vault sync is off on the desktop it never arrives, and the browser gives no hint.",
+   "rec": "Desktop: add the vault sync state to the bridge 'state' answer. Extension: after a save, add one short line when sync is off, 'Saved on this computer. Turn on Vault sync in Desktop to get it on your phone.'",
+   "files": [
+    "desktop/pro/main/vault/extension-vault.ts:161",
+    "desktop/pro/renderer/screens/VaultScreen.tsx:563",
+    "browser-extension/src/sidepanel/HistoryRow.tsx:137",
+    "browser-extension/src/shared/bridge/protocol.ts:24"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "extension-save-offer-silent-when-away",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Web page after a login is submitted",
+   "kind": "state-elsewhere",
+   "title": "No save prompt when Desktop is away",
+   "what": "After a login is submitted the worker asks Desktop if it is new. If Desktop does not answer (closed, not paired, no Pro, error) nothing is offered and nothing is shown. Only a locked vault still gets the offer.",
+   "risk": "The user signs up on a site while Desktop is closed. No save card appears. They believe the password was saved and lose it.",
+   "rec": "When there is no Desktop answer, still show the save card with one line: \"Open Off Grid AI Desktop to save this login\" and the existing Open Off Grid AI action. Keep the held login for its two minutes so Save works once Desktop is back.",
+   "files": [
+    "browser-extension/src/shared/inline/save-offer.ts:55",
+    "browser-extension/src/shared/inline/save-offer.ts:60",
+    "browser-extension/src/background/inline.ts:119"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "extension-context-menu-prompt-dropped",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Right-click menu, then the panel in setup, offline or no-model state",
+   "kind": "dead-end",
+   "title": "Right-click prompt is dropped without a word",
+   "what": "The menu items are always there, paired or not. The prompt is stored for 60 seconds and only the chat view reads it, and only when a model is active and no reply is running. In setup, offline or no-model state the panel opens and the prompt quietly expires.",
+   "risk": "The user picks \"Summarize this page\", the panel opens on a pairing or empty screen, and nothing is sent. After they fix the block the question is gone.",
+   "rec": "Keep the pending prompt until it is sent or dismissed, and show it as a banner: \"Waiting to send: Summarize this page\" with the blocking reason and its fix button. Send it as soon as the panel is ready.",
+   "files": [
+    "browser-extension/src/sidepanel/Panel.tsx:153",
+    "browser-extension/src/sidepanel/usePendingPrompt.ts:8",
+    "browser-extension/src/shared/shortcuts.ts:33",
+    "browser-extension/src/shared/shortcuts.ts:67",
+    "browser-extension/src/background/shortcuts.ts:130"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "extension-desktop-lost-mid-session",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel > Chat after Desktop quits or the network drops",
+   "kind": "state-elsewhere",
+   "title": "Desktop drops mid-session: blank chat, weak notice",
+   "what": "The friendly \"Start Off Grid AI Desktop\" page only shows if Desktop is away on the first check. If it goes away later the panel stays on chat. The empty state is hidden, so a new chat is blank. The banner is text only (\"Check its address in Settings\"), its close button is the retry, and when the worker gives no answer there is no banner at all.",
+   "risk": "The user sees an empty panel or a vague banner and cannot tell that Desktop was closed, or what to press.",
+   "rec": "When the gateway is down in chat, show the existing DesktopOffline block in the empty area (it already has Check now and Change desktop address) and give the banner a Retry and a Settings action.",
+   "files": [
+    "browser-extension/src/sidepanel/panel-gate.ts:11",
+    "browser-extension/src/sidepanel/Panel.tsx:259",
+    "browser-extension/src/sidepanel/ChatBanner.tsx:38",
+    "browser-extension/src/sidepanel/useGateway.ts:67",
+    "browser-extension/src/shared/gateway/errors.ts:33"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "extension-vault-unlock-no-feedback",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel > Vault, locked",
+   "kind": "blocked-no-reason",
+   "title": "Unlock button gives no sign it worked",
+   "what": "Unlock asks Desktop to show its password window, then waits. The button has no pressed or waiting state and no line says where to look. If the wait ends still locked, nothing is said.",
+   "risk": "The Desktop window may open behind the browser. The user presses Unlock, sees no change, and presses again.",
+   "rec": "Reuse what VaultFillOffer already does: disable the button while waiting, show \"Unlock the vault in the Off Grid AI Desktop window\", and \"The vault is still locked\" with Try again if the wait ends.",
+   "files": [
+    "browser-extension/src/sidepanel/vault/VaultParts.tsx:27",
+    "browser-extension/src/sidepanel/vault/VaultScreen.tsx:143",
+    "browser-extension/src/sidepanel/vault/useVault.ts:117",
+    "browser-extension/src/sidepanel/vault/VaultFillOffer.tsx:53"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "extension-infield-unlock-closes",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Web page: key icon menu, vault locked",
+   "kind": "dead-end",
+   "title": "In-field Unlock closes the menu and forgets",
+   "what": "Pressing \"Unlock in Off Grid AI Desktop\" sends the request and hides the menu. The page does not wait for the unlock. After unlocking in Desktop the user must come back and click the key icon again.",
+   "risk": "The user unlocks, returns to the page, and nothing is offered. The login they asked for does not appear.",
+   "rec": "Keep the menu open with \"Waiting for Off Grid AI Desktop\", poll inline.matches for a short while (the panel's waitForUnlock rule), then show the logins by itself.",
+   "files": [
+    "browser-extension/src/content/inline.ts:180",
+    "browser-extension/src/background/inline.ts:256",
+    "browser-extension/src/shared/vault/wait-unlock.ts:17"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "extension-vault-fill-hidden-no-access",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel > Vault list and item view, when the tab cannot be read",
+   "kind": "blocked-no-reason",
+   "title": "Fill disappears with no reason",
+   "what": "If the tab cannot be scanned (no site access yet, a browser page, not HTTPS) the site origin is null. Then the \"On this site\" list is not drawn and the Fill button is removed from every item. No line says why.",
+   "risk": "The user opens the vault on a login page and sees no logins for the site and no Fill button. They copy the password by hand or think the vault has nothing.",
+   "rec": "Carry the scan's failure reason to the vault screen. Show one line where \"On this site\" would be: needs access gets the existing \"Allow on all sites\" action; a browser page or non-HTTPS page gets its reason.",
+   "files": [
+    "browser-extension/src/sidepanel/vault/VaultScreen.tsx:57",
+    "browser-extension/src/sidepanel/vault/VaultScreen.tsx:174",
+    "browser-extension/src/sidepanel/vault/VaultItemView.tsx:259",
+    "browser-extension/src/background/vault.ts:34",
+    "browser-extension/src/sidepanel/vault/useVault.ts:73"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "extension-infield-notices-no-action",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Web page: key icon menu when not paired, Desktop closed, vault not set up, or no login saved",
+   "kind": "dead-end",
+   "title": "In-field vault notices have no button",
+   "what": "Only the locked state has an action. \"Pair this browser ... in the Off Grid AI panel\", \"Open Off Grid AI Desktop to fill\", \"Set up your vault\" and \"No saved logins for this site\" are text only. The worker can already open the panel from this menu.",
+   "risk": "The user reads what is wrong and then has to find the panel or the app on their own. With no saved login there is no way to add one from where they are.",
+   "rec": "Add one action per notice using what exists: not paired and no logins open the panel (inline.openVault); Desktop closed uses offgrid://open.",
+   "files": [
+    "browser-extension/src/shared/inline/view-model.ts:43",
+    "browser-extension/src/content/inline-view.ts:127",
+    "browser-extension/src/background/inline.ts:105"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "extension-vault-gate-no-retry",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel > Vault when Desktop is closed, outdated, or the vault is not set up",
+   "kind": "dead-end",
+   "title": "Vault blocked states have no retry or open",
+   "what": "\"Open it on this computer\", \"Update it\" and \"Set up your vault in Off Grid AI Desktop first\" are text only. The screen re-checks only when the panel window regains focus. An unknown failure shows the \"Pair this browser\" text and pairing card even when already paired.",
+   "risk": "The user fixes the cause in Desktop, looks back at the side panel, and still sees the old notice. An already paired user is asked to pair.",
+   "rec": "Add \"Open Off Grid AI Desktop\" and \"Check again\" to these notices, re-check on a short timer while the notice shows, and give the unknown case its own line (\"Could not reach the vault\") with Retry.",
+   "files": [
+    "browser-extension/src/sidepanel/vault/VaultGateNotice.tsx:8",
+    "browser-extension/src/sidepanel/vault/VaultGateNotice.tsx:28",
+    "browser-extension/src/sidepanel/vault/useVault.ts:88",
+    "browser-extension/src/shared/vault/gate.ts:21"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "extension-vault-empty-no-action",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel > Vault, unlocked with no items or no search match",
+   "kind": "dead-end",
+   "title": "Empty vault says only \"Nothing here yet\"",
+   "what": "An empty list and a search with no match both show \"Nothing here yet.\" Add is a small + icon above, and Import is two taps away in the tools menu.",
+   "risk": "A new user with an empty vault is not shown the two things they most likely want: add a login or import from another manager.",
+   "rec": "In the empty note add two buttons, \"Add login\" and \"Import\" (both views exist). For a search with no match say \"No items match\" instead.",
+   "files": [
+    "browser-extension/src/sidepanel/vault/VaultItemList.tsx:27",
+    "browser-extension/src/sidepanel/vault/VaultScreen.tsx:229",
+    "browser-extension/src/sidepanel/vault/VaultParts.tsx:57"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "guide-extension-get-chrome-only",
+   "product": "desktop",
+   "direction": "desktop->extension",
+   "platform": null,
+   "screen": "Desktop guide topics 'Browser extension', 'Vault in the browser' -> 'Get it'",
+   "kind": "cross-product",
+   "title": "Guide says Firefox; link is Chrome only",
+   "what": "The topic says 'Add Off Grid AI to Chrome or Firefox'. GUIDE_LINKS.extension is the Chrome Web Store only, for both topics.",
+   "risk": "Firefox users follow 'Get it' to a store that cannot install it.",
+   "rec": "shared: point 'extension' at a getoffgridai.co page that picks the store by browser.",
+   "files": [
+    "shared/packages/models/src/product-guide.ts:37",
+    "shared/packages/models/src/product-guide.ts:416"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-voice-errors-hidden",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Chat composer mic, Voice mode",
+   "kind": "dead-end",
+   "title": "Voice input errors are made but never shown",
+   "what": "The code builds messages such as 'Couldn't hear that' and 'Couldn't load the voice model, free some memory'. They go only to the mic button, which takes the error and never draws it. A speech model download started from the mic logs its failure and shows nothing. 'Transcribe again' with no usable model gives an OK-only alert that says to download a model in Models.",
+   "risk": "You speak, the spinner stops, nothing appears. No reason and no retry. A failed download just puts the mic back to its unavailable look.",
+   "rec": "Draw the error in the line above the composer that already shows the transcription notice. For the memory case use the existing model failure card (Free memory and retry). For the download and 'Transcribe again' cases open the existing speech model picker sheet.",
+   "files": [
+    "mobile/src/components/VoiceRecordButton/index.tsx:160",
+    "mobile/src/components/ChatInput/Voice.ts:194",
+    "mobile/src/components/ChatInput/Voice.ts:264",
+    "mobile/src/hooks/useWhisperTranscription.ts:247",
+    "mobile/src/components/ChatInput/index.tsx:685",
+    "mobile/src/components/VoiceRecordButton/index.tsx:323",
+    "mobile/src/screens/ChatScreen/useChatMessageHandlers.ts:213"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-save-image-goes-nowhere",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Chat image viewer (Save)",
+   "kind": "dead-end",
+   "title": "Saved chat image lands where you cannot open it",
+   "what": "iPhone: Save copies the image into the app's own documents folder and says 'Saved to <file name>'. The app does not expose that folder to Files, and it is not Photos. Android: the storage permission answer is ignored, and a failure shows the raw system error. Both alerts have OK only.",
+   "risk": "iPhone says 'Image Saved' and the picture is in neither Photos nor Files. On Android a refusal ends in a system error string with no way forward.",
+   "rec": "Use the path the Gallery already uses: the share sheet on iPhone and the media export service on Android (the one video save uses). On a permanent refusal offer Open Settings.",
+   "files": [
+    "mobile/src/screens/ChatScreen/useSaveImage.ts:15",
+    "mobile/src/screens/ChatScreen/useSaveImage.ts:29",
+    "mobile/src/screens/ChatScreen/useSaveImage.ts:40",
+    "mobile/src/screens/GalleryScreen/galleryMedia.ts:43",
+    "mobile/src/services/exportGeneratedMedia.ts:11"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-desktop-tools-offline",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Pro tools (Desktop tools section)",
+   "kind": "blocked-no-reason",
+   "title": "Desktop tools switch silent when computer offline",
+   "what": "The switch sends a request to the computer and ignores whether it was sent. The row never reads which computers are connected. With no paired computer the whole section is hidden. An unreachable computer shows 'Not reachable' with a disabled row, and its tools page offers only 'Go back'.",
+   "risk": "You flip the switch for an offline Mac and nothing changes, with no reason. With no computer paired, the phone never mentions that it can run tools on a computer.",
+   "rec": "Read the connected list in the row (the task card already does). When offline show 'Offline. Open Off Grid AI on <name>.' and make the row open Sync. With no paired computer show one row 'Pair a computer'. Add an 'Open Sync' action beside 'Go back'.",
+   "files": [
+    "mobile/pro/ui/CompanionToolsSection.tsx:44",
+    "mobile/pro/ui/CompanionToolsSection.tsx:77",
+    "mobile/pro/ui/CompanionToolsSection.tsx:96",
+    "mobile/pro/mcp/mcpToolGrantService.ts:115",
+    "mobile/pro/ui/McpToolsScreen.tsx:47",
+    "mobile/pro/ui/TaskChatCard.tsx:100"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-documents-couldnt-read",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Files, Document preview, Chat attachments",
+   "kind": "dead-end",
+   "title": "'Couldn't read' a file: no reason, no retry",
+   "what": "A file that fails to read is labelled 'Couldn't read'. The stored reason is never shown, and failed files are never tried again. The preview shows a red sentence with only Back. The Files error card has Retry, but it reopens the file picker and keeps only the last failure.",
+   "risk": "A failed file sits in the list with two words. You cannot see why or try again without finding the file a second time.",
+   "rec": "Show the stored reason as the row's second line. Add 'Try again' that restarts reading for that file, in the row and in the preview error state.",
+   "files": [
+    "mobile/src/components/knowledge/KnowledgeDocumentInfo.tsx:43",
+    "mobile/src/services/rag/index.ts:252",
+    "mobile/src/screens/DocumentPreviewScreen.tsx:158",
+    "mobile/src/screens/DocumentPreviewScreen.tsx:262",
+    "mobile/src/screens/KnowledgeBaseScreen.tsx:283",
+    "mobile/src/components/ChatInput/Attachments.tsx:268"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "mobile-app-lock-forgot-passphrase",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Lock screen, Passphrase setup",
+   "kind": "dead-end",
+   "title": "Forgotten app passphrase: no way out, no warning",
+   "what": "The lock screen has one field and Unlock. After five misses it shows a five-minute timer. There is no 'Forgot passphrase'. Setup never says the passphrase cannot be recovered.",
+   "risk": "A forgotten passphrase locks you out for good, and nothing tells you what that means or what to do.",
+   "rec": "One line at setup: 'If you forget it, the only way back in is to erase the app's data.' A 'Forgot passphrase?' link on the lock screen that says the same.",
+   "files": [
+    "mobile/src/screens/LockScreen.tsx:136",
+    "mobile/src/screens/LockScreen.tsx:146",
+    "mobile/src/screens/PassphraseSetupScreen.tsx:127"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-vault-passcode-ios",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "ios",
+   "screen": "Vault (locked)",
+   "kind": "blocked-no-reason",
+   "title": "iPhone with no passcode: Vault says 'Try again' forever",
+   "what": "The message 'Set a passcode on this phone to use Vault' is thrown only when the keychain call returns false. On an iPhone with no passcode the keychain rejects, so the screen shows 'Vault stayed locked. Try again.' There is no Settings button in either case. (The reject path was read in the keychain library, not run on a device.)",
+   "risk": "Unlock, 'Try again', unlock, in a loop. You are never told that a passcode is needed.",
+   "rec": "Map the keychain rejection to the passcode message, and add Open Settings beside Unlock.",
+   "files": [
+    "mobile/pro/vault/phoneVault.ts:86",
+    "mobile/pro/vault/phoneVault.ts:88",
+    "mobile/pro/vault/ui/VaultScreen.tsx:84"
+   ],
+   "effort": "S"
+  }
+ ]
+}

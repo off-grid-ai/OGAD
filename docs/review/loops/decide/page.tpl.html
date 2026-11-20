@@ -1,0 +1,198 @@
+<title>Product Loops Decisions</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 8 decisions. Each one: a real screen with numbered marks (and the fix drawn on it), three plain lines, one choice. */
+:root {
+  --bg: #f5f6f4; --surface: #ffffff; --fg: #141a16; --muted: #5d6862; --line: #dfe3df;
+  --accent: #0f7a4f; --accent-soft: #e3f2ea; --mark: #e0482f; --mark-fg: #ffffff;
+  --sans: "Inter", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d110f; --surface: #151a17; --fg: #e7ece8; --muted: #94a199; --line: #26302a;
+  --accent: #4cc98f; --accent-soft: #15301f; --mark: #ff6a4d; --mark-fg: #140a07; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0d110f; --surface: #151a17; --fg: #e7ece8; --muted: #94a199; --line: #26302a;
+  --accent: #4cc98f; --accent-soft: #15301f; --mark: #ff6a4d; --mark-fg: #140a07; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 14px/1.55 var(--sans); margin: 0; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-block: 28px 80px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.eyebrow, .lbl { font: 500 11px/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+h1 { font-weight: 300; font-size: 32px; line-height: 1.15; margin: 8px 0 10px; text-wrap: balance; }
+.how { margin: 0 0 18px; padding: 0; list-style: none; display: grid; gap: 4px; color: var(--muted); max-width: 72ch; }
+.how b { color: var(--fg); font-weight: 500; }
+.bar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 0; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+.progress { font: 500 12px var(--mono); }
+.bar .btn { margin-left: auto; }
+.idx { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; margin-bottom: 26px; }
+.idx a { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  color: var(--fg); text-decoration: none; font-size: 13px; min-width: 0; }
+.idx a:hover { border-color: var(--accent); }
+.idx .n { font: 500 11px var(--mono); color: var(--muted); }
+.idx .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); flex: none; }
+.dot.done { background: var(--accent); border-color: var(--accent); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 18px; scroll-margin-top: 64px;
+  display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); overflow: hidden; }
+.card.picked { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.stage { padding: 14px; border-right: 1px solid var(--line); min-width: 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin-bottom: 10px; }
+.seg button { font: 500 12px var(--sans); padding: 5px 11px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--fg); }
+.where { font: 11px var(--mono); color: var(--muted); margin-left: 10px; }
+.shot { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+.shots { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.shots.tallrow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); max-width: 520px; }
+.fig { margin: 0; min-width: 0; display: grid; gap: 4px; }
+.fig figcaption { font: 11px var(--mono); color: var(--muted); }
+.nophone { margin: 18px 0 0; font-size: 12px; color: var(--muted); border: 1px dashed var(--line); border-radius: 8px; padding: 10px; }
+.fig.phone .fixd { font-size: 10px; padding: 4px 6px; }
+.shot img { display: block; width: 100%; height: auto; }
+.mk { position: absolute; transform: translate(-50%, -50%); width: 24px; height: 24px; border-radius: 50%; background: var(--mark); color: var(--mark-fg);
+  font: 600 12px/24px var(--mono); text-align: center; box-shadow: 0 0 0 3px color-mix(in srgb, var(--mark) 35%, transparent); transition: opacity .2s; }
+.fixd { position: absolute; font: 500 12px/1.3 var(--sans); color: #0b1f15; background: #7ee2b0; border: 1.5px dashed #0b6b43; border-radius: 7px;
+  padding: 6px 9px; opacity: 0; transform: translateY(4px); transition: opacity .25s, transform .25s; pointer-events: none; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.fixd.banner { border-radius: 8px; padding: 8px 12px; }
+.shot.after .fixd { opacity: 1; transform: none; }
+.shot.after .mk { opacity: .25; }
+.legend { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 4px; font-size: 13px; }
+.legend li { display: flex; gap: 8px; align-items: baseline; }
+.legend .num { flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--mark); color: var(--mark-fg); font: 600 10px/18px var(--mono); text-align: center; transform: translateY(2px); }
+.side { padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.side h2 { margin: 0; font-weight: 400; font-size: 20px; line-height: 1.25; text-wrap: balance; }
+.side h2 .n { font: 500 13px var(--mono); color: var(--muted); margin-right: 6px; }
+.row { display: grid; gap: 2px; }
+.row p { margin: 0; }
+.row.build p { background: var(--accent-soft); padding: 8px 10px; border-radius: 7px; }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 12px var(--mono); color: var(--muted); }
+.facts b { color: var(--fg); font-weight: 500; }
+.choice { display: grid; gap: 6px; margin-top: auto; }
+.btn { font: 500 13px var(--sans); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+  cursor: pointer; text-align: left; transition: background .15s, border-color .15s, color .15s; display: flex; justify-content: space-between; gap: 8px; }
+.btn:hover { border-color: var(--accent); }
+.btn .rec { font: 500 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.btn[aria-pressed="true"] .rec { color: var(--bg); }
+.btn:disabled { opacity: .5; cursor: default; }
+.who { font: 11px var(--mono); color: var(--muted); min-height: 14px; }
+details.all { border-top: 1px solid var(--line); padding-top: 10px; }
+details.all summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+details.all ol { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 6px; font-size: 13px; max-height: 320px; overflow: auto; }
+details.all li span { color: var(--muted); font-size: 12px; display: block; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 860px) { .card { grid-template-columns: minmax(0, 1fr); } .stage { border-right: 0; border-bottom: 1px solid var(--line); } .fixd { font-size: 10px; padding: 3px 6px; } }
+@media (prefers-reduced-motion: reduce) { .fixd, .mk, .btn { transition: none; } }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">Off Grid AI · product loops · 20 Nov 2026</div>
+  <h1>8 decisions to close the product loops</h1>
+  <ul class="how">
+    <li><b>The problem:</b> screens leave people stuck. They don't say what blocks them, or give no next step.</li>
+    <li><b>Each card is one fix.</b> A desktop screen and today's Android app (0.125, shot 20 Nov), red marks where people get stuck, and "With the fix" draws the change on it.</li>
+    <li><b>Pick one button per card.</b> Each fix is built once in shared code and covers every place listed under it.</li>
+  </ul>
+  <div class="bar">
+    <span class="progress" id="progress"></span>
+    <button type="button" class="btn" id="all">Accept every recommendation</button>
+  </div>
+  <nav class="idx" id="idx" aria-label="Decisions"></nav>
+  <div id="cards"></div>
+</div>
+
+<script>
+(() => {
+  const DATA = /*DATA*/null;
+  const OPTIONS = [['shared', 'Build it', true], ['worst', 'Only the worst few', false], ['later', 'Not now', false]];
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const picks = {};
+  const shotFig = (shot, label, marks, after, kind) => `
+    <figure class="fig ${kind}">
+      <figcaption>${esc(label)}</figcaption>
+      <div class="shot">
+        <img src="shots/${shot}.jpg" alt="${esc(label)} today" loading="lazy">
+        ${marks.map((m) => `<span class="mk" style="left:${m.x}%;top:${m.y}%" aria-hidden="true">${m.n}</span>`).join('')}
+        ${after.map((a) => `<span class="fixd ${a.kind}" style="left:${a.x}%;top:${a.y}%;width:${a.w}%">${esc(a.text)}</span>`).join('')}
+      </div>
+    </figure>`;
+
+  document.getElementById('idx').innerHTML = DATA.decisions.map((d, i) =>
+    `<a href="#d-${d.id}"><span class="dot" data-dot="${d.id}"></span><span class="n">${i + 1}</span><span class="t">${esc(d.title)}</span></a>`).join('');
+
+  document.getElementById('cards').innerHTML = DATA.decisions.map((d, i) => `
+    <section class="card" id="d-${d.id}" aria-labelledby="h-${d.id}">
+      <div class="stage">
+        <div class="seg" role="group" aria-label="Show">
+          <button type="button" data-view="today" aria-pressed="true">Today</button>
+          <button type="button" data-view="after" aria-pressed="false">With the fix</button>
+        </div>
+        <div class="shots${d.tall ? ' tallrow' : ''}">
+          ${shotFig(d.shot, d.product, d.marks, d.after, d.tall ? 'tall' : 'wide')}
+          ${d.phone ? shotFig(d.phone.shot, d.phone.label, d.phone.marks, d.phone.after, 'phone') : `<p class="nophone">${esc(d.phone_note || '')}</p>`}
+        </div>
+        <ol class="legend">${[...d.marks, ...(d.phone ? d.phone.marks : [])].map((m) => `<li><span class="num">${m.n}</span>${esc(m.text)}</li>`).join('')}</ol>
+      </div>
+      <div class="side">
+        <h2 id="h-${d.id}"><span class="n">${i + 1}/${DATA.decisions.length}</span>${esc(d.title)}</h2>
+        <div class="row"><span class="lbl">Today</span><p>${esc(d.today)}</p></div>
+        <div class="row"><span class="lbl">Why it matters</span><p>${esc(d.hurts)}</p></div>
+        <div class="row build"><span class="lbl">What we build</span><p>${esc(d.build)}</p></div>
+        <div class="facts"><span>covers <b>${d.count}</b> places</span>${Object.entries(d.products).map(([p, n]) => `<span>${esc(p)} <b>${n}</b></span>`).join('')}<span>small <b>${d.small}</b>/${d.count}</span></div>
+        <div class="choice" data-call="${d.id}" role="group" aria-label="Your call on ${esc(d.title)}">
+          ${OPTIONS.map(([v, l, r]) => `<button type="button" class="btn" data-v="${v}" aria-pressed="false">${l}${r ? '<span class="rec">Recommended</span>' : ''}</button>`).join('')}
+          <span class="who"></span>
+        </div>
+        <details class="all"><summary>See all ${d.count} places this fixes</summary>
+          <ol>${d.also.map((a) => `<li>${esc(a.title)}<span>${esc(a.where)} · ${esc(a.what)}</span></li>`).join('')}</ol>
+        </details>
+      </div>
+    </section>`).join('');
+
+  document.querySelectorAll('.card').forEach((card) => {
+    const shot = card.querySelector('.shot');
+    card.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => {
+      card.querySelectorAll('.seg button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      shot.classList.toggle('after', b.dataset.view === 'after');
+    }));
+  });
+
+  const progress = () => {
+    const n = DATA.decisions.filter((d) => picks[d.id]).length;
+    document.getElementById('progress').textContent = `${n} of ${DATA.decisions.length} decided`;
+  };
+  progress();
+
+  (async () => {
+    const db = await window.claude?.use?.('db');
+    const user = await window.claude?.use?.('user');
+    const show = (id, doc) => {
+      const g = document.querySelector(`[data-call="${id}"]`);
+      if (!g) return;
+      picks[id] = doc?.choice || null;
+      g.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(doc?.choice === b.dataset.v)));
+      g.closest('.card').classList.toggle('picked', !!doc?.choice);
+      document.querySelector(`[data-dot="${id}"]`)?.classList.toggle('done', !!doc?.choice);
+      progress();
+      const who = g.querySelector('.who');
+      if (!doc?.by) { who.textContent = ''; return; }
+      user?.profiles([doc.by]).then((ps) => { who.textContent = `${ps?.[doc.by]?.name || 'Someone'} · ${new Date(doc.at).toLocaleDateString()}`; }).catch(() => {});
+    };
+    if (!db) {
+      document.querySelectorAll('.choice button, #all').forEach((b) => (b.disabled = true));
+      return;
+    }
+    const save = async (id, choice) => {
+      const doc = { screen: id, choice, by: user ? await user.id() : null, at: Date.now() };
+      show(id, doc);
+      try { await db.doc(`calls/${id}`).set(doc); } catch { document.querySelector(`[data-call="${id}"] .who`).textContent = 'Not saved. Try again.'; }
+    };
+    db.collection('calls').onSnapshot((snap) => snap.docs.forEach((d) => show(d.id, d.data())));
+    document.querySelectorAll('.choice button').forEach((b) => b.addEventListener('click', () => save(b.closest('.choice').dataset.call, b.dataset.v)));
+    document.getElementById('all').addEventListener('click', async () => {
+      for (const d of DATA.decisions) if (!picks[d.id]) await save(d.id, 'shared');
+    });
+  })();
+})();
+</script>
