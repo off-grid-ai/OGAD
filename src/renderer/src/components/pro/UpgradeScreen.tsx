@@ -160,7 +160,7 @@ export function UpgradeScreen({
           </p>
 
           {f && (
-            <AnimatedGroup as="ul" asChild="li" preset="blur-slide" className="grid gap-2 sm:grid-cols-2">
+            <AnimatedGroup as="ul" asChild="li" preset="slide" className="grid gap-2 sm:grid-cols-2">
               {f.highlights.map((h) => (
                 <div key={h} className="flex items-start gap-2 text-sm text-neutral-300">
                   <Check

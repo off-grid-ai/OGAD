@@ -132,7 +132,7 @@ function StylePresetPickerComponent({
         ) : null}
       </div>
       <AnimatedGroup
-        preset="blur-slide"
+        preset="slide"
         className={`grid w-full grid-cols-2 gap-2.5 sm:grid-cols-4 ${compact ? 'lg:grid-cols-8' : ''}`}
       >
         {presets.map((style) => {

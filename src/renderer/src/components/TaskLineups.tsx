@@ -140,7 +140,7 @@ export function TaskLineups(props: {
             }
           >
             {lineup.slots.length ? (
-              <AnimatedGroup preset="blur-slide" className="grid gap-3">
+              <AnimatedGroup preset="slide" className="grid gap-3">
                 {lineup.slots.map((slot) => {
                   const role = slot.role === 'decision' ? 'decision' : 'grounding'
                   const onDevice = !slot.remote && props.installed.includes(slot.modelId)

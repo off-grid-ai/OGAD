@@ -5233,7 +5233,7 @@ export function MemoryChat({
                                 ) : null
                               ) : (
                                 <AnimatedGroup
-                                  preset="blur-slide"
+                                  preset="slide"
                                   className="mt-6 grid w-full grid-cols-1 gap-2 sm:grid-cols-2"
                                 >
                                   {examples.map((ex) => (

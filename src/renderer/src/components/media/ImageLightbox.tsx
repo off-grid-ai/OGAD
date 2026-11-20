@@ -79,8 +79,8 @@ function ImageLightboxContent({
         <motion.img
           src={image.url}
           alt={image.alt}
-          initial={reduceMotion ? false : { opacity: 0, scale: 0.98, filter: 'blur(6px)' }}
-          animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
           exit={reduceMotion ? undefined : { opacity: 0, scale: 0.99 }}
           transition={reduceMotion ? { duration: 0 } : { duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
           className="max-h-full max-w-full rounded-md object-contain"

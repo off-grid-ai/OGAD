@@ -289,7 +289,7 @@ export function GatewayScreen(): React.ReactElement {
           </Section>
 
           <Section label="Endpoints">
-            <AnimatedGroup preset="blur-slide" className="grid gap-2 2xl:grid-cols-2">
+            <AnimatedGroup preset="slide" className="grid gap-2 2xl:grid-cols-2">
               {ENDPOINTS.map((e) => (
                 <button
                   key={e.path}

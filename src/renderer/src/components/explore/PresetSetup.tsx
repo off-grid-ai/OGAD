@@ -343,8 +343,8 @@ function IntakeField({
             key="enhancement-error"
             className="mt-1 text-xs leading-relaxed text-destructive"
             role="alert"
-            initial={reduceMotion ? false : { opacity: 0, y: -4, filter: 'blur(4px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            initial={reduceMotion ? false : { opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: reduceMotion ? 0 : 0.3, ease: EASE }}
           >
@@ -507,8 +507,8 @@ Keep the result under 240 characters. Return only the answer.`
               <motion.div
                 key="connector"
                 className="overflow-hidden"
-                initial={reduceMotion ? false : { opacity: 0, height: 0, filter: 'blur(4px)' }}
-                animate={{ opacity: 1, height: 'auto', filter: 'blur(0px)' }}
+                initial={reduceMotion ? false : { opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: reduceMotion ? 0 : 0.4, ease: EASE }}
               >

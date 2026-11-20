@@ -385,8 +385,8 @@ function VoiceMessageRow({
             <motion.div
               key="voice"
               className="flex w-full flex-col"
-              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
               transition={{ duration: reduceMotion ? 0.15 : 0.4, ease: [0.16, 1, 0.3, 1] }}
             >
               <VoiceBubble

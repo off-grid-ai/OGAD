@@ -207,9 +207,9 @@ export function ModelPipelineSection(): React.ReactElement {
               <motion.span
                 key={`${job.label}-${String(index)}`}
                 layout
-                initial={{ opacity: 0, y: 4, filter: 'blur(3px)' }}
-                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, filter: 'blur(3px)' }}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
                 transition={{ duration: 0.4, ease, delay: index * 0.05 }}
                 className={`rounded px-1.5 py-0.5 tabular-nums transition-colors duration-300 ${live.running.includes(job) ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-400'}`}
               >
