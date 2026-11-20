@@ -1,0 +1,26 @@
+# Microsoft Store package (MSIX), made from an already-built Windows app folder
+# (--prepackaged): a release's payload or the branch build's win-unpacked.
+# CI passes the Partner Center identity (MS_STORE_* secrets) with -c.appx.*.
+# The Store signs the package; the app hands updates to the Store
+# (src/main/store-distribution.ts).
+appId: co.getoffgridai.desktop.pro
+productName: Off Grid AI Desktop
+electronVersion: 39.8.10
+directories:
+  buildResources: build
+  output: dist
+win:
+  executableName: off-grid-ai
+appx:
+  artifactName: ${name}-${version}-store.${ext}
+  displayName: Off Grid AI
+  applicationId: OffGridAI
+  backgroundColor: '#0a0a0a'
+  languages:
+    - en-US
+  capabilities:
+    - internetClient
+    - privateNetworkClientServer
+    - microphone
+    - webcam
+    - location

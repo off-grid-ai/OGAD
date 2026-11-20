@@ -209,23 +209,6 @@ deb:
     - kde-spectacle
   recommends:
     - mesa-vulkan-drivers
-# Microsoft Store package (MSIX). Built only on request: `electron-builder --win appx`.
-# identityName, publisher and publisherDisplayName must match the Partner Center
-# reservation; CI passes them from secrets (-c.appx.identityName=… etc.). The Store
-# signs the package, and the app hands updates to the Store (src/main/store-distribution.ts).
-appx:
-  artifactName: ${name}-${version}-store.${ext}
-  displayName: Off Grid AI
-  applicationId: OffGridAI
-  backgroundColor: '#0a0a0a'
-  languages:
-    - en-US
-  capabilities:
-    - internetClient
-    - privateNetworkClientServer
-    - microphone
-    - webcam
-    - location
 # Ubuntu App Center (Snap Store). Built only on request: `electron-builder --linux snap`.
 # Strict confinement: each plug below is a permission the app uses. audio-record and
 # camera need a store declaration request before the store auto-connects them.
