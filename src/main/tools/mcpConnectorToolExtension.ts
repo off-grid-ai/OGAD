@@ -61,7 +61,7 @@ function formatChatConnectorExecution(
     case 'parked':
       // A routine's change waits for a person; in Chat nothing should have parked.
       if (meta.unattended) {
-        return `"${meta.tool}" on ${meta.connector}: Waiting for the user's approval in Action Approval; it runs once they approve. Tell the user it is waiting for them. Action reference: ${execution.actionId}.`
+        return `"${meta.tool}" on ${meta.connector}: Waiting for the user's approval in Actions > Approvals in Off Grid AI Desktop, or on any paired phone; it runs once they approve. Tell the user it is waiting for them and where to approve it. Action reference: ${execution.actionId}.`
       }
       return `Error: the action engine held this Chat connector action instead of starting it. No approval was created. Action reference: ${execution.actionId}.`
     case 'running':

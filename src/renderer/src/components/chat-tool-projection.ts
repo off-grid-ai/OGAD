@@ -5,7 +5,10 @@ const TASK_REFERENCE = /(?:^|\s)Task reference:\s*([A-Za-z0-9_-]+)\.?/i
 const TASK_LAUNCH_NOTICES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^(?:Web|Computer) Use started\. Live progress\b/i, 'Task started.'],
   [/^A matching task is already in flight\b/i, 'This task is already running.'],
-  [/Waiting for the user's approval in Action Approval\b/i, 'Waiting for your approval.']
+  [
+    /Waiting for the user's approval in (?:Action Approval|Actions > Approvals)\b/i,
+    'Waiting for your approval in Actions > Approvals, or on your phone.'
+  ]
 ]
 
 export function taskReferenceFromResult(result: string | undefined): string | undefined {
