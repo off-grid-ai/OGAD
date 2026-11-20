@@ -98,7 +98,7 @@ describe('<App/> desktop navigation integration', () => {
 
     let shortcutDispatched = false
     const observer = new MutationObserver(() => {
-      if (shortcutDispatched || !screen.queryByRole('heading', { name: 'Integrations' })) return
+      if (shortcutDispatched || !screen.queryByRole('heading', { name: 'Connectors' })) return
       shortcutDispatched = true
       window.dispatchEvent(new KeyboardEvent('keydown', { key: '[', metaKey: true, bubbles: true }))
     })
@@ -106,7 +106,7 @@ describe('<App/> desktop navigation integration', () => {
     try {
       // By role and name: the collapsed rail still exposes every destination to
       // assistive technology even when its visible text is hidden.
-      await user.click(screen.getByRole('button', { name: 'Integrations' }))
+      await user.click(screen.getByRole('button', { name: 'Connectors' }))
       await waitFor(() => expect(shortcutDispatched).toBe(true))
     } finally {
       observer.disconnect()
@@ -122,7 +122,7 @@ describe('<App/> desktop navigation integration', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ']', metaKey: true, bubbles: true }))
     })
     expect(
-      await screen.findByRole('heading', { name: 'Integrations' }, { timeout: 5_000 })
+      await screen.findByRole('heading', { name: 'Connectors' }, { timeout: 5_000 })
     ).not.toBeNull()
   })
 
@@ -257,7 +257,7 @@ describe('<App/> desktop navigation integration', () => {
     expect(navigation.getAttribute('aria-expanded')).toBe('true')
     expect(buttonNames()).toEqual(collapsedDestinations)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Integrations' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Connectors' }))
     await waitFor(() => expect(window.location.pathname).toBe('/connectors'))
     expect(navigation.getAttribute('aria-expanded')).toBe('true')
 
