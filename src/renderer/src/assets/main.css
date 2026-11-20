@@ -723,6 +723,18 @@ code {
   }
 }
 
+/* A live dot's ring (the meeting that is on now): it grows and fades on the compositor. */
+@keyframes og-live-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
 /* Dialog / modal transitions. The shared shadcn Dialog ships tailwindcss-animate
    classes (`animate-in`, `zoom-in-95`, …) that this project doesn't include, so
    modals used to pop in with no transition. These keyframes hook Radix's
