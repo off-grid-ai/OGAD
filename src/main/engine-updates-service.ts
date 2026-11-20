@@ -4,6 +4,7 @@ import { createEngineUpdater } from './engine-updates'
 import { getSetting, saveSetting } from './database'
 import { offerPerformancePack } from './performance-pack'
 import { dataDir } from './runtime-env'
+import { storeAllowsDownloadedEngines, storeDistribution } from './store-distribution'
 import { hasLinuxNvidiaDriver, hasWindowsNvidiaDriver } from './transcription/whisper-runtime'
 
 /** Setting key; engines stay current unless the user turns this off. */
@@ -13,7 +14,9 @@ export const engineUpdater = createEngineUpdater({
   platform: process.platform,
   dataDir,
   appVersion: () => app.getVersion(),
-  enabled: () => getSetting<boolean>(KEEP_ENGINES_UPDATED, true) !== false,
+  enabled: () =>
+    storeAllowsDownloadedEngines(storeDistribution()) &&
+    getSetting<boolean>(KEEP_ENGINES_UPDATED, true) !== false,
   setEnabled: (enabled) => saveSetting(KEEP_ENGINES_UPDATED, enabled),
   hasNvidiaGpu: () =>
     process.platform === 'win32'
