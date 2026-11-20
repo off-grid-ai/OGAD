@@ -1,0 +1,93 @@
+# Ubuntu App Center (Snap Store) package, made from a released .deb so the store
+# ships exactly what the release shipped. CI (Branch Builds → snap_release_tag)
+# downloads the release's .deb beside this folder as off-grid-ai.deb, copies the
+# icon into snap/gui, and stamps the version.
+name: off-grid-ai
+title: Off Grid AI
+version: 'VERSION'
+summary: A private AI studio that runs on your own computer
+description: |
+  Chat, make images, talk out loud, take notes and ask questions about your
+  documents, with AI that runs on your own computer. Your files and
+  conversations stay on your machine.
+
+  Off Grid AI picks open models that fit your hardware and sets them up for
+  you, NVIDIA GPUs included. Once a model is downloaded, it keeps working with
+  no internet.
+
+  Free to use. Off Grid AI Pro adds more tools for $119 once or $7.99 a month.
+website: https://getoffgridai.co
+license: AGPL-3.0-only
+base: core24
+grade: stable
+confinement: strict
+platforms:
+  amd64:
+
+apps:
+  off-grid-ai:
+    # The store's confinement replaces Chromium's setuid sandbox.
+    command: app/off-grid-ai --no-sandbox
+    extensions: [gnome]
+    desktop: meta/gui/off-grid-ai.desktop
+    environment:
+      TMPDIR: $XDG_RUNTIME_DIR
+    plugs:
+      - home
+      - removable-media
+      - network
+      - network-bind
+      - browser-support
+      - audio-playback
+      - audio-record
+      - camera
+      - screencast-legacy
+      - password-manager-service
+      - hardware-observe
+      - system-observe
+
+parts:
+  off-grid-ai:
+    plugin: dump
+    source: off-grid-ai.deb
+    source-type: deb
+    override-build: |
+      craftctl default
+      # The .deb marks itself as a deb so electron-updater installs updates with dpkg.
+      # A snap is updated by the store: without the marker the updater stays idle.
+      rm -f "$CRAFT_PART_INSTALL/opt/Off Grid AI Desktop/resources/package-type"
+    organize:
+      'opt/Off Grid AI Desktop': app
+    prime:
+      - app
+      - usr/lib
+      - usr/bin
+      - usr/share
+      - -usr/share/doc
+      - -usr/share/applications
+    # The .deb's helper tools: paste and keystrokes, screen capture, the Scribe
+    # overlay (AT-SPI + GTK), and media playback.
+    stage-packages:
+      - libnss3
+      - libxss1
+      - libxtst6
+      - libnotify4
+      - libsecret-1-0
+      - libgbm1
+      - libvulkan1
+      - libasound2t64
+      - xdg-utils
+      - xdotool
+      - x11-utils
+      - wtype
+      - grim
+      - python3-gi
+      - python3-gi-cairo
+      - gir1.2-gtk-3.0
+      - gir1.2-atspi-2.0
+      - gir1.2-gstreamer-1.0
+      - gir1.2-gst-plugins-base-1.0
+      - gstreamer1.0-plugins-base
+      - gstreamer1.0-plugins-good
+      - gstreamer1.0-pipewire
+      - gstreamer1.0-pulseaudio

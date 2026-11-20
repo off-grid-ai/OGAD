@@ -24,6 +24,7 @@ on:
           - both
           - windows
           - linux
+          - none
       pro_ref:
         # Use the Pro gitlink from the selected Core commit unless overridden.
         description: 'desktop-pro branch/tag/sha (empty = commit pinned by Core)'
@@ -47,6 +48,24 @@ on:
         type: boolean
         required: false
         default: false
+
+      snap_release_tag:
+        # Snap a published release's .deb for the Ubuntu App Center (e.g. v0.0.59).
+        # Uploads when the SNAPCRAFT_STORE_CREDENTIALS secret is set.
+        description: 'Release tag to publish to the Snap Store (empty = skip)'
+        type: string
+        required: false
+        default: ''
+      snap_channel:
+        description: 'Snap Store channel for that release'
+        type: choice
+        required: false
+        default: stable
+        options:
+          - stable
+          - candidate
+          - beta
+          - edge
 
 permissions:
   contents: read
@@ -369,3 +388,45 @@ jobs:
           path: dist/*.deb
           if-no-files-found: error
           compression-level: 0
+
+  publish-snap:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.snap_release_tag != '' }}
+    runs-on: ubuntu-24.04
+    env:
+      HAS_SNAP_LOGIN: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the release's .deb and stamp its version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.snap_release_tag }}
+        run: |
+          version="${TAG#v}"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "off-grid-ai_${version}_amd64.deb" -O snap/release/off-grid-ai.deb
+          cp resources/icon.png snap/release/snap/gui/off-grid-ai.png
+          sed -i "s/^version: 'VERSION'/version: '${version}'/" snap/release/snap/snapcraft.yaml
+          grep -n '^version:' snap/release/snap/snapcraft.yaml
+
+      - name: Build the snap
+        id: build
+        uses: snapcore/action-build@v1
+        with:
+          path: snap/release
+
+      - name: Upload snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: off-grid-ai-snap-${{ inputs.snap_release_tag }}
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Publish to the Snap Store
+        if: ${{ env.HAS_SNAP_LOGIN == 'true' }}
+        uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          release: ${{ inputs.snap_channel }}
