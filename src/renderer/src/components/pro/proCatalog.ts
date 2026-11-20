@@ -334,10 +334,10 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'devices',
-    label: 'Devices',
+    label: 'Sync',
     icon: DevicesIcon,
-    tagline: 'Your chats and settings, on every device.',
-    card: 'Chats on every device',
+    tagline: 'Your chats, notes and settings, on every device.',
+    card: 'Sync across your devices',
     group: 'private',
     description:
       'Pair your computer and phone over your local network to keep chats, projects and model settings in step. Data moves through a direct encrypted connection between your devices. Nothing is uploaded to an Off Grid AI server.',
