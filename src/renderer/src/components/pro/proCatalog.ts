@@ -334,7 +334,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'devices',
-    label: 'Sync',
+    label: 'Devices and sync',
     icon: DevicesIcon,
     tagline: 'Your chats, notes and settings, on every device.',
     card: 'Sync across your devices',
