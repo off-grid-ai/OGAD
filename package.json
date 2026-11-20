@@ -81,6 +81,7 @@
     "@offgrid/automation": "file:../shared/packages/automation",
     "@offgrid/clipboard": "file:./packages/clipboard",
     "@offgrid/design": "file:../shared/packages/design",
+    "@offgrid/failures": "file:../shared/packages/failures",
     "@offgrid/features": "file:../shared/packages/features",
     "@offgrid/i18n": "file:../shared/packages/i18n",
     "@offgrid/models": "file:../shared/packages/models",
