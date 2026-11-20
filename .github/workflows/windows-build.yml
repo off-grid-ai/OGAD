@@ -40,6 +40,14 @@ on:
         required: false
         default: ''
 
+      store_packages:
+        # Also build the Microsoft Store MSIX and the Ubuntu App Center snap from the
+        # same unpacked app. Uploaded as artifacts; store submission stays manual for now.
+        description: 'Also build store packages (MSIX, snap)'
+        type: boolean
+        required: false
+        default: false
+
 permissions:
   contents: read
 
@@ -169,6 +177,30 @@ jobs:
         run: |
           node scripts/verify-windows-dll-imports.mjs dist/win-unpacked
           node scripts/verify-main-startup-imports.mjs out/main
+
+      - name: Package Microsoft Store MSIX
+        if: ${{ inputs.store_packages }}
+        env:
+          # From Partner Center → Product identity. Without them the MSIX is a test package.
+          MS_STORE_IDENTITY_NAME: ${{ secrets.MS_STORE_IDENTITY_NAME }}
+          MS_STORE_PUBLISHER: ${{ secrets.MS_STORE_PUBLISHER }}
+          MS_STORE_PUBLISHER_NAME: ${{ secrets.MS_STORE_PUBLISHER_NAME }}
+        shell: bash
+        run: |
+          args=()
+          if [ -n "$MS_STORE_IDENTITY_NAME" ]; then
+            args+=("-c.appx.identityName=$MS_STORE_IDENTITY_NAME" "-c.appx.publisher=$MS_STORE_PUBLISHER" "-c.appx.publisherDisplayName=$MS_STORE_PUBLISHER_NAME")
+          fi
+          npx electron-builder --win appx --prepackaged dist/win-unpacked --publish never "${args[@]}"
+
+      - name: Upload Microsoft Store MSIX artifact
+        if: ${{ inputs.store_packages }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: off-grid-ai-windows-msix
+          path: dist/*.appx
+          if-no-files-found: error
+          compression-level: 0
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -300,6 +332,25 @@ jobs:
               test -z "$missing" || { printf "%s\n" "$missing" >&2; exit 1; }
             done
           '
+
+      - name: Set up LXD for snapcraft
+        if: ${{ inputs.store_packages }}
+        uses: canonical/setup-lxd@v0.1.2
+
+      - name: Package Ubuntu App Center snap
+        if: ${{ inputs.store_packages }}
+        run: |
+          sudo snap install snapcraft --classic
+          npx electron-builder --linux snap --x64 --prepackaged dist/linux-unpacked --publish never
+
+      - name: Upload Ubuntu App Center snap artifact
+        if: ${{ inputs.store_packages }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: off-grid-ai-linux-snap
+          path: dist/*.snap
+          if-no-files-found: error
+          compression-level: 0
 
       - name: Upload Linux AppImage artifact
         uses: actions/upload-artifact@v4
