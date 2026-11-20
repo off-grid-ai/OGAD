@@ -4,6 +4,8 @@
 # icon into snap/gui, and stamps the version.
 name: off-grid-ai
 title: Off Grid AI
+# The store listing icon. CI copies resources/icon.png here before the build.
+icon: snap/gui/off-grid-ai.png
 version: 'VERSION'
 summary: A private AI studio that runs on your own computer
 description: |
