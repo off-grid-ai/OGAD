@@ -29,7 +29,6 @@ apps:
     # The store's confinement replaces Chromium's setuid sandbox.
     command: app/off-grid-ai --no-sandbox
     extensions: [gnome]
-    desktop: meta/gui/off-grid-ai.desktop
     environment:
       TMPDIR: $XDG_RUNTIME_DIR
     plugs:
