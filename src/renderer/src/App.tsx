@@ -1,4 +1,5 @@
 import { appLocationPath, replaceAppLocation } from './lib/app-location'
+import { openModelsTab } from './components/ReadinessNotice'
 import { FEATURE_NAMES } from '@offgrid/features'
 import { TextMorph } from '@offgrid/operator-ui/operator/motion/text-morph'
 import { ChatDetail } from './components/ChatDetail'
@@ -263,7 +264,7 @@ const navRowClass = (expanded: boolean, active = false): string =>
 // as the full System Health panel, through a narrow IPC projection that does not
 // re-check permissions, the gateway, image generation, and native helpers every
 // five seconds. Green = running, amber = starting, grey = not loaded yet, red = stopped.
-type ChatHealth = 'ready' | 'starting' | 'idle' | 'down' | null
+type ChatHealth = 'ready' | 'starting' | 'idle' | 'none' | 'down' | null
 function ModelStatusDot({
   open,
   onClick
@@ -281,7 +282,9 @@ function ModelStatusDot({
       const next: ChatHealth =
         chat?.status === 'ready' || chat?.status === 'starting' || chat?.status === 'idle'
           ? chat.status
-          : 'down'
+          : chat?.status === 'not_installed'
+            ? 'none'
+            : 'down'
       if (live) setStatus(next)
     }
     const refresh = (): void => {
@@ -324,7 +327,9 @@ function ModelStatusDot({
           ? 'text-amber-500'
           : status === 'idle'
             ? 'text-neutral-500'
-            : 'text-red-500'
+            : status === 'none'
+              ? 'text-amber-500'
+              : 'text-red-500'
   const text =
     status == null
       ? 'Checking…'
@@ -334,15 +339,19 @@ function ModelStatusDot({
           ? 'Model starting'
           : status === 'idle'
             ? 'Model loads on first use'
-            : 'Model stopped'
+            : status === 'none'
+              ? 'No model'
+              : 'Model stopped'
   const label =
     status === 'down'
       ? 'Model server stopped. Open Setup and health.'
-      : `Model server: ${text.toLowerCase()}. Open Setup and health.`
+      : status === 'none'
+        ? 'No chat model yet. Get a model.'
+        : `Model server: ${text.toLowerCase()}. Open Setup and health.`
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={status === 'none' ? () => openModelsTab('chat') : onClick}
       title={label}
       aria-label={label}
       data-slot="button"

@@ -21,6 +21,8 @@ export interface ActiveModelSummary {
   recommendedCtx: string | null
   /** The model runs on a remote server, whose own setting decides its window. */
   remote?: boolean
+  /** True once the catalog was read: no name then means no chat model, not still loading. */
+  known?: boolean
 }
 
 /** Read the active text model + its running context window for the composer indicator.
@@ -71,7 +73,8 @@ export function useActiveModelSummary(refreshWhen: unknown): ActiveModelSummary 
           recommendedCtx: activeModel.remote
             ? null
             : formatContextWindow(recommendedContextWindow(settings?.modelMaxCtx)),
-          remote: Boolean(activeModel.remote)
+          remote: Boolean(activeModel.remote),
+          known: true
         })
       } catch {
         if (request.active)

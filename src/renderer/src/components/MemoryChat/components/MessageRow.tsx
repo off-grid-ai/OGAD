@@ -1,4 +1,7 @@
 import { memo, useCallback, useEffect, useState } from 'react'
+import { explainFailure } from '@offgrid/failures'
+import { Button } from '../../ui/button'
+import { openFailureStep } from '../../FailureNotice'
 import { attachmentKindFor, type SyncedMessageRole } from '@offgrid/sync'
 import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { Message, MessageContent } from '@offgrid/operator-ui/operator/elements/message-core'
@@ -539,6 +542,7 @@ function MessageBubble({
         <MessageMarkdown message={message} navigation={navigation} withoutArtifact={!!artifact} />
       )}
       <ResponseCutoffNotice cutoff={message.cutoff} />
+      <FailedReplyStep message={message} />
       {message.imageMemoryRetry ? (
         <ImageMemoryRetryAction
           message={message}
@@ -949,6 +953,31 @@ function VideoCardSlot({
 function FilmCardSlot({ storyId }: { storyId: string }): React.JSX.Element | null {
   const [FilmCard] = useState(() => getSlot(SLOTS.chatFilmCard))
   return FilmCard ? <FilmCard storyId={storyId} /> : null
+}
+
+
+/**
+ * A reply that failed for a known reason ends with the shared plain line ("No chat model yet.").
+ * Under it, that reason's one next step, so the line is never a dead end.
+ */
+function FailedReplyStep({ message }: Readonly<{ message: ChatMessage }>): React.JSX.Element | null {
+  if (message.role !== 'assistant' || message.streaming) return null
+  const last = (message.content ?? '').trim().split(/\n{2,}/).pop() ?? ''
+  if (!last || last.length > 220) return null
+  const failure = explainFailure(last)
+  const step = failure.step
+  if (failure.code === 'unknown' || failure.line !== last || step?.kind !== 'open') return null
+  return (
+    <Button
+      type="button"
+      size="xs"
+      variant="outline"
+      onClick={() => openFailureStep(step)}
+      className="mt-2 active:scale-95"
+    >
+      {step.label}
+    </Button>
+  )
 }
 
 export const MessageRow = memo(

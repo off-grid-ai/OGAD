@@ -1570,7 +1570,7 @@ export class LLMService {
       console.error(`[LLMService] Models not found. Please download them first.`)
       console.error(`[LLMService] Expected model: ${this.modelPath}`)
       console.error(`[LLMService] Expected mmproj: ${this.mmProjPath}`)
-      throw new Error('Models not downloaded. Please complete onboarding to download the AI model.')
+      throw new Error('No chat model yet.')
     }
 
     // Integrity check: a corrupt/truncated weights file would crash llama-server
