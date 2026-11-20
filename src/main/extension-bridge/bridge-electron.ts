@@ -192,6 +192,8 @@ export async function confirmPairing(
   win?.show()
   win?.focus()
   const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(peerAddress)
+  // The browser's features are part of Pro: say so before pairing, not after.
+  const pro = proEnabled()
   const controller = new AbortController()
   const options = {
     signal: controller.signal,
@@ -203,7 +205,11 @@ export async function confirmPairing(
     message: `Pair "${deviceName}" with Off Grid AI Desktop?`,
     detail:
       `Only continue if your browser shows these same words:\n\n${code}\n\n` +
-      `The browser can then use your chats, tools and (with Pro) vault through an encrypted, ${
+      `${
+        pro
+          ? 'The browser can then use your chats, tools and vault'
+          : 'The browser extension is part of Off Grid AI Pro. Once Pro is on here, the browser can use your chats, tools and vault'
+      } through an encrypted, ${
         local
           ? 'private link on this computer. '
           : `private link. This request comes from another device on the network (${peerAddress}). `
@@ -212,19 +218,28 @@ export async function confirmPairing(
   const shown = win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)
   const timeout = setTimeout(() => controller.abort(), PAIR_TIMEOUT_MS)
   try {
-    return (await shown).response === 0 && !controller.signal.aborted
+    const paired = (await shown).response === 0 && !controller.signal.aborted
+    // Paired without Pro: the next step is the Pro page, so open it here.
+    if (paired && !pro) win?.webContents.send('navigate', 'explore')
+    return paired
   } finally {
     clearTimeout(timeout)
   }
 }
 
 /** Paired browsers and whether each is connected over the live socket now (Tasks > Web Use). */
-export function listBridgeBrowsers(): Array<{ id: string; name: string; connected: boolean }> {
+export function listBridgeBrowsers(): Array<{
+  id: string
+  name: string
+  connected: boolean
+  pairedAt: number
+}> {
   const live = new Set(links.list().map((l) => l.browser.id))
   return (readFile()?.browsers ?? []).map((b) => ({
     id: b.id,
     name: b.name,
-    connected: live.has(b.id)
+    connected: live.has(b.id),
+    pairedAt: b.pairedAt
   }))
 }
 
@@ -412,12 +427,7 @@ const settingsStore = createSettingsStore({
   imageParams: (model, settings) =>
     resolveImageParameters({ id: model }, settings as Parameters<typeof resolveImageParameters>[1]),
   setImageParam: (settings, model, key, value) =>
-    setImageParameter(
-      settings as Parameters<typeof setImageParameter>[0],
-      model,
-      key,
-      value
-    ),
+    setImageParameter(settings as Parameters<typeof setImageParameter>[0], model, key, value),
   transcription: readTranscriptionInfo
 })
 

@@ -77,11 +77,18 @@ export function createBridgeService(deps: BridgeDeps): BridgeService {
   const handlers = rpcHandlers(deps, forgetSession)
 
   return {
-    /** Unauthenticated: the desktop's public key and protocol version. Nothing private. */
+    /**
+     * Unauthenticated: the desktop's public key and protocol version, and whether Pro is on here,
+     * so the extension can say it needs Pro before the person pairs. Nothing private.
+     */
     async info(): Promise<BridgeReply> {
       return {
         status: 200,
-        body: { v: BRIDGE_VERSION, publicKey: await exportPublicKey(deps.keys.publicKey) }
+        body: {
+          v: BRIDGE_VERSION,
+          publicKey: await exportPublicKey(deps.keys.publicKey),
+          pro: deps.data.features().pro
+        }
       }
     },
 
