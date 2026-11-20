@@ -5,6 +5,8 @@ import { settingsChanged } from './settings-version'
 import { storageDownloadsActive } from './model-storage-guard'
 import { moveModelStorage } from './model-storage-move'
 import { ipcMain, BrowserWindow, app, clipboard } from 'electron'
+import { productAction } from '@offgrid/features'
+import { defaultBrowserTarget } from './accessibility/ax-host'
 import { listBridgeBrowsers, removeBridgeBrowser } from './extension-bridge/bridge-electron'
 import { setupAIRequestLogIPC } from './ai-request-log-ipc'
 import { modelDisplayName } from '@offgrid/models'
@@ -635,6 +637,12 @@ export function setupIPC(): void {
   // Browsers paired through the extension bridge, and which are connected (Tasks > Web Use).
   ipcMain.handle('extension-bridge:browsers', () => listBridgeBrowsers())
   ipcMain.handle('extension-bridge:remove', (_e, id: string) => removeBridgeBrowser(id))
+  // "Get the extension", from any screen: the store for this computer's default browser.
+  ipcMain.handle('extension-bridge:get', async () => {
+    const browser = (await defaultBrowserTarget().catch(() => null))?.name
+    const { url } = productAction({ product: 'extension', browser })
+    if (url) await (await import('electron')).shell.openExternal(url)
+  })
 
   // App version (for the Settings footer — so users know what build they're on). A packaged app
   // reads its own; an unpackaged launch of a script reports Electron's, so it uses the build's.

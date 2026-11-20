@@ -29,8 +29,19 @@ import {
   type ProLicenseInfo
 } from './licensing/license-service'
 import { effectiveProLicenseInfo } from './licensing/effective-license'
+import { clearLicenceLoss, licenceRemovedBy } from './licensing/licence-loss'
 import { withUtm } from '../shared/utm'
 import { trackFlow } from './analytics'
+
+/** The status a window reads: the license, plus who removed this device when that is why Pro is off. */
+function shownLicenseInfo(info: ProLicenseInfo): ProLicenseInfo {
+  if (info.isPro) {
+    clearLicenceLoss()
+    return info
+  }
+  const removedBy = licenceRemovedBy()
+  return removedBy === null ? info : { ...info, removedBy }
+}
 
 export function setupLicenseIpc(): void {
   let licenseChangeRevision = 0
@@ -42,7 +53,7 @@ export function setupLicenseIpc(): void {
     const effectiveInfo = effectiveProLicenseInfo(info, proEnabled())
     const publish = (): void => {
       for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send('license:changed', effectiveInfo)
+        win.webContents.send('license:changed', shownLicenseInfo(effectiveInfo))
       }
     }
     if (effectiveInfo.isPro) {
@@ -79,7 +90,7 @@ export function setupLicenseIpc(): void {
 
   ipcMain.handle('license:status', () => {
     const info = getProLicenseInfo()
-    return effectiveProLicenseInfo(info, proReady())
+    return shownLicenseInfo(effectiveProLicenseInfo(info, proReady()))
   })
   ipcMain.handle('license:activate', async (_e, key: string) => {
     const result = await activateProByKey(key)

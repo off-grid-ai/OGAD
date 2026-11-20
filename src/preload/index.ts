@@ -451,6 +451,8 @@ const offGridApi = {
     return unsubscribe('gateway:keep-loaded:engine-update', subscription)
   },
   getSettings: () => ipcRenderer.invoke('settings:get'),
+  // Opens the extension's store page for this computer's default browser.
+  getExtension: (): Promise<void> => ipcRenderer.invoke('extension-bridge:get'),
   aiLogsList: (
     query: import('../shared/ai-request-log').AILogQuery = {}
   ): Promise<import('../shared/ai-request-log').AILogPage> =>

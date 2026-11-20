@@ -12,6 +12,8 @@ export interface ProLicenseInfo {
   tier: ProTier | null
   expiry: string | null
   verifiedAt: number
+  /** Pro is off because another device removed this one: its name, or '' when not known. */
+  removedBy?: string
 }
 
 export interface ProLicensedDevice {
