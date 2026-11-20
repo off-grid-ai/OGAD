@@ -64,3 +64,23 @@ Also needed:
 - Apple's commission: 15% on the Small Business Program.
 
 Decision for Mac: the App Store edition scope (the table above) and IAP pricing.
+
+### Where each blocked feature switches off (audit 2026-11-20)
+
+Add `isMacAppStore()` to `src/main/store-distribution.ts`, and expose `mas: process.mas === true`
+beside `platform` in `src/preload/index.ts`, so the renderer can hide controls.
+
+| Feature | Gate |
+| --- | --- |
+| `computer_use`, `messages_send`, `mail_send` tools | `specsForPlatform()` in `src/main/tools/nativeActionToolExtension-logic.ts` (also its Mac system hint); backstops `input/actuation.ts` `loadActuation()`, `actions/semantic-rail.ts` |
+| Computer use UI | `internal-tab-route.ts` (computer_use tab), `explore/presetCatalog.ts` computer-use presets; keep Web Use |
+| Dictation paste at cursor | `pro/main/text-injection.ts` `pasteIntoApp()` returns false (text stays on clipboard); `focusInfo()`, `screenText()` return empty |
+| Push-to-talk hold | `pro/main/dictation/controller.ts` `needsKeyUp`; toggle hotkey still works |
+| Scribe overlay, system-wide hotkey | `pro/main/writing/overlay/overlay-service.ts` `overlayHelper()` → null; `pro/main/writing/system-wide.ts` `wanted` |
+| Clipboard quick-paste, file copy | `pro/main/paste-command.ts` → null; `pro/main/clipboard.ts` uses Electron clipboard instead of osascript |
+| Accessibility text for capture | `pro/main/ax-text.ts` `readAxSnapshot()` unavailable branch |
+| Night wake (pmset) | `pro/main/capture-ipc.ts` `capture:set-night-wake` |
+| Kev Python runtime | `src/main/kev-runtime-pack.ts` `kevRuntimeAsset()` → null under `storeAllowsDownloadedEngines` |
+| Buy links | `src/shared/product-links.ts` `PRO_PURCHASE_URL`; opened from `UpgradeScreen.tsx` and `license-ipc.ts` |
+
+Calendar, reminders and contacts use EventKit and Contacts, which work in the sandbox with their entitlements.
