@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -99,6 +99,11 @@ afterAll(async () => {
 const names = (tools: unknown[]): unknown[] => tools.map((tool) => (tool as { name: string }).name)
 
 describe('pairing dialog peer address', () => {
+  // The dialog says whether the browser needs Pro first, so the build constant must be set.
+  beforeEach(() => {
+    vi.stubGlobal('__OFFGRID_PRO__', true)
+  })
+
   it.each(['192.168.1.20', '100.64.0.12'])('identifies the network device %s', async (address) => {
     await confirmPairing('same words', 'Browser', address)
     const detail = pairingDialogs.at(-1)!.detail
