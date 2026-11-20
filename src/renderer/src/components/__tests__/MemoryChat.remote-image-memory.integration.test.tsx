@@ -139,8 +139,20 @@ describe('<MemoryChat/> remote image memory refusal', () => {
     window.api.generateImage = async () => {
       throw new Error('Provider rejected the image prompt.')
     }
+    // An image model is there: with none, Image opens Models instead of image mode.
+    let imageStatusRead = false
+    window.api.imageGenStatus = async () => {
+      imageStatusRead = true
+      return {
+        available: true,
+        models: ['remote-image:server:flux'],
+        active: 'remote-image:server:flux',
+        modelNames: { 'remote-image:server:flux': 'Flux' }
+      }
+    }
     renderChat({ conversationId: 'conversation-a' })
     const user = userEvent.setup()
+    await waitFor(() => expect(imageStatusRead).toBe(true))
     await user.click(await screen.findByRole('button', { name: 'Image' }))
     await sendImagePrompt('A moonlit coast', user)
 

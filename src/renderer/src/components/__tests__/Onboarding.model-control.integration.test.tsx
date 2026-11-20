@@ -217,7 +217,8 @@ describe('desktop onboarding: what you want → which ones → how it works', ()
     const onComplete = vi.fn()
     render(<Onboarding onComplete={onComplete} />)
     await user.click(await screen.findByRole('button', { name: /^Open / }))
-    expect(onComplete).toHaveBeenCalledOnce()
+    // Images first checks for an image model (Models when there is none), then leaves.
+    await waitFor(() => expect(onComplete).toHaveBeenCalledOnce())
     expect(localStorage.getItem(ONBOARDING_OPEN_KEY)).toBeTruthy()
   })
 
