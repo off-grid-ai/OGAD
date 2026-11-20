@@ -15,7 +15,11 @@ interface CatalogMessage {
 const isCatalogMessage = (data: unknown): data is CatalogMessage =>
   typeof data === 'object' && data !== null && (data as { type?: unknown }).type === 'offgrid-i18n'
 
+// A locale code (en, pt-BR, zh-Hant), so ?lang= can only name a catalog folder, never a path.
+const LOCALE_CODE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/
+
 async function loadCatalog(code: string): Promise<Strings> {
+  if (!LOCALE_CODE.test(code)) return {}
   const read = async (file: string): Promise<Strings> => {
     const res = await fetch(`./catalogs/${code}/${file}.json`)
     return res.ok ? ((await res.json()) as Strings) : {}

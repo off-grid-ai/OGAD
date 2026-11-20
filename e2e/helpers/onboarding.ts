@@ -60,6 +60,9 @@ export const completeOnboarding = async (page: Page, maxSteps = 10): Promise<voi
     await expect(skip).toBeHidden()
     // Reaching the shell is the point of this helper — assert it rather than hoping.
     await expect(cta).toBeHidden()
+    // Skip leaves analytics unanswered, so the app asks after the first reply and its dialog
+    // covers the chat. Answer it the way Not now does; analytics journeys own that prompt.
+    await page.evaluate(() => window.api.analytics.dismissPrompt())
   }
 
   // Most journeys test the app shell, not first-model setup. A fresh profile has no

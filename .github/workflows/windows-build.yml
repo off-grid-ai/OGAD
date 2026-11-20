@@ -132,6 +132,9 @@ jobs:
           }
           Write-Host "OK: computer-use addon present ($((Get-Item $addon).Length) bytes)"
 
+      - name: Windows Vulkan Whisper
+        uses: ./.github/actions/windows-whisper
+
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
         shell: pwsh
         env:
