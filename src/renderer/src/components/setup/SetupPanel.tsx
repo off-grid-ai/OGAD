@@ -1,3 +1,4 @@
+import { FailureNotice } from '../FailureNotice'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import {
   MagicWand,
@@ -145,6 +146,8 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const [modeError, setModeError] = useState('')
   const [loadingPlan, setLoadingPlan] = useState(false)
   const [plan, setPlan] = useState<SetupPlan | null>(null)
+  // A plan that could not load says so, with Try again: an empty list and a dead button said nothing.
+  const [planError, setPlanError] = useState<unknown>(null)
   const { isPro } = useRendererEntitlement()
   // What onboarding's picks need is checked; with no picks, chat alone, as before.
   const [picked] = useState(() => setupKindsForPicks(isPro))
@@ -162,8 +165,10 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
       try {
         const p = (await api.setupPlan(m)) as SetupPlan | null
         setPlan(p ?? null)
-      } catch {
+        setPlanError(null)
+      } catch (error) {
         setPlan(null)
+        setPlanError(error)
       }
     },
     [api]
@@ -328,6 +333,16 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               {modeError}
             </Alert>
           )}
+          {planError && !plan && !loadingPlan ? (
+            <FailureNotice
+              className="mt-2"
+              error={planError}
+              onRetry={() => {
+                setLoadingPlan(true)
+                void loadPlan(mode).finally(() => setLoadingPlan(false))
+              }}
+            />
+          ) : null}
         </div>
 
         {/* Exactly which models it will set up — the full baseline, no surprises */}
