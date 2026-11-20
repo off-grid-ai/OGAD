@@ -73,6 +73,11 @@ import {
 } from './tools/tool-origin'
 import { selectChatToolSchemas } from './tools/chat-tool-selection'
 import { budgetTools } from './tools/tool-budget'
+import {
+  claimsTaskLaunch,
+  historyContentForModel,
+  LAUNCH_CLAIM_RETRY_INSTRUCTION
+} from './tools/task-launch-history'
 import { ANSWER_NOW_INSTRUCTION, emptyAnswerReason } from '../shared/empty-answer'
 
 /** What a project chat's system prompt says about its knowledge base (Settings → Project knowledge). */
@@ -150,6 +155,8 @@ export type ToolActivity =
   | { kind: 'waiting_server'; label: string }
   /** `summary` stands in for every earlier turn; the app keeps it with the conversation. */
   | { kind: 'compacted'; label: 'Compacted'; summary?: string }
+  /** The streamed answer was wrong and is dropped; the model answers again. */
+  | { kind: 'answer_discarded'; label: string }
   /** Reading the conversation's attached documents, then what was read. */
   | import('./documents/chat-turn').DocumentsActivity
 
@@ -1085,7 +1092,7 @@ export async function toolChat(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const messages: any[] = [
     { role: 'system', content: sys },
-    ...history.map((m) => ({ role: m.role, content: m.content })),
+    ...history.map((m) => ({ role: m.role, content: historyContentForModel(m.role, m.content) })),
     {
       role: 'user',
       content: buildContentParts(
@@ -1351,6 +1358,7 @@ export async function toolChat(
   // Calls per tool this response whose arguments failed the schema check.
   const invalidArgumentCalls = new Map<string, number>()
   let stopInstruction: string | undefined
+  let launchClaimRetried = false
   while (toolCalls.length < maxToolCalls) {
     // Past the soft threshold, older bulky tool results become short stubs so a long
     // tool sequence keeps room to finish instead of ending in "Context is full."
@@ -1648,6 +1656,23 @@ export async function toolChat(
       continue // let the model use the results
     }
     // No tool calls this round: `content` is the final answer (already streamed via onDelta).
+    // A reply claiming a task started with no task tool called would leave the chat saying
+    // "Web Use started" while nothing runs (found live): ask once more, plainly.
+    if (
+      !launchClaimRetried &&
+      !toolCalls.some((call) => isTaskAction(call.name)) &&
+      roundToolNames.some((name) => isTaskAction(name)) &&
+      claimsTaskLaunch(answerFrom(content)) &&
+      !opts.signal?.aborted
+    ) {
+      launchClaimRetried = true
+      opts.onActivity?.({ kind: 'answer_discarded', label: 'Starting the task…' })
+      // A user turn, not a system one: Qwen-style templates reject a system message mid-chat.
+      messages.push({ role: 'assistant', content: answerFrom(content) })
+      messages.push({ role: 'user', content: LAUNCH_CLAIM_RETRY_INSTRUCTION })
+      round += 1
+      continue
+    }
     if (!answerFrom(content).trim() && !opts.signal?.aborted) {
       // Finished with nothing to say (often reasoning used the whole allowance): ask once more
       // for an answer from what is already here, then say why if there is still none.

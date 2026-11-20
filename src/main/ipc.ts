@@ -1541,6 +1541,7 @@ export function setupIPC(): void {
                 }
               },
               onActivity: (activity) => {
+                if (activity.kind === 'answer_discarded') resetChatStreamPartial(streamId)
                 try {
                   sender.send('rag:stream', { streamId, type: 'step', step: activity })
                 } catch {

@@ -3974,9 +3974,10 @@ export function MemoryChat({
         data.step &&
         typeof data.step === 'object' &&
         'kind' in data.step &&
-        data.step.kind === 'restarting_model'
+        (data.step.kind === 'restarting_model' || data.step.kind === 'answer_discarded')
       ) {
-        // The same model restarts after a GPU fault; the reply placeholder starts over.
+        // The same model restarts after a GPU fault, or its streamed answer was dropped (it
+        // claimed a task started without starting one): the reply placeholder starts over.
         reasoningByStream.current[data.streamId] = ''
         answerByStream.current[data.streamId] = ''
         timelineByStream.current[data.streamId] = []
