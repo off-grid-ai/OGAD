@@ -7,6 +7,7 @@ import { remoteTextVision } from '../shared/model-settings-rules'
 import { parseNativeBackend } from './runtime-backends'
 import { spawn, execSync, ChildProcess } from 'child_process'
 import { Mutex } from 'async-mutex'
+import { runExclusiveAbortable } from './llm/abortable-exclusive'
 import { prepareModelMemory, registerModelEvictor } from './model-memory'
 import { callHook } from './bootstrap/hookRegistry'
 import path from 'path'
@@ -2394,7 +2395,7 @@ export class LLMService {
   ): Promise<string> {
     await this.ensureReady()
     const exclusive = <T>(fn: () => Promise<T>): Promise<T> =>
-      opts.shared ? fn() : this.chatMutex.runExclusive(fn)
+      opts.shared ? fn() : runExclusiveAbortable(this.chatMutex, fn, withJobSignal(opts.signal))
     return exclusive(async () => {
       try {
         const payload: Record<string, unknown> = {
