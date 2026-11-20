@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { FEATURE_NAMES } from '@offgrid/features'
 import { AnimatePresence, motion } from 'motion/react'
 import { persistToggle } from '@renderer/lib/persist-toggle'
 import {
@@ -129,7 +130,7 @@ type ToolSetting = { name: string; description: string; enabled?: boolean }
 
 const TOOL_GROUPS = [
   {
-    label: 'God',
+    label: FEATURE_NAMES.assistant,
     matches: (name: string): boolean => ['computer_use', 'web_use'].includes(name)
   },
   {

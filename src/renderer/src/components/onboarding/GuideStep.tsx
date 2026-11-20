@@ -72,7 +72,7 @@ export function GuideStep({
         <div className="grid gap-2">
           <QuickConnections onBusyChange={onConnectionBusy} />
           <p className="text-xs text-muted-foreground">
-            Optional. You can add or change connections in Integrations later.
+            Optional. You can add or change connections in Connectors later.
           </p>
         </div>
       )

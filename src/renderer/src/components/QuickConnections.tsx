@@ -79,7 +79,7 @@ export function QuickConnections({
       </div>
       {providersFailed && (
         <div role="alert" className="flex items-center gap-3 text-xs">
-          <p>Google, Microsoft and Obsidian could not load. Open Integrations later to add them.</p>
+          <p>Google, Microsoft and Obsidian could not load. Open Connectors later to add them.</p>
         </div>
       )}
       {connection.errors.load && (

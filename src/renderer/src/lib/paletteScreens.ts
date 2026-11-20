@@ -32,9 +32,9 @@ export function internalTabPaletteScreens(
  */
 const SCREEN_ALIASES: Record<string, string[]> = {
   settings: ['preferences', 'config'],
-  devices: ['sync', 'mesh', 'phone', 'pairing'],
+  devices: ['devices', 'sync', 'mesh', 'phone', 'pairing'],
   models: ['download', 'gguf', 'llm'],
-  connectors: ['integrations', 'mcp', 'tools'],
+  connectors: ['connectors', 'integrations', 'accounts', 'mcp', 'tools'],
   'memory-chat': ['chat', 'ask'],
   replay: ['timeline', 'movie', 'history'],
   day: ['today', 'timeline'],
@@ -47,7 +47,8 @@ const SCREEN_ALIASES: Record<string, string[]> = {
   projects: ['folders'],
   search: ['find'],
   clipboard: ['copy', 'paste'],
-  voice: ['speech', 'dictation'],
+  voice: ['voice', 'speech', 'dictation'],
+  explore: ['god', 'ares', 'assistant'],
   notifications: ['alerts', 'inbox']
 }
 

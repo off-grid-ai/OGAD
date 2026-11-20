@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from './ui/button'
+import { openModelSettingsPanel, type ModelSettingsPanelTab } from '@renderer/lib/model-settings-panel'
+import { FEATURE_NAMES } from '@offgrid/features'
 import { motion } from 'motion/react'
 import { ProgressiveBlur } from './ui/progressive-blur'
 import { Section } from '@offgrid/operator-ui/operator/experience'
@@ -36,12 +39,13 @@ const SETTINGS_SECTION_TITLES: Record<string, string> = {
   setup: 'Setup & health',
   permissions: 'Setup & health',
   performance: 'Engines',
+  'model-settings': 'Model settings',
   capture: 'Capture & processing',
   'computer-use': 'Computer use',
   remote: 'Remote model server',
   'ai-activity': 'AI activity',
-  'god-twin': 'God',
-  sync: 'Device sync',
+  'god-twin': FEATURE_NAMES.assistant,
+  sync: FEATURE_NAMES.sync,
   identity: 'You',
   secretary: 'What Off Grid AI has learned',
   'pro-plan': 'Your Pro plan',
@@ -53,6 +57,16 @@ const SETTINGS_SECTION_TITLES: Record<string, string> = {
   shortcuts: 'Keyboard shortcuts',
   update: 'Software update'
 }
+
+/** The model-settings drawer's tabs, opened from Settings as from Models and Chat. */
+const MODEL_SETTINGS_TABS: Array<[ModelSettingsPanelTab, string]> = [
+  ['model', 'Text'],
+  ['image', 'Image'],
+  ['video', 'Video'],
+  ['voice', 'Spoken replies'],
+  ['transcription', 'Transcription'],
+  ['tools', 'Tools']
+]
 
 const SETTINGS_TITLE_IDS = Object.fromEntries(
   Object.entries(SETTINGS_SECTION_TITLES)
@@ -221,6 +235,20 @@ export function Settings({
             </SettingsCard>
 
             <SettingsCard
+              title="Model settings"
+              summary="How each model answers: text, images, video, spoken replies, transcription and tools."
+              delay={0.137}
+            >
+              <div className="flex flex-wrap gap-2">
+                {MODEL_SETTINGS_TABS.map(([tab, label]) => (
+                  <Button key={tab} variant="outline" size="sm" onClick={() => openModelSettingsPanel(tab)}>
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </SettingsCard>
+
+            <SettingsCard
               title="Capture & processing"
               summary="See capture health, recover pending frames, and control model scheduling in one place."
               delay={0.14}
@@ -251,7 +279,7 @@ export function Settings({
             {/* God is Pro: its settings show only where God does. */}
             {isPro && GodSettings && (
               <SettingsCard
-                title="God"
+                title={FEATURE_NAMES.assistant}
                 summary="Your assistant's name, rules, wake word and Ares on the desktop."
                 delay={0.17}
               >

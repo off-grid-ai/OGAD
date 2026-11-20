@@ -1,4 +1,5 @@
 import { track } from '@renderer/lib/analytics'
+import { FEATURE_NAMES } from '@offgrid/features'
 import { reportChatInput } from '@renderer/lib/usage-tracker'
 import { restoredStreamMessage, withRestoredStream } from '@renderer/lib/chat-stream-restore'
 import { stopChatRun } from '@renderer/lib/chat-stop'
@@ -5955,7 +5956,7 @@ export function MemoryChat({
                                     setToolsOn((t) => !t)
                                   }}
                                 >
-                                  <GodIcon /> <span className="flex-1">God</span>
+                                  <GodIcon /> <span className="flex-1">{FEATURE_NAMES.assistant}</span>
                                   <span
                                     className={`text-xs ${toolsOn ? 'text-primary' : 'text-muted-foreground'}`}
                                   >
@@ -5984,13 +5985,20 @@ export function MemoryChat({
                                     setConnectorsOn((t) => !t)
                                   }}
                                 >
-                                  <Plug /> <span className="flex-1">Connectors</span>
+                                  <Plug /> <span className="flex-1">{FEATURE_NAMES.connectors}</span>
                                   <span
                                     className={`text-xs ${connectorsOn ? 'text-primary' : 'text-muted-foreground'}`}
                                   >
                                     {connectorsOn ? 'On' : 'Off'}
                                   </span>
-                                </DropdownMenuItem></>
+                                </DropdownMenuItem>
+                                {onOpenConnectors ? (
+                                  <DropdownMenuItem onSelect={() => onOpenConnectors()}>
+                                    <span className="flex-1 pl-6 text-muted-foreground">
+                                      Manage {FEATURE_NAMES.connectors.toLowerCase()}
+                                    </span>
+                                  </DropdownMenuItem>
+                                ) : null}</>
 )}
                               </DropdownMenuContent>
                             </DropdownMenu>

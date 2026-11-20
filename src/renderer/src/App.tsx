@@ -1,4 +1,5 @@
 import { appLocationPath, replaceAppLocation } from './lib/app-location'
+import { FEATURE_NAMES } from '@offgrid/features'
 import { TextMorph } from '@offgrid/operator-ui/operator/motion/text-morph'
 import { ChatDetail } from './components/ChatDetail'
 import { CommandPalette } from './components/CommandPalette'
@@ -1092,12 +1093,12 @@ function AppContent(): React.JSX.Element {
         proItem('entities'),
         proItem('notes'),
         {
-          label: 'Projects',
+          label: FEATURE_NAMES.projects,
           icon: <IconFolders className="h-5 w-5 shrink-0" />,
           view: 'projects' as ViewMode
         },
         {
-          label: 'Chat',
+          label: FEATURE_NAMES.chat,
           icon: <IconMessageCircle className="h-5 w-5 shrink-0" />,
           view: 'memory-chat' as ViewMode
         },
@@ -1118,7 +1119,7 @@ function AppContent(): React.JSX.Element {
       icon: <IconTool className="h-5 w-5 shrink-0" />,
       items: navItems(
         {
-          label: 'Integrations',
+          label: FEATURE_NAMES.connectors,
           icon: <IconPlug className="h-5 w-5 shrink-0" />,
           view: 'connectors' as ViewMode
         },

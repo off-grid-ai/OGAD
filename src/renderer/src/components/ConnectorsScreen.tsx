@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef, type ReactElement } from 'react'
+import { FEATURE_NAMES } from '@offgrid/features'
 import { ConnectorPullQueryField } from './ConnectorPullQueryField'
 import { flow } from '@renderer/lib/analytics'
 import { ConnectorSecretsForm } from './ConnectorSecretsForm'
@@ -631,7 +632,7 @@ export function ConnectorsScreen(): ReactElement {
   return (
     <PageShell
       className="bg-neutral-950 font-mono"
-      title="Integrations"
+      title={FEATURE_NAMES.connectors}
       description="Connect a tool. Actions it takes run only after you approve them."
       actions={
         <div className="flex items-center gap-3">
