@@ -44,8 +44,12 @@ export async function createTaskExecutionPlan(
       const modelStartedAt = Date.now()
       recordComputerUseMetric('reasoningCalls')
       try {
+        // No thinking: the plan is a few short phases in a fixed JSON shape, and the step model
+        // does not think either. With thinking on, the reasoning budget is unlimited by default,
+        // so a local model sharing the GPU sat on "Preparing the plan" for minutes before any
+        // action ran (one prompt got no answer in 96 s; the same prompt without thinking took 5 s).
         const response = await llm.chat(input, [], undefined, undefined, {
-          enableThinking: true,
+          disableThinking: true,
           responseFormat: TASK_PLAN_RESPONSE_FORMAT,
           signal
         })
