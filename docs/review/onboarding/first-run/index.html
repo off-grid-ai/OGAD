@@ -1,0 +1,132 @@
+<title>Desktop First Run</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; the finding and decision first, then the clip, then screens in a two-up grid. */
+:root {
+  --bg: #f6f8f7; --surface: #ffffff; --fg: #111614; --muted: #5b6662; --line: #dde3e0;
+  --accent: #0f8f5f; --accent-soft: #e3f3ec; --warn: #a15c07; --warn-soft: #fbf0df;
+  --display: "Inter", system-ui, sans-serif; --body: "Inter", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0b0e0d; --surface: #121715; --fg: #e8eeeb; --muted: #8d9994; --line: #222a27;
+  --accent: #34d399; --accent-soft: #0f2a20; --warn: #f2b45a; --warn-soft: #2a1f0e; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0b0e0d; --surface: #121715; --fg: #e8eeeb; --muted: #8d9994; --line: #222a27;
+  --accent: #34d399; --accent-soft: #0f2a20; --warn: #f2b45a; --warn-soft: #2a1f0e; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--body); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 40px 80px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 48px; }
+.label { font: 500 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+h1 { font: 300 clamp(30px, 4vw, 44px)/1.1 var(--display); letter-spacing: -.02em; margin: 10px 0 8px; text-wrap: balance; }
+h2 { font: 300 24px/1.2 var(--display); letter-spacing: -.01em; margin: 6px 0 0; text-wrap: balance; }
+p { margin: 0; max-width: 68ch; }
+.lead { color: var(--muted); }
+section { display: grid; gap: 16px; }
+.finding { background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  border-radius: 12px; padding: 20px 22px; display: grid; gap: 12px; }
+.finding .label { color: var(--warn); }
+ol.flow { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 70ch; }
+.times { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line);
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.times div { background: var(--surface); padding: 14px 16px; display: grid; gap: 4px; }
+.times b { font: 400 22px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.times span { font-size: 13px; color: var(--muted); }
+.decide { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 20px 22px; display: grid; gap: 14px; }
+.opts { display: grid; gap: 10px; }
+.opt { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.opt.rec { border-color: var(--accent); background: var(--accent-soft); }
+.opt .k { font: 500 12px/1.6 var(--mono); color: var(--accent); }
+.opt .t { font-weight: 500; }
+.opt p { grid-column: 2; color: var(--muted); font-size: 14px; }
+video, .shot img { width: 100%; max-width: 100%; display: block; border-radius: 10px; border: 1px solid var(--line); background: #000; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 24px; }
+@media (max-width: 720px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.shot { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.shot h3 { font: 500 15px/1.3 var(--body); margin: 0; }
+.shot p { color: var(--muted); font-size: 14px; }
+.tag { display: inline-block; font: 500 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  padding: 4px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); margin-left: 6px; vertical-align: 2px; }
+.tag.w { background: var(--warn-soft); color: var(--warn); }
+.note { font-size: 13px; color: var(--muted); }
+a { color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="label">Off Grid AI Desktop · first run · 21 Nov</div>
+    <h1>From first launch to first reply</h1>
+    <p class="lead">A new person on a fresh profile, recorded on the Linux workstation (0.0.59 dev build, branch feature/onboarding-picks). Real clicks, real catalog, nothing seeded.</p>
+  </header>
+
+  <section class="decide">
+    <div class="label">Now · LFM3 starter</div>
+    <h2>Set up my models starts a chat model at once</h2>
+    <p>Your call: start on LFM. Set up my models now downloads <strong>LFM3 1.7B</strong> (1.1 GB) straight away and makes it the chat model when it lands. A card shows the progress over whatever screen the person is on. The GPU screen waits for a later launch. The model sized to this computer stays under Configure.</p>
+    <div class="times">
+      <div><b>8 s</b><span>four onboarding steps</span></div>
+      <div><b>132 s</b><span>Set up my models → LFM3 ready</span></div>
+      <div><b>&lt;30 s</b><span>message → first reply</span></div>
+      <div><b>&lt;3½ min</b><span>launch → first reply</span></div>
+    </div>
+    <p class="note">Measured on the Linux workstation on its own connection, fresh profile, no GPU screen in the way. Before: 22.6 GB and three screens before the first download, so 30–60 minutes.</p>
+  </section>
+
+  <section>
+    <div class="label">The new run</div>
+    <h2>Launch to first reply (3× speed)</h2>
+    <video src="media/starter-run.mp4" controls muted playsinline preload="metadata"></video>
+    <div class="grid">
+      <div class="shot"><img src="media/starter-downloading.jpg" alt="Getting LFM3 1.7B ready card" loading="lazy"><h3>Getting LFM3 1.7B ready<span class="tag">new</span></h3><p>Starts the moment Set up my models is pressed. MB of GB and a percentage; people can look around meanwhile.</p></div>
+      <div class="shot"><img src="media/first-reply.jpg" alt="First reply from LFM3 1.7B" loading="lazy"><h3>First reply</h3><p>LFM3 1.7B is the chat model. It answered in under 30 seconds.</p></div>
+    </div>
+  </section>
+
+  <section class="finding">
+    <div class="label">Before · what a new person met this morning</div>
+    <p><strong>No model downloaded on its own.</strong> After the four steps, Set up my models led to two more screens. Only then did a 22.6 GB model start, after one more click.</p>
+    <ol class="flow">
+      <li><strong>Set up my models</strong> first showed "Use your NVIDIA GPU": an optional 7.3 GB download.</li>
+      <li>Skip for now landed on the <strong>Models catalog</strong> with a Configure card. Nothing downloading.</li>
+      <li>Configure opened <strong>Set up your local AI</strong> with Sage A1.5 35B ticked (<strong>22.6 GB</strong>).</li>
+    </ol>
+  </section>
+
+  <section>
+    <div class="label">Before · the run</div>
+    <h2>Fresh profile, start to download screen (60 s)</h2>
+    <video src="media/new-user.mp4" controls muted playsinline preload="metadata"></video>
+    <p class="note">Recorded at real speed on the virtual screen. The clicks are scripted, so the steps go faster than a person would.</p>
+  </section>
+
+  <section>
+    <div class="label">Before · after Set up my models</div>
+    <div class="grid">
+      <div class="shot"><img src="media/gpu-step.jpg" alt="Use your NVIDIA GPU screen" loading="lazy"><h3>Use your NVIDIA GPU<span class="tag w">in the way</span></h3><p>Shown right after Set up my models on an NVIDIA computer. 7.3 GB, optional. A Mac never sees it.</p></div>
+      <div class="shot"><img src="media/models-landing.jpg" alt="Models catalog after skipping" loading="lazy"><h3>Models catalog<span class="tag w">nothing downloading</span></h3><p>Where Skip for now lands. Picks for this computer are 19–26 GB. The Configure card sits bottom right.</p></div>
+      <div class="shot"><img src="media/configure.jpg" alt="Set up your local AI" loading="lazy"><h3>Set up your local AI</h3><p>Configure it for me, Balanced: Sage A1.5 35B ticked, ~22.6 GB. Voice, images and search start unticked.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="label">Onboarding steps, as built</div>
+    <div class="grid">
+      <div class="shot"><img src="media/welcome.jpg" alt="Welcome" loading="lazy"><h3>Welcome</h3><p>The first screen, with a language picker.</p></div>
+      <div class="shot"><video src="media/groups.mp4" controls muted playsinline preload="metadata"></video><h3>What do you want to do?</h3><p>Seven groups. Chat starts picked; picking a group picks its first feature.</p></div>
+      <div class="shot"><img src="media/which.jpg" alt="Which ones?" loading="lazy"><h3>Which ones?</h3><p>The features of each picked group. A picked Pro feature brings the licence key box.</p></div>
+      <div class="shot"><video src="media/how-chat.mp4" controls muted playsinline preload="metadata"></video><h3>How it works: your picks</h3><p>The guide, filtered to your picks. Where models run and the analytics opt-in sit here. Set up my models is the one green action.</p></div>
+      <div class="shot"><img src="media/how-meetings.jpg" alt="How it works: a Pro feature" loading="lazy"><h3>How it works: a Pro feature</h3><p>A Pro pick shows the price, Get Pro and Enter licence key.</p></div>
+      <div class="shot"><img src="media/how-integrations.jpg" alt="How it works: Connectors" loading="lazy"><h3>How it works: Connectors</h3><p>Connections inline (the old Connect step), still optional.</p></div>
+      <div class="shot"><img src="media/sidebar.jpg" alt="Menu with your picks" loading="lazy"><h3>Menu: your picks</h3><p>The menu leads with Your picks; the other groups start closed.</p></div>
+      <div class="shot"><video src="media/what-you-use.mp4" controls muted playsinline preload="metadata"></video><h3>Settings → What you use</h3><p>Change your picks any time; the menu follows at once.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="label">Not covered here</div>
+    <p class="note">Phone onboarding (no phone was connected to the workstation) and a Mac run (this one is Linux).</p>
+  </section>
+</div>
