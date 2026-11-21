@@ -20,6 +20,9 @@ import type { SetupItemKind } from '../../../../shared/setup-contract'
 export const PICKS_KEY = 'onboarding_picks'
 /** A screen an "Open …" in onboarding's guide asked for: the app opens it once setup is done. */
 export const ONBOARDING_OPEN_KEY = 'onboarding_then_open'
+/** Set for the session that finished onboarding: optional setup screens wait until a later launch,
+ *  so nothing stands between a new person and their first reply. */
+export const FIRST_RUN_SESSION_KEY = 'first_run_session'
 
 export interface Picks {
   groups: OnboardingGroupId[]

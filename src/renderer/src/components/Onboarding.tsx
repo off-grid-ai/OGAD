@@ -15,6 +15,7 @@ import { FeaturesStep, GroupsStep } from './onboarding/PickSteps'
 import { GuideStep } from './onboarding/GuideStep'
 import { LanguageSelect } from './LanguageSettingsSection'
 import {
+  FIRST_RUN_SESSION_KEY,
   ONBOARDING_OPEN_KEY,
   clearPicks,
   loadPicks,
@@ -31,7 +32,12 @@ interface OnboardingProps {
 const steps = [{ id: 'welcome' }, { id: 'groups' }, { id: 'features' }, { id: 'guide' }] as const
 // Read when shown, so the label is in the app language (text in code reaches a catalog through t()).
 const stepLabel = (id: (typeof steps)[number]['id']): string =>
-  ({ welcome: t('Welcome'), groups: t('What you want'), features: t('The details'), guide: t('How it works') })[id]
+  ({
+    welcome: t('Welcome'),
+    groups: t('What you want'),
+    features: t('The details'),
+    guide: t('How it works')
+  })[id]
 type StepId = (typeof steps)[number]['id']
 
 const ONBOARDING_STEP_KEY = 'onboarding_step'
@@ -89,6 +95,11 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
     localStorage.removeItem(ONBOARDING_STEP_KEY)
     localStorage.setItem('onboarding_completed', 'true')
     if (open) localStorage.setItem(ONBOARDING_OPEN_KEY, open)
+    // The first chat model starts downloading now, so the first reply is minutes away, not an hour.
+    sessionStorage.setItem(FIRST_RUN_SESSION_KEY, 'true')
+    void Promise.resolve(window.api.setupQuickStart?.()).catch((error: unknown) =>
+      console.warn('[quick-start] could not start', error)
+    )
     // Either answer counts as asked, so no prompt asks again soon.
     if (shareAnalytics) {
       // What was picked goes with the opt-in, once consent is on.

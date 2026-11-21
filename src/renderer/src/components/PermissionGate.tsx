@@ -55,6 +55,43 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
   const [visionIssue, setVisionIssue] = useState<VisionIssue | null>(null)
   const [visionDownloadProgress, setVisionDownloadProgress] = useState<ProgressLike | null>(null)
   const [visionDownloadFailure, setVisionDownloadFailure] = useState<string | null>(null)
+  // A chat model on its way (the starter from onboarding, or Configure): its progress shows in the nudge.
+  const [chatSetup, setChatSetup] = useState<{
+    modelName: string | null
+    progress: ProgressLike | null
+    failure: string | null
+  } | null>(null)
+  useEffect(
+    () =>
+      window.api.onSetupProgress?.((data) => {
+        const p = data as {
+          phase?: string
+          message?: string
+          modelName?: string
+          downloadedBytes?: number
+          totalBytes?: number
+          bytesPerSecond?: number
+        }
+        if (p.phase === 'download')
+          setChatSetup({
+            modelName: p.modelName ?? null,
+            progress: {
+              downloadedBytes: p.downloadedBytes,
+              totalBytes: p.totalBytes,
+              bytesPerSecond: p.bytesPerSecond
+            },
+            failure: null
+          })
+        else if (p.phase === 'error')
+          setChatSetup((s) => ({
+            modelName: s?.modelName ?? null,
+            progress: null,
+            failure: p.message ?? 'Setup failed.'
+          }))
+        else if (p.phase === 'done') setChatSetup(null)
+      }),
+    []
+  )
   const permissions = usePermissionController(isPro)
   const permissionStatus = permissions.status
   const isChecking = permissions.checking
@@ -268,6 +305,9 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
             <SetupNudge
               key="setup-nudge"
               missingModel={!modelStatus?.downloaded}
+              modelName={chatSetup?.modelName}
+              progress={chatSetup?.progress}
+              failure={chatSetup?.failure}
               missingLocalNetwork={isPro && permissionStatus?.localNetwork === false}
               onOpen={() => setShowSetup(true)}
               onDismiss={() => setSetupDismissed(true)}
@@ -438,11 +478,13 @@ function SetupNudge({
         ? 'Some moments need a vision model'
         : issue === 'remote-screen-images'
           ? 'Allow screen images'
-          : missingModel
-            ? 'Set up your local AI'
-            : missingLocalNetwork
-              ? 'Allow Local Network access'
-              : 'Finish setting up capture'
+          : missingModel && progress
+            ? `Getting ${modelName ?? 'your chat model'} ready`
+            : missingModel
+              ? 'Set up your local AI'
+              : missingLocalNetwork
+                ? 'Allow Local Network access'
+                : 'Finish setting up capture'
   const detail =
     issue === 'missing-projector'
       ? `${moments} wait. ${modelName ?? 'The active model'} reads them after its vision support downloads.`
@@ -452,11 +494,13 @@ function SetupNudge({
           ? `${moments} wait. The chat model on ${modelName ?? 'your server'} reads text only.`
           : issue === 'remote-screen-images'
             ? `${moments} wait. Allow screen images for ${modelName ?? 'your server'} to analyze them there.`
-            : missingModel
-              ? `Pick a model yourself, or let Off Grid AI configure one for your ${deviceNoun()}.`
-              : missingLocalNetwork
-                ? `Allow this ${deviceNoun()} to find and sync directly with your devices.`
-                : 'Grant screen and accessibility access so Off Grid AI can see and remember.'
+            : missingModel && progress
+              ? 'Chat works the moment it finishes. Bigger models are under Configure.'
+              : missingModel
+                ? `Pick a model yourself, or let Off Grid AI configure one for your ${deviceNoun()}.`
+                : missingLocalNetwork
+                  ? `Allow this ${deviceNoun()} to find and sync directly with your devices.`
+                  : 'Grant screen and accessibility access so Off Grid AI can see and remember.'
   const presentedProgress = progress ? projectProgress(progress) : null
   const cta =
     progress != null
