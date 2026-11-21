@@ -78,6 +78,7 @@ import {
 import { ApprovalSetup, type ApprovalSetupRecord } from '../actions/ApprovalSetup'
 import { REQUEST_FORM_URL, presetById, type DemoPreset } from '../explore/presetCatalog'
 import { useChatVoiceTurns } from '../use-chat-voice-turns'
+import { LiveTranscript } from '../LiveTranscript'
 import { SkillsPanel } from '../SkillsPanel'
 import { ModelPicker } from '../ModelPicker'
 import { SettingsPanel } from '../SettingsPanel'
@@ -5855,6 +5856,7 @@ export function MemoryChat({
                             transcriptionLabel={voiceTurns.transcriptionLabel}
                             error={voiceTurns.error}
                             subscribeAmplitudes={voiceTurns.subscribeAmplitudes}
+                            subscribeLiveTranscript={voiceTurns.subscribeLiveTranscript}
                             onToggleRecording={toggleRecording}
                             onTurnModeChange={(mode: VoiceTurnMode) => {
                               setVoiceTurnMode(mode)
@@ -5863,6 +5865,11 @@ export function MemoryChat({
                           />
                         ) : (
                           <PromptInputBody>
+                          {/* Dictation: the words appear here as they are spoken, then move into the draft. */}
+                          <LiveTranscript
+                            subscribe={voiceTurns.subscribeLiveTranscript}
+                            className="px-3 pt-2"
+                          />
                           <ChatDraftInput
                             ref={draftInputRef}
                             store={draftStore}

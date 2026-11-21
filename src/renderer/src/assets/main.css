@@ -735,6 +735,16 @@ code {
   }
 }
 
+/* A live-transcript segment arriving: it fades up into place instead of popping in. */
+@keyframes og-live-word-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* Dialog / modal transitions. The shared shadcn Dialog ships tailwindcss-animate
    classes (`animate-in`, `zoom-in-95`, …) that this project doesn't include, so
    modals used to pop in with no transition. These keyframes hook Radix's

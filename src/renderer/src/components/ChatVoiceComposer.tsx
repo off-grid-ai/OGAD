@@ -10,6 +10,8 @@ import { Button } from './ui/button'
 import { LoadingDots } from './ui/loading-dots'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 import type { ChatVoicePhase } from './use-chat-voice-turns'
+import type { LiveTranscript as Transcript } from '@offgrid/speech'
+import { LiveTranscript } from './LiveTranscript'
 
 interface ChatVoiceComposerProps {
   phase: ChatVoicePhase
@@ -22,6 +24,8 @@ interface ChatVoiceComposerProps {
   onTurnModeChange?: (mode: VoiceTurnMode) => void
   /** The live microphone envelope (from useChatVoiceTurns), drawn while the microphone is open. */
   subscribeAmplitudes?: (listener: (amplitudes: number[]) => void) => () => void
+  /** What has been heard so far in this turn, shown while the person speaks. */
+  subscribeLiveTranscript?: (listener: (transcript: Transcript) => void) => () => void
 }
 
 /** The capture's own words for its controls, in the product's voice. */
@@ -104,7 +108,8 @@ export function ChatVoiceComposer({
   error,
   onToggleRecording,
   onTurnModeChange,
-  subscribeAmplitudes
+  subscribeAmplitudes,
+  subscribeLiveTranscript
 }: ChatVoiceComposerProps): React.JSX.Element {
   const active = phase !== 'idle'
   const transcribing = phase === 'transcribing'
@@ -162,6 +167,9 @@ export function ChatVoiceComposer({
           }
         />
       </AutoHeight>
+      {subscribeLiveTranscript ? (
+        <LiveTranscript subscribe={subscribeLiveTranscript} className="pt-1.5" />
+      ) : null}
     </div>
   )
 }
