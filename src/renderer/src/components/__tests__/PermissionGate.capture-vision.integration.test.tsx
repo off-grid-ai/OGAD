@@ -48,6 +48,8 @@ beforeEach(() => {
         allGranted: true
       }),
       checkModelStatus: async () => ({ downloaded: true, modelsDir: '/tmp/models' }),
+      // No setup is running: the progress feed delivers nothing.
+      onSetupProgress: () => () => undefined,
       getActiveModel: async () => MODEL_ID,
       getModelCatalog: async () => ({
         kinds: ['vision'],
