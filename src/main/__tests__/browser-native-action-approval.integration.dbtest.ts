@@ -83,7 +83,7 @@ describe('browser native action approval with the real engine', () => {
       if (waits) {
         // Task tools return on acceptance; the real gate determines whether they can run.
         if (name !== 'web_use') {
-          expect(text).toMatch(/waiting for the user's approval in Off Grid AI Desktop/i)
+          expect(text).toMatch(/waiting for the user's approval in Actions > Approvals in Off Grid AI Desktop/i)
         }
         await expect.poll(() => requests.length).toBe(1)
         expect(executed).toEqual([])
