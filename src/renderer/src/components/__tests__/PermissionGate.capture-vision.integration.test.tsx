@@ -248,6 +248,9 @@ describe('<PermissionGate/> Pro capture vision recovery', () => {
     captureStatus = { running: true, paused: false, visionReady: true }
     modelProgress?.({ modelId: MODEL_ID, status: 'completed' })
 
-    await waitFor(() => expect(screen.queryByText('Capture needs vision support')).toBeNull())
+    // The nudge re-reads capture status and then animates out; a busy machine needs more than 1s.
+    await waitFor(() => expect(screen.queryByText('Capture needs vision support')).toBeNull(), {
+      timeout: 5_000
+    })
   })
 })
