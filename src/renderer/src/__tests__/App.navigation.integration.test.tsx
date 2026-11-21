@@ -259,9 +259,7 @@ describe('<App/> desktop navigation integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Connectors' }))
     await waitFor(() => expect(window.location.pathname).toBe('/connectors'))
-    expect(navigation.getAttribute('aria-expanded')).toBe('true')
-
-    await user.unhover(navigation)
+    // Picking a place folds the hover-opened rail at once, so it does not lie over the screen it opened.
     await waitFor(() => expect(navigation.getAttribute('aria-expanded')).toBe('false'))
     expect(screen.getByText('Menu').getAttribute('aria-hidden')).toBe('true')
   })
