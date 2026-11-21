@@ -29,6 +29,7 @@ import { QUICK_CONNECTION_IDS } from './quickConnectionCatalog'
 import { CONNECTIONS_CHANGED_EVENT } from './useQuickConnection'
 import { Segmented } from '@offgrid/operator-ui/operator/segmented'
 import { PageShell } from './PageShell'
+import { FailureNotice } from './FailureNotice'
 import { Button } from './ui/button'
 import { GlyphSwap, IconTip } from './IconTip'
 import { Skeleton } from '@offgrid/operator-ui/operator/coss/skeleton'
@@ -882,7 +883,7 @@ export function ConnectorsScreen(): ReactElement {
                     </div>
                   </form>
                 )}
-                {editing && dcat?.auth === 'token' && dcat.secrets?.length ? (
+                {(editing || changingToken) && dcat?.auth === 'token' && dcat.secrets?.length ? (
                   <div className="space-y-2">
                     {changingToken ? (
                       <ConnectorSecretsForm
@@ -909,7 +910,17 @@ export function ConnectorsScreen(): ReactElement {
                   </p>
                 )}
                 {!dNotReady && detail.status === 'error' && detail.status_detail && (
-                  <p className="text-[11px] text-red-400/80">{cleanError(detail.status_detail)}</p>
+                  // The shared failure rule says what went wrong and the one step: a refused token
+                  // opens the token form here, a signed-out account signs in again with Test.
+                  <FailureNotice
+                    error={detail.status_detail}
+                    context={{ auth: dcat?.auth === 'token' ? 'token' : 'oauth' }}
+                    onRetry={() =>
+                      dcat?.auth === 'token' && dcat.secrets?.length
+                        ? setChangingToken(true)
+                        : void test(detail.id)
+                    }
+                  />
                 )}
 
                 {!dNotReady && detail.status === 'ok' && detail.liveOnly && (
