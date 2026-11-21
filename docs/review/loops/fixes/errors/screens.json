@@ -1,0 +1,87 @@
+[
+  {
+    "id": "desktop-actions",
+    "name": "Actions: suggestion failed",
+    "group": "Desktop · Actions",
+    "what": "A failed Suggest actions shows the reason (\"Could not reach the network…\") with Try again (was a green note).",
+    "file": "desktop-actions.png",
+    "step": "actions"
+  },
+  {
+    "id": "desktop-setup",
+    "name": "Setup: plan did not load",
+    "group": "Desktop · Settings",
+    "what": "Setup says why the plan did not load, with Try again.",
+    "file": "desktop-setup.png",
+    "step": "setup"
+  },
+  {
+    "id": "desktop-vault",
+    "name": "Vault",
+    "group": "Desktop · Vault",
+    "what": "Vault on a fresh profile: create the vault.",
+    "file": "desktop-vault.png",
+    "step": "vault"
+  },
+  {
+    "id": "desktop-connectors",
+    "name": "Connectors: signed out",
+    "group": "Desktop · Connectors",
+    "what": "A connector refused with 401 says \"Signed out. Sign in again to reconnect.\" with Sign in. A token connector says the token was refused, with Change token beside it (was always \"click Test to authorize\").",
+    "file": "desktop-connectors.png",
+    "step": "connectors"
+  },
+  {
+    "id": "ext-desktop-away-in-chat",
+    "name": "Chat: Desktop goes away mid-session",
+    "group": "Extension · Chat",
+    "what": "When Desktop quits while the panel is open, an empty chat shows \"Start Off Grid AI Desktop\" with Open, Get, Check now and Change desktop address, and connects again by itself (was a blank chat).",
+    "file": "ext-desktop-away-in-chat.png",
+    "step": "desktop-away",
+    "shot": "ext-desktop-away-in-chat.png",
+    "steps": [
+      "Open the panel, paired, on a new chat.",
+      "Quit Off Grid AI Desktop and wait a few seconds."
+    ]
+  },
+  {
+    "id": "ext-vault-locked",
+    "name": "Vault: locked",
+    "group": "Extension · Vault",
+    "what": "A locked vault says \"Your Off Grid AI vault is locked.\" with Unlock. The button shows it is waiting and says to unlock in the Desktop window; every other blocked state has its own line and step.",
+    "file": "ext-vault-locked.png",
+    "step": "vault-locked",
+    "shot": "ext-vault-locked.png",
+    "steps": [
+      "Open Vault in the panel, then lock the vault in Desktop.",
+      "Press Unlock and type the password in the Desktop window."
+    ]
+  },
+  {
+    "id": "ext-save-card-desktop-away",
+    "name": "Save prompt: Desktop closed",
+    "group": "Extension · Vault",
+    "what": "A login submitted while Desktop is closed still gets the save card: \"Open Off Grid AI Desktop to save this password…\" with Save, Not now and Open Off Grid AI Desktop. A refused save keeps the login, so Save works once Desktop is back (was no card and a lost password).",
+    "file": null,
+    "step": "save-away",
+    "shot": null,
+    "steps": [
+      "Grant all-sites access, then quit Desktop.",
+      "Sign up on a site.",
+      "Open Desktop from the card, then press Save."
+    ]
+  },
+  {
+    "id": "ext-pending-prompt",
+    "name": "Right-click prompt that cannot go yet",
+    "group": "Extension · Chat",
+    "what": "\"Summarize this page\" from the right-click menu is held and shown above the composer: Waiting to send \"…\", with the reason and its step (Choose a model, Retry). It sends by itself once it can (was dropped after 60 seconds).",
+    "file": null,
+    "step": "pending-prompt",
+    "shot": null,
+    "steps": [
+      "With no model active, right-click a page and choose Summarize this page.",
+      "Choose a model: the prompt sends."
+    ]
+  }
+]

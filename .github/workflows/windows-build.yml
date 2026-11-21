@@ -24,6 +24,7 @@ on:
           - both
           - windows
           - linux
+          - none
       pro_ref:
         # Use the Pro gitlink from the selected Core commit unless overridden.
         description: 'desktop-pro branch/tag/sha (empty = commit pinned by Core)'
@@ -39,6 +40,33 @@ on:
         type: string
         required: false
         default: ''
+
+      store_packages:
+        # Also build the Microsoft Store MSIX and the Ubuntu App Center snap from the
+        # same unpacked app. Uploaded as artifacts; store submission stays manual for now.
+        description: 'Also build store packages (MSIX, snap)'
+        type: boolean
+        required: false
+        default: false
+
+      snap_release_tag:
+        # Package a published release for the stores (e.g. v0.0.59): a snap from its .deb
+        # (uploaded when SNAPCRAFT_STORE_CREDENTIALS is set) and a Microsoft Store MSIX from
+        # its Windows payload (an artifact to upload in Partner Center).
+        description: 'Release tag to package for the stores (empty = skip)'
+        type: string
+        required: false
+        default: ''
+      snap_channel:
+        description: 'Snap Store channel for that release'
+        type: choice
+        required: false
+        default: stable
+        options:
+          - stable
+          - candidate
+          - beta
+          - edge
 
 permissions:
   contents: read
@@ -169,6 +197,30 @@ jobs:
         run: |
           node scripts/verify-windows-dll-imports.mjs dist/win-unpacked
           node scripts/verify-main-startup-imports.mjs out/main
+
+      - name: Package Microsoft Store MSIX
+        if: ${{ inputs.store_packages }}
+        env:
+          # From Partner Center → Product identity. Without them the MSIX is a test package.
+          MS_STORE_IDENTITY_NAME: ${{ secrets.MS_STORE_IDENTITY_NAME }}
+          MS_STORE_PUBLISHER: ${{ secrets.MS_STORE_PUBLISHER }}
+          MS_STORE_PUBLISHER_NAME: ${{ secrets.MS_STORE_PUBLISHER_NAME }}
+        shell: bash
+        run: |
+          args=()
+          if [ -n "$MS_STORE_IDENTITY_NAME" ]; then
+            args+=("-c.appx.identityName=$MS_STORE_IDENTITY_NAME" "-c.appx.publisher=$MS_STORE_PUBLISHER" "-c.appx.publisherDisplayName=$MS_STORE_PUBLISHER_NAME")
+          fi
+          npx electron-builder --config build/msix.yml --win appx --x64 --prepackaged dist/win-unpacked --publish never "${args[@]}"
+
+      - name: Upload Microsoft Store MSIX artifact
+        if: ${{ inputs.store_packages }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: off-grid-ai-windows-msix
+          path: dist/*.appx
+          if-no-files-found: error
+          compression-level: 0
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -301,6 +353,25 @@ jobs:
             done
           '
 
+      - name: Set up LXD for snapcraft
+        if: ${{ inputs.store_packages }}
+        uses: canonical/setup-lxd@v0.1.2
+
+      - name: Package Ubuntu App Center snap
+        if: ${{ inputs.store_packages }}
+        run: |
+          sudo snap install snapcraft --classic
+          npx electron-builder --linux snap --x64 --prepackaged dist/linux-unpacked --publish never
+
+      - name: Upload Ubuntu App Center snap artifact
+        if: ${{ inputs.store_packages }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: off-grid-ai-linux-snap
+          path: dist/*.snap
+          if-no-files-found: error
+          compression-level: 0
+
       - name: Upload Linux AppImage artifact
         uses: actions/upload-artifact@v4
         with:
@@ -316,5 +387,83 @@ jobs:
         with:
           name: off-grid-ai-linux-deb
           path: dist/*.deb
+          if-no-files-found: error
+          compression-level: 0
+
+  publish-snap:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.snap_release_tag != '' }}
+    runs-on: ubuntu-24.04
+    env:
+      HAS_SNAP_LOGIN: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the release's .deb and stamp its version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.snap_release_tag }}
+        run: |
+          version="${TAG#v}"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "off-grid-ai_${version}_amd64.deb" -O snap/release/off-grid-ai.deb
+          cp resources/icon.png snap/release/snap/gui/off-grid-ai.png
+          sed -i "s/^version: 'VERSION'/version: '${version}'/" snap/release/snap/snapcraft.yaml
+          grep -n '^version:' snap/release/snap/snapcraft.yaml
+
+      - name: Build the snap
+        id: build
+        uses: snapcore/action-build@v1
+        with:
+          path: snap/release
+
+      - name: Upload snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: off-grid-ai-snap-${{ inputs.snap_release_tag }}
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Publish to the Snap Store
+        if: ${{ env.HAS_SNAP_LOGIN == 'true' }}
+        uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          release: ${{ inputs.snap_channel }}
+
+  package-msix:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.snap_release_tag != '' }}
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch and unpack the release's Windows app
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.snap_release_tag }}
+        run: |
+          version="${TAG#v}"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "off-grid-ai-${version}-x64.nsis.7z" -O payload.7z
+          7z x payload.7z -oapp -y > /dev/null
+          test -f app/off-grid-ai.exe
+          npm pkg set version="$version"
+
+      - name: Package Microsoft Store MSIX
+        shell: bash
+        env:
+          MS_STORE_IDENTITY_NAME: ${{ secrets.MS_STORE_IDENTITY_NAME }}
+          MS_STORE_PUBLISHER: ${{ secrets.MS_STORE_PUBLISHER }}
+          MS_STORE_PUBLISHER_NAME: ${{ secrets.MS_STORE_PUBLISHER_NAME }}
+        run: |
+          npx --yes electron-builder@26.16.1 --config build/msix.yml --win appx --x64 --prepackaged app --publish never \
+            "-c.appx.identityName=$MS_STORE_IDENTITY_NAME" "-c.appx.publisher=$MS_STORE_PUBLISHER" "-c.appx.publisherDisplayName=$MS_STORE_PUBLISHER_NAME"
+
+      - name: Upload MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: off-grid-ai-msix-${{ inputs.snap_release_tag }}
+          path: dist/*.appx
           if-no-files-found: error
           compression-level: 0

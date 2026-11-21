@@ -5,15 +5,19 @@ success with a wrong or empty answer). Clone tasks keep the app-database verdict
 OpenAI-compatible model (Qwen3.8-27B on vLLM); spot-check its verdicts by hand before trusting it.
   python3 judge.py --tasks tasks-v2.json --runs <lineup dir> [...] [--url http://127.0.0.1:8095/v1] [--workers 16]
 Writes <lineup>/judged.json and prints per-group counts.
+
+Answer-quality evals (desktop/scripts/eval/run.ts) use the same grader for open chat answers:
+  python3 judge.py --eval to-judge.json [--url ...]
+Each item is {id, q, answer, rubric}; writes to-judge.judged.json as [{id, verdict: pass|fail, reason}].
 """
 import argparse, concurrent.futures as cf, glob, json, math, os, re, urllib.request
 
 ap = argparse.ArgumentParser()
-ap.add_argument('--tasks', required=True); ap.add_argument('--runs', nargs='+', required=True)
+ap.add_argument('--tasks'); ap.add_argument('--runs', nargs='+', default=[]); ap.add_argument('--eval')
 ap.add_argument('--url', default='http://127.0.0.1:8095/v1'); ap.add_argument('--model', default='qwen38')
 ap.add_argument('--workers', type=int, default=16); ap.add_argument('--page-chars', type=int, default=12000)
 a = ap.parse_args()
-tasks = {t['id']: t for t in json.load(open(a.tasks))}
+tasks = {t['id']: t for t in json.load(open(a.tasks))} if a.tasks else {}
 words = lambda s: set(re.findall(r'[a-z0-9₹$€.%]+', s.lower()))
 
 
@@ -28,6 +32,28 @@ def page_excerpt(page, goal, answer, limit):
             continue
         keep.add(i); used += len(lines[i]) + 1
     return '\n'.join(lines[i] for i in sorted(keep))
+
+
+def complete(prompt):
+    body = json.dumps({'model': a.model, 'messages': [{'role': 'user', 'content': prompt}], 'temperature': 0,
+                       'max_tokens': 2000, 'chat_template_kwargs': {'enable_thinking': False}}).encode()
+    req = urllib.request.Request(a.url + '/chat/completions', body, {'content-type': 'application/json'})
+    text = json.load(urllib.request.urlopen(req, timeout=300))['choices'][0]['message']['content']
+    m = re.search(r'\{.*\}', text, re.S)
+    try:
+        return json.loads(m.group(0)) if m else None
+    except json.JSONDecodeError:
+        return None
+
+
+def judge_answer(item):
+    """An open chat answer against its case's rubric: pass or fail, with one sentence why."""
+    prompt = (f'A user asked an AI assistant:\n{item["q"]}\n\nThe assistant answered:\n{item["answer"]}\n\n'
+              f'The answer passes only if this holds: {item["rubric"]}\n'
+              'Judge the answer against that rule alone, not its style or length.\n'
+              'Reply with JSON only: {"verdict": "pass|fail", "reason": "<one sentence>"}')
+    v = complete(prompt) or {'verdict': 'fail', 'reason': 'unparsable judge reply'}
+    return {'id': item['id'], 'verdict': 'pass' if v.get('verdict') == 'pass' else 'fail', 'reason': str(v.get('reason', ''))[:200]}
 
 
 def ask(goal, answer, page):
@@ -76,6 +102,12 @@ def wilson(k, n, z=1.96):
     p = k / n; d = 1 + z * z / n; c = (p + z * z / (2 * n)) / d; h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
     return [round(c - h, 3), round(c + h, 3)]
 
+
+if a.eval:
+    with cf.ThreadPoolExecutor(a.workers) as ex:
+        verdicts = list(ex.map(judge_answer, json.load(open(a.eval))))
+    json.dump(verdicts, open(a.eval.replace('.json', '.judged.json'), 'w'), indent=1, ensure_ascii=False)
+    print(json.dumps({'judged': len(verdicts), 'pass': sum(v['verdict'] == 'pass' for v in verdicts)}))
 
 for d in a.runs:
     files = [f for f in glob.glob(os.path.join(d, '*.json')) if not os.path.basename(f).startswith(('summary', 'graded', 'judged'))]

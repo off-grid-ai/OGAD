@@ -13,6 +13,8 @@ interface SidebarNavigationMenuProps<Item extends { view: string; label: string 
   expanded: boolean
   groups: readonly SidebarNavigationGroup<Item>[]
   renderItem: (item: Item) => React.ReactElement
+  /** The sections that start open; every section when not given. */
+  initiallyOpen?: readonly string[]
 }
 
 /** Thin navigation adapter over the shared Collapsible primitive. Every section
@@ -21,12 +23,13 @@ export function SidebarNavigationMenu<Item extends { view: string; label: string
   activeView,
   expanded,
   groups,
-  renderItem
+  renderItem,
+  initiallyOpen
 }: SidebarNavigationMenuProps<Item>): React.ReactElement {
   // One section state owns both widths. Hover changes the sidebar's width, never this set, so a
   // destination cannot appear, disappear or move only because its label became visible.
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(
-    () => new Set(groups.map((group) => group.label))
+    () => new Set(initiallyOpen ?? groups.map((group) => group.label))
   )
 
   return (

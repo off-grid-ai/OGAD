@@ -191,7 +191,9 @@ describe('<HealthPanel/> production status integration', () => {
       accessibility: true,
       screenRecording: process.platform !== 'darwin',
       localNetwork: true,
-      allGranted: process.platform !== 'darwin'
+      allGranted: process.platform !== 'darwin',
+      // Linux has no microphone switch; elsewhere this boundary answers as it does for the screen.
+      microphone: process.platform !== 'darwin' ? 'granted' : 'blocked'
     })
     expect(latestComponent('chat').status).toBe('ready')
     expectRenderedRecord('chat')

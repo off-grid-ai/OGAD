@@ -7,12 +7,18 @@
  * machine's own copy (fixtures/model-picks-network-boundary.cjs), so the journey runs on a Mac that
  * already has one pick's files, and skips elsewhere.
  */
-import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
+import {
+  _electron as electron,
+  expect,
+  test,
+  type ElectronApplication,
+  type Page
+} from '@playwright/test'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { completeOnboarding } from './helpers/onboarding'
-import { targetIsPackaged } from './helpers/launch'
+import { targetIsPackaged, skipGpuSetup } from './helpers/launch'
 
 const SOURCE_DIR =
   process.env.OFFGRID_PICKS_SOURCE_DIR ??
@@ -27,20 +33,22 @@ test.describe.configure({ timeout: 600_000 })
 
 test.beforeEach(async () => {
   profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-model-picks-'))
-  app = await electron.launch({
-    args: [path.resolve('e2e/fixtures/model-picks-network-boundary.cjs')],
-    env: {
-      ...process.env,
-      OFFGRID_USER_DATA: profileDir,
-      OFFGRID_PICKS_SOURCE_DIR: SOURCE_DIR,
-      OFFGRID_PRO: '0',
-      NODE_ENV: 'production',
-      OPENAI_API_KEY: '',
-      ANTHROPIC_API_KEY: '',
-      GOOGLE_API_KEY: '',
-      HF_TOKEN: ''
-    }
-  })
+  app = skipGpuSetup(
+    await electron.launch({
+      args: [path.resolve('e2e/fixtures/model-picks-network-boundary.cjs')],
+      env: {
+        ...process.env,
+        OFFGRID_USER_DATA: profileDir,
+        OFFGRID_PICKS_SOURCE_DIR: SOURCE_DIR,
+        OFFGRID_PRO: '0',
+        NODE_ENV: 'production',
+        OPENAI_API_KEY: '',
+        ANTHROPIC_API_KEY: '',
+        GOOGLE_API_KEY: '',
+        HF_TOKEN: ''
+      }
+    })
+  )
   page = await app.firstWindow()
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.waitForLoadState('domcontentloaded')
@@ -66,13 +74,17 @@ test('a pick for this Mac downloads, becomes the model in use, and Chat now answ
 
   // Use the pick whose every file this machine already has, so no byte crosses the network.
   const catalog = (await page.evaluate(() =>
-    (window as unknown as { api: { getModelCatalog: () => Promise<unknown> } }).api.getModelCatalog()
+    (
+      window as unknown as { api: { getModelCatalog: () => Promise<unknown> } }
+    ).api.getModelCatalog()
   )) as { models: { name: string; files: { name: string }[] }[] }
   let pickName: string | null = null
   for (const item of await picks.getByRole('listitem').all()) {
     const text = (await item.textContent()) ?? ''
     const model = catalog.models.find((entry) => text.includes(entry.name))
-    if (model?.files.every((file) => fs.existsSync(path.join(SOURCE_DIR, path.basename(file.name))))) {
+    if (
+      model?.files.every((file) => fs.existsSync(path.join(SOURCE_DIR, path.basename(file.name))))
+    ) {
       pickName = model.name
       break
     }
@@ -100,7 +112,12 @@ test('a pick for this Mac downloads, becomes the model in use, and Chat now answ
   await composer.fill('What is two plus two? Answer with only the number.')
   await page.keyboard.press('Enter')
   // The model it downloaded answers in the transcript.
-  await expect(page.getByRole('paragraph').filter({ hasText: /^4\.?$/ }).last()).toBeVisible({
+  await expect(
+    page
+      .getByRole('paragraph')
+      .filter({ hasText: /^4\.?$/ })
+      .last()
+  ).toBeVisible({
     timeout: 240_000
   })
   await page.screenshot({ path: 'e2e/screenshots/model-picks-chat-answer.png' })

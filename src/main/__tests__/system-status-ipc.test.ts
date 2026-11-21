@@ -290,7 +290,8 @@ describe('registering the status channels', () => {
 
     await expect(handlers.get('permissions:get-status')!({})).resolves.toEqual({
       ...GRANTED,
-      allGranted: true
+      allGranted: true,
+      microphone: 'granted'
     })
     expect(tcc.reads).toBe(1)
   })

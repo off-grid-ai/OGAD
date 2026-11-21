@@ -9,6 +9,10 @@ export interface HostedFile {
   bytes: Buffer
   /** How the host answers a Range request: honestly (206), with 416, or with a wrong range. */
   range?: 'honest' | 'refuse-416' | 'wrong-range'
+  /** Range requests answered with the whole file (200) first, as a CDN cache miss does. */
+  wholeFileAnswers?: number
+  /** The first response closes the connection after this many bytes of its body. */
+  dropAfter?: number
 }
 
 export interface DownloadRequest {
@@ -38,9 +42,20 @@ export async function startFakeDownloadHost(
       return
     }
     const total = file.bytes.length
+    const send = (body: Buffer): void => {
+      if (file.dropAfter === undefined) {
+        res.end(body)
+        return
+      }
+      const cut = file.dropAfter
+      delete file.dropAfter
+      res.write(body.subarray(0, cut), () => res.destroy())
+    }
     const match = range ? /^bytes=(\d+)-$/.exec(range) : null
-    if (!match) {
-      res.writeHead(200, { 'Content-Length': total }).end(file.bytes)
+    if (!match || (file.wholeFileAnswers ?? 0) > 0) {
+      if (match) file.wholeFileAnswers! -= 1
+      res.writeHead(200, { 'Content-Length': total })
+      send(file.bytes)
       return
     }
     const start = Number(match[1])
@@ -49,12 +64,11 @@ export async function startFakeDownloadHost(
       return
     }
     const claimed = file.range === 'wrong-range' ? 0 : start
-    res
-      .writeHead(206, {
-        'Content-Range': `bytes ${claimed}-${total - 1}/${total}`,
-        'Content-Length': total - start
-      })
-      .end(file.bytes.subarray(start))
+    res.writeHead(206, {
+      'Content-Range': `bytes ${claimed}-${total - 1}/${total}`,
+      'Content-Length': total - start
+    })
+    send(file.bytes.subarray(start))
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`

@@ -213,6 +213,8 @@ interface ModelEntry {
   /** Which of its files are on disk already, when some are (brought by another model). */
   onDiskFiles?: string[]
   minLlamaBuild?: number
+  /** Listed by this app's own code, not the recommended catalog: never a Fast, Balanced or Best pick. */
+  appOnly?: boolean
 }
 /** What a Hugging Face search adds to a card: other uploads of the model, an MTP head, a newer model. */
 interface SearchExtras {
@@ -421,9 +423,9 @@ const api = (window as any).api
 const COLLECTION_SPRING = { type: 'spring', stiffness: 380, damping: 32 } as const
 const COLLECTION_EASE = [0.16, 1, 0.3, 1] as const
 const RISE = {
-  initial: { opacity: 0, y: 8, filter: 'blur(4px)' },
-  animate: { opacity: 1, y: 0, filter: 'blur(0px)' },
-  exit: { opacity: 0, y: -6, filter: 'blur(4px)' },
+  initial: { opacity: 0, y: 8 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -6 },
   transition: { duration: 0.35, ease: COLLECTION_EASE }
 }
 const ACTIVE_RING =
@@ -1118,6 +1120,7 @@ export function ModelsScreen({
             (activeKind !== 'text' || m.kind === 'text' || m.kind === 'vision') &&
             !m.quantOf &&
             !m.remoteServerId &&
+            !m.appOnly &&
             m.availability !== 'coming_soon'
         )
         .map((m) => ({
@@ -1673,9 +1676,9 @@ export function ModelsScreen({
         key={m.id}
         role="listitem"
         layout
-        initial={{ opacity: 0, scale: 0.96, filter: 'blur(4px)' }}
-        animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-        exit={{ opacity: 0, scale: 0.96, filter: 'blur(4px)' }}
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.96 }}
         transition={COLLECTION_SPRING}
         whileHover={hoverMotion ? { y: -2 } : undefined}
         className="group relative"
@@ -2034,9 +2037,9 @@ export function ModelsScreen({
                 {useCase !== 'all' && (
                   <motion.span
                     key={useCase}
-                    initial={{ opacity: 0, y: 6, filter: 'blur(4px)' }}
-                    animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                    exit={{ opacity: 0, y: -6, filter: 'blur(4px)' }}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
                     transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
                     className="ml-2 text-[9px] text-neutral-600"
                   >

@@ -1,4 +1,9 @@
 import { track } from '@renderer/lib/analytics'
+import { openModelsTab } from '@/lib/readiness-actions'
+import { CHAT_IMAGE_MODE_EVENT, takeImageModeRequest } from '@/lib/chat-image-mode'
+import { openFailureStep } from '@/lib/failure-step'
+import { explainFailure } from '@offgrid/failures'
+import { FEATURE_NAMES } from '@offgrid/features'
 import { reportChatInput } from '@renderer/lib/usage-tracker'
 import { restoredStreamMessage, withRestoredStream } from '@renderer/lib/chat-stream-restore'
 import { stopChatRun } from '@renderer/lib/chat-stop'
@@ -20,6 +25,7 @@ import {
   type RunStopTarget
 } from '@renderer/lib/chat-run-lifecycle'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { SideScrollRow } from '@offgrid/operator-ui/operator/side-scroll'
 import { queuedCount } from '@renderer/lib/chat-queue'
 import {
   submitQueuedTurn,
@@ -72,6 +78,7 @@ import {
 import { ApprovalSetup, type ApprovalSetupRecord } from '../actions/ApprovalSetup'
 import { REQUEST_FORM_URL, presetById, type DemoPreset } from '../explore/presetCatalog'
 import { useChatVoiceTurns } from '../use-chat-voice-turns'
+import { LiveTranscript } from '../LiveTranscript'
 import { SkillsPanel } from '../SkillsPanel'
 import { ModelPicker } from '../ModelPicker'
 import { SettingsPanel } from '../SettingsPanel'
@@ -991,7 +998,8 @@ export function MemoryChat({
   // Pro registers this slot after the core renderer starts. Resolve it on each render so an
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
-  const TaskSupervisorOverlay = isPro ? getSlot(SLOTS.taskSupervisorOverlay) : undefined
+  // Web Use and Computer Use are free: the task overlay registers without Pro (registerTaskUseSlots).
+  const TaskSupervisorOverlay = getSlot(SLOTS.taskSupervisorOverlay)
   const ChatVideoProgress = getSlot(SLOTS.chatVideoProgress)
   // Esc closes the open overlay (attachment viewer / image lightbox).
   useEffect(() => {
@@ -2025,7 +2033,7 @@ export function MemoryChat({
         unmarked = unmarked.slice(unmarked.indexOf('-->') + 3).trimStart()
       }
       const named = unmarked.trim() || trimmed
-      const title = named.length > 50 ? named.slice(0, 47) + '...' : named
+      const title = named.length > 50 ? `${named.slice(0, 47)}...` : named
       try {
         await window.api.createRagConversation(convId, title, projectId, surface)
         const now = new Date().toISOString()
@@ -3900,7 +3908,7 @@ export function MemoryChat({
       setMessages((prev) =>
         prev.map((m) =>
           m.imagePath === path
-            ? { ...m, image: undefined, imagePath: undefined, content: m.content + '  (deleted)' }
+            ? { ...m, image: undefined, imagePath: undefined, content: `${m.content}  (deleted)` }
             : m
         )
       )
@@ -3972,9 +3980,10 @@ export function MemoryChat({
         data.step &&
         typeof data.step === 'object' &&
         'kind' in data.step &&
-        data.step.kind === 'restarting_model'
+        (data.step.kind === 'restarting_model' || data.step.kind === 'answer_discarded')
       ) {
-        // The same model restarts after a GPU fault; the reply placeholder starts over.
+        // The same model restarts after a GPU fault, or its streamed answer was dropped (it
+        // claimed a task started without starting one): the reply placeholder starts over.
         reasoningByStream.current[data.streamId] = ''
         answerByStream.current[data.streamId] = ''
         timelineByStream.current[data.streamId] = []
@@ -4401,11 +4410,34 @@ export function MemoryChat({
     [addFiles]
   )
 
-  // Video is Pro. Without it the button opens the upgrade screen instead of a dead mode.
+  // Video is Pro. Without it the button opens the upgrade screen instead of a dead mode; with no
+  // complete video model it opens Models on the Video tab, as the Video screen does.
   const chooseVideoMode = (): void => {
-    if (videoController) setMode('video')
-    else window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'video' }))
+    if (!videoController) window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'video' }))
+    else if (!videoAvailable) openModelsTab('video')
+    else setMode('video')
   }
+  // With no image model, image mode would only answer "no image model": open Models on Image instead.
+  const chooseImageMode = (): void => {
+    if (imageAvailable) setMode('image')
+    else openModelsTab('image')
+  }
+  // The guide's Images topic opens chat in image mode (it checked the image model first).
+  useEffect(() => {
+    const take = (): void => {
+      if (takeImageModeRequest()) setMode('image')
+    }
+    take()
+    window.addEventListener(CHAT_IMAGE_MODE_EVENT, take)
+    return () => window.removeEventListener(CHAT_IMAGE_MODE_EVENT, take)
+  }, [])
+
+  // A known voice failure (no speech model) carries its one next step beside the line.
+  const voiceFailure = voiceTurns.error ? explainFailure(voiceTurns.error) : null
+  const voiceErrorStep =
+    voiceFailure && voiceFailure.code !== 'unknown' && voiceFailure.step?.kind === 'open'
+      ? voiceFailure.step
+      : undefined
 
   let examples = ASK_EXAMPLES
   if (mode === 'image') examples = IMAGE_EXAMPLES
@@ -5062,7 +5094,13 @@ export function MemoryChat({
                 <div className="flex h-full min-w-0 flex-col">
                   {/* Chat tabs — quick-switch between open conversations */}
                   {(openTabs.length > 0 || activeConversationId) && (
-                    <div className="flex items-center gap-1 overflow-x-auto border-b border-neutral-900 px-2 py-1">
+                    <SideScrollRow
+                      label="open chats"
+                      layoutKey={`${openTabs.join(',')}|${activeConversationId ?? ''}`}
+                      wrapperClassName="border-b border-neutral-900"
+                      arrowClassName="border border-border bg-background/90 text-muted-foreground shadow-sm hover:text-foreground"
+                      className="flex items-center gap-1 overflow-x-auto px-2 py-1 [scrollbar-width:none]"
+                    >
                       <AnimatePresence initial={false}>
                         {openTabs.map((id) => {
                           const t = conversations.find((c) => c.id === id)
@@ -5106,7 +5144,7 @@ export function MemoryChat({
                       >
                         +
                       </button>
-                    </div>
+                    </SideScrollRow>
                   )}
                   {/* Messages */}
                   <div className="relative min-h-0 flex-1">
@@ -5232,7 +5270,7 @@ export function MemoryChat({
                                 ) : null
                               ) : (
                                 <AnimatedGroup
-                                  preset="blur-slide"
+                                  preset="slide"
                                   className="mt-6 grid w-full grid-cols-1 gap-2 sm:grid-cols-2"
                                 >
                                   {examples.map((ex) => (
@@ -5796,9 +5834,18 @@ export function MemoryChat({
                         {voiceTurns.error && !voiceTurns.microphoneDenied && !voiceMode && (
                           <div
                             role="alert"
-                            className="mx-2 mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+                            className="mx-2 mb-2 flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
                           >
-                            {voiceTurns.error}
+                            <span>{voiceTurns.error}</span>
+                            {voiceErrorStep ? (
+                              <button
+                                type="button"
+                                onClick={() => openFailureStep(voiceErrorStep)}
+                                className="shrink-0 text-amber-300 underline underline-offset-2 transition-colors hover:text-amber-100"
+                              >
+                                {voiceErrorStep.label}
+                              </button>
+                            ) : null}
                           </div>
                         )}
                         {voiceMode ? (
@@ -5809,6 +5856,7 @@ export function MemoryChat({
                             transcriptionLabel={voiceTurns.transcriptionLabel}
                             error={voiceTurns.error}
                             subscribeAmplitudes={voiceTurns.subscribeAmplitudes}
+                            subscribeLiveTranscript={voiceTurns.subscribeLiveTranscript}
                             onToggleRecording={toggleRecording}
                             onTurnModeChange={(mode: VoiceTurnMode) => {
                               setVoiceTurnMode(mode)
@@ -5817,6 +5865,11 @@ export function MemoryChat({
                           />
                         ) : (
                           <PromptInputBody>
+                          {/* Dictation: the words appear here as they are spoken, then move into the draft. */}
+                          <LiveTranscript
+                            subscribe={voiceTurns.subscribeLiveTranscript}
+                            className="px-3 pt-2"
+                          />
                           <ChatDraftInput
                             ref={draftInputRef}
                             store={draftStore}
@@ -5888,13 +5941,21 @@ export function MemoryChat({
                                 )}
                                 {!god && (
 <><DropdownMenuItem
-                                  disabled={!imageAvailable}
-                                  onSelect={() => setMode('image')}
+                                  aria-disabled={!imageAvailable}
+                                  title={imageAvailable ? undefined : 'Needs an image model. Click to get one.'}
+                                  className={imageAvailable ? undefined : 'opacity-50'}
+                                  onSelect={chooseImageMode}
                                 >
                                   <Sparkles /> Generate image
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
-                                  disabled={Boolean(videoController) && !videoAvailable}
+                                  aria-disabled={Boolean(videoController) && !videoAvailable}
+                                  title={
+                                    videoController && !videoAvailable
+                                      ? 'Needs a video model. Click to get one.'
+                                      : undefined
+                                  }
+                                  className={videoController && !videoAvailable ? 'opacity-50' : undefined}
                                   onSelect={chooseVideoMode}
                                 >
                                   <VideoCamera /> Generate video
@@ -5946,7 +6007,7 @@ export function MemoryChat({
                                     setToolsOn((t) => !t)
                                   }}
                                 >
-                                  <GodIcon /> <span className="flex-1">God</span>
+                                  <GodIcon /> <span className="flex-1">{FEATURE_NAMES.assistant}</span>
                                   <span
                                     className={`text-xs ${toolsOn ? 'text-primary' : 'text-muted-foreground'}`}
                                   >
@@ -5975,13 +6036,20 @@ export function MemoryChat({
                                     setConnectorsOn((t) => !t)
                                   }}
                                 >
-                                  <Plug /> <span className="flex-1">Connectors</span>
+                                  <Plug /> <span className="flex-1">{FEATURE_NAMES.connectors}</span>
                                   <span
                                     className={`text-xs ${connectorsOn ? 'text-primary' : 'text-muted-foreground'}`}
                                   >
                                     {connectorsOn ? 'On' : 'Off'}
                                   </span>
-                                </DropdownMenuItem></>
+                                </DropdownMenuItem>
+                                {onOpenConnectors ? (
+                                  <DropdownMenuItem onSelect={() => onOpenConnectors()}>
+                                    <span className="flex-1 pl-6 text-muted-foreground">
+                                      Manage {FEATURE_NAMES.connectors.toLowerCase()}
+                                    </span>
+                                  </DropdownMenuItem>
+                                ) : null}</>
 )}
                               </DropdownMenuContent>
                             </DropdownMenu>
@@ -6097,6 +6165,18 @@ export function MemoryChat({
 <>{/* Active model + context window — click to change (opens the same
                         ModelPicker as the header). Mirrors what the Active-models panel shows. A split
                         pane picks its model in its own header, so it has no chip here. */}
+                            {!modelSummary.name && modelSummary.known && !paneKey && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openModelsTab('chat')}
+                                title="No chat model yet."
+                                className="h-8 gap-1.5 rounded-full border-amber-500/40 text-amber-300"
+                              >
+                                <Cpu className="h-3.5 w-3.5 shrink-0" /> Get a model
+                              </Button>
+                            )}
                             {modelSummary.name && !paneKey && (
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -6183,9 +6263,9 @@ export function MemoryChat({
                                   variant="outline"
                                   size="sm"
                                   onClick={() => {
-                                    const on = mode !== 'image'
-                                    setMode(on ? 'image' : 'ask')
-                                    if (!on) setShowImageOptions(false)
+                                    if (mode !== 'image') return chooseImageMode()
+                                    setMode('ask')
+                                    setShowImageOptions(false)
                                   }}
                                   className={`h-8 gap-1.5 rounded-full ${mode === 'image' ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
                                 >
@@ -6196,7 +6276,9 @@ export function MemoryChat({
                               <TooltipContent>
                                 {mode === 'image'
                                   ? 'Image mode on — your prompt generates an image (click to return to chat)'
-                                  : 'Generate an image from your prompt'}
+                                  : imageAvailable
+                                    ? 'Generate an image from your prompt'
+                                    : 'Needs an image model. Click to get one.'}
                               </TooltipContent>
                             </Tooltip>
                             <Tooltip>
@@ -6217,7 +6299,7 @@ export function MemoryChat({
                                   ? 'Video needs Off Grid AI Pro'
                                   : videoAvailable
                                     ? 'Generate a local video'
-                                    : 'Download a complete video model pack in Models'}
+                                    : 'Needs a video model. Click to get one.'}
                               </TooltipContent>
                             </Tooltip>
                             {mode === 'video' && (

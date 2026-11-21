@@ -884,6 +884,32 @@ jobs:
           fi
           sha256sum "${appimages[0]}" "${debs[0]}" > dist/linux-packages.sha256
           gh release upload "v$VERSION" dist/linux-packages.sha256 --clobber
+      # Permanent Linux download links, the Linux counterparts to OffGrid-latest.dmg
+      # and OffGrid-latest-setup.exe. The versioned packages change name every
+      # release, so upload constant-named copies for stable URLs:
+      #   https://github.com/off-grid-ai/OGAD/releases/latest/download/OffGrid-latest.AppImage
+      #   https://github.com/off-grid-ai/OGAD/releases/latest/download/OffGrid-latest-amd64.deb
+      # The versioned packages + latest-linux.yml updater feed are untouched, so
+      # auto-update is unaffected. --clobber replaces the copy from the prior run.
+      - name: Publish stable latest Linux aliases
+        if: needs.version.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          APPIMAGE_LARGE: ${{ steps.linux_assets.outputs.appimage_large }}
+          DEB_LARGE: ${{ steps.linux_assets.outputs.deb_large }}
+        run: |
+          shopt -s nullglob
+          appimages=(dist/*.AppImage)
+          debs=(dist/*.deb)
+          if [ "$APPIMAGE_LARGE" != 'true' ]; then
+            cp "${appimages[0]}" dist/OffGrid-latest.AppImage
+            gh release upload "v$VERSION" dist/OffGrid-latest.AppImage --clobber
+          fi
+          if [ "$DEB_LARGE" != 'true' ]; then
+            cp "${debs[0]}" dist/OffGrid-latest-amd64.deb
+            gh release upload "v$VERSION" dist/OffGrid-latest-amd64.deb --clobber
+          fi
       - name: Upload large Linux AppImage to this workflow run
         if: steps.linux_assets.outputs.appimage_large == 'true'
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4

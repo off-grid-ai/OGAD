@@ -10,6 +10,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-task-retry-context-'))
 const previousDataDir = process.env.OFFGRID_DATA_DIR
 process.env.OFFGRID_DATA_DIR = profile
+// Pairing asks whether Pro is on (the browser's features are Pro), so the build constant is set.
+vi.stubGlobal('__OFFGRID_PRO__', true)
 
 const electron = vi.hoisted(() => {
   const surface: unknown = new Proxy(function inertSurface() {}, {

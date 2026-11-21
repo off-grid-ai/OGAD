@@ -154,7 +154,8 @@ describe('capture permission recovery', () => {
       accessibility: true,
       screenRecording: true,
       localNetwork: true,
-      allGranted: true
+      allGranted: true,
+      microphone: 'granted'
     })
     expect(boundary.accessibilityChecks.at(-1)).toBe(false)
     expect(boundary.screenRequests).toBe(1)
@@ -208,7 +209,8 @@ describe('capture permission recovery', () => {
       accessibility: false,
       screenRecording: true,
       localNetwork: true,
-      allGranted: false
+      allGranted: false,
+      microphone: 'granted'
     })
 
     await user.click(
@@ -230,7 +232,8 @@ describe('capture permission recovery', () => {
       accessibility: true,
       screenRecording: true,
       localNetwork: true,
-      allGranted: true
+      allGranted: true,
+      microphone: 'granted'
     })
   })
 })

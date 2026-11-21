@@ -5,6 +5,8 @@ import { settingsChanged } from './settings-version'
 import { storageDownloadsActive } from './model-storage-guard'
 import { moveModelStorage } from './model-storage-move'
 import { ipcMain, BrowserWindow, app, clipboard } from 'electron'
+import { productAction } from '@offgrid/features'
+import { defaultBrowserTarget } from './accessibility/ax-host'
 import { listBridgeBrowsers, removeBridgeBrowser } from './extension-bridge/bridge-electron'
 import { setupAIRequestLogIPC } from './ai-request-log-ipc'
 import { modelDisplayName } from '@offgrid/models'
@@ -73,6 +75,7 @@ import {
 } from './performance-pack'
 import { engineUpdater } from './engine-updates-service'
 import { notifyRagConversationChanged } from './rag-conversation-events'
+import { keepTaskResultsLast } from './tasks/task-result-chat'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 // Generate the answer for a rag:chat turn. When a streamId + sender are present,
@@ -504,7 +507,12 @@ export function setupIPC(): void {
     'rag:update-message',
     async (_e, conversationId: string, messageId: string, content: string, context?: unknown) => {
       const { updateRagMessage } = await import('./database')
-      return updateRagMessage(conversationId, messageId, content, context)
+      const updated = updateRagMessage(conversationId, messageId, content, context)
+      // A streamed reply lands here: a task that ended before it keeps its outcome last.
+      if (updated && keepTaskResultsLast(getDB(), conversationId)) {
+        notifyRagConversationChanged({ conversationId })
+      }
+      return updated
     }
   )
 
@@ -559,7 +567,12 @@ export function setupIPC(): void {
       // standing beside it. Read from the one owner of "what this device is generating", so no caller
       // has to pass it and none can forget to.
       const streamed = role === 'assistant' ? takeChatStreamMessageId(conversationId) : undefined
-      return addRagMessage(conversationId, role, content, context, streamed, placement)
+      const added = addRagMessage(conversationId, role, content, context, streamed, placement)
+      // A task that ended before this reply was saved keeps its outcome as the Chat's last word.
+      if (role === 'assistant' && keepTaskResultsLast(getDB(), conversationId)) {
+        notifyRagConversationChanged({ conversationId })
+      }
+      return added
     }
   )
 
@@ -624,6 +637,12 @@ export function setupIPC(): void {
   // Browsers paired through the extension bridge, and which are connected (Tasks > Web Use).
   ipcMain.handle('extension-bridge:browsers', () => listBridgeBrowsers())
   ipcMain.handle('extension-bridge:remove', (_e, id: string) => removeBridgeBrowser(id))
+  // "Get the extension", from any screen: the store for this computer's default browser.
+  ipcMain.handle('extension-bridge:get', async () => {
+    const browser = (await defaultBrowserTarget().catch(() => null))?.name
+    const { url } = productAction({ product: 'extension', browser })
+    if (url) await (await import('electron')).shell.openExternal(url)
+  })
 
   // App version (for the Settings footer — so users know what build they're on). A packaged app
   // reads its own; an unpackaged launch of a script reports Electron's, so it uses the build's.
@@ -1178,6 +1197,12 @@ export function setupIPC(): void {
   ipcMain.handle('setup:cancel-download', (_e, modelId: string) =>
     import('./setup').then((setup) => setup.cancelSetupDownload(modelId))
   )
+  ipcMain.handle('setup:quick-start', async () => {
+    const { quickStart } = await import('./setup')
+    return quickStart((p) =>
+      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('setup:progress', p))
+    )
+  })
   ipcMain.handle('setup:auto-configure', async (_e, selectedModelIds?: string[], mode?: string) => {
     const { autoConfigure } = await import('./setup')
     return autoConfigure(
@@ -1530,6 +1555,7 @@ export function setupIPC(): void {
                 }
               },
               onActivity: (activity) => {
+                if (activity.kind === 'answer_discarded') resetChatStreamPartial(streamId)
                 try {
                   sender.send('rag:stream', { streamId, type: 'step', step: activity })
                 } catch {

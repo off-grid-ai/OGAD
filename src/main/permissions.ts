@@ -95,8 +95,17 @@ export async function getPermissionStatus(): Promise<PermissionStatus> {
     accessibility,
     screenRecording,
     localNetwork,
-    allGranted: accessibility && screenRecording && localNetwork
+    allGranted: accessibility && screenRecording && localNetwork,
+    microphone: microphoneStatus()
   }
+}
+
+/** Microphone access as the system reports it. Linux has no such switch: always granted. */
+function microphoneStatus(): 'granted' | 'ask' | 'blocked' {
+  if (process.platform !== 'darwin' && process.platform !== 'win32') return 'granted'
+  const status = systemPreferences.getMediaAccessStatus('microphone')
+  if (status === 'granted') return 'granted'
+  return status === 'not-determined' ? 'ask' : 'blocked'
 }
 
 /**

@@ -131,9 +131,9 @@ export function ConversationTitleActions({
               key="rename-error"
               role="alert"
               className="mt-1 text-[10px] text-destructive"
-              initial={reduceMotion ? false : { opacity: 0, y: -4, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4, filter: 'blur(4px)' }}
+              initial={reduceMotion ? false : { opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
               transition={{ duration: reduceMotion ? 0 : 0.3, ease: [0.16, 1, 0.3, 1] }}
             >
               {error}

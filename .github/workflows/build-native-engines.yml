@@ -3,7 +3,8 @@ name: Build native engines
 # Builds the engine archives that macOS and Linux releases unpack, from the versions pinned in
 # resources/engine-pins.json, and smoke-tests each engine on its own platform:
 #   mac-native     llama.cpp, Prism, stable-diffusion.cpp and whisper.cpp from source (universal,
-#                  macOS 13+), plus the Kev runtime carried over from the current archive
+#                  macOS 13+), plus the Kev runtime carried over from the current archive (rebuilt
+#                  when the MLX pin moved)
 #   linux-native   upstream llama.cpp and Prism (Vulkan and CPU), stable-diffusion.cpp (Vulkan) from source,
 #                  plus whisper, FFmpeg, executorch-speech and licences carried over from the
 #                  current archive (or from a new whisper archive when whisper moved)
@@ -12,6 +13,10 @@ name: Build native engines
 # Windows needs no archive: release.yml and the CUDA pack fetch the pinned upstream zips.
 # New archives go to the release named in the pins (names are never reused), and the job commits
 # their names and hashes back to resources/engine-pins.json on the branch it ran on.
+#
+# Each engine builds on its own. One that fails (or whose stable-diffusion.cpp patches no longer
+# apply, checked once in plan) is held: the archive keeps the copy from the current archive, its
+# pin goes back to the base branch's, and the other engines still publish. The summary names it.
 on:
   workflow_dispatch:
   workflow_call:
@@ -41,6 +46,7 @@ jobs:
       stamp: ${{ steps.plan.outputs.stamp }}
       sd_cuda: ${{ steps.plan.outputs.sd_cuda }}
       whisper: ${{ steps.plan.outputs.whisper }}
+      hold_sd: ${{ steps.sd-patches.outputs.hold }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -61,12 +67,26 @@ jobs:
             *"-$(pin whisper.ref)-"*) echo whisper=false ;; *) echo whisper=true ;;
           esac >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
+      # The same pinned source and patches every stable-diffusion.cpp build uses; when they no longer
+      # fit, sd is held on every platform at once instead of failing three builds.
+      - id: sd-patches
+        name: Check the stable-diffusion.cpp patches against the pin
+        run: |
+          if node scripts/prepare-image-runtime.mjs "$RUNNER_TEMP/sd-src" 2> "$RUNNER_TEMP/sd-patches.log"; then
+            echo hold=false >> "$GITHUB_OUTPUT"
+          else
+            cat "$RUNNER_TEMP/sd-patches.log"
+            echo "::warning::stable-diffusion.cpp held: its patches do not apply to the pin"
+            echo hold=true >> "$GITHUB_OUTPUT"
+          fi
 
   linux-sd-cuda:
     needs: plan
-    if: needs.plan.outputs.sd_cuda == 'true'
+    if: needs.plan.outputs.sd_cuda == 'true' && needs.plan.outputs.hold_sd != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    outputs:
+      held: ${{ steps.build.outcome != 'success' && 'sd' || '' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -78,8 +98,11 @@ jobs:
       - name: Stage the CUDA runtime the engine links against
         run: LLAMA_ACCELERATOR=cuda bash scripts/build-llama-linux.sh
       - name: Build stable-diffusion.cpp CUDA from the pinned source
+        id: build
+        continue-on-error: true
         run: OFFGRID_BUILD_IMAGE_CUDA_FROM_SOURCE=1 bash scripts/build-image-cuda-linux.sh
       - name: Package
+        if: steps.build.outcome == 'success'
         run: |
           ref=$(node -p "require('./resources/engine-pins.json').sd.ref")
           name="ogad-sd-$ref-linux-x64-cuda12.8-multiarch-${{ needs.plan.outputs.stamp }}.tar.gz"
@@ -87,6 +110,7 @@ jobs:
           mkdir -p out && mv "$RUNNER_TEMP/$name" out/
           (cd out && sha256sum "$name" > linux-sd-cuda.sha256 && echo "$name" > linux-sd-cuda.name)
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        if: steps.build.outcome == 'success'
         with:
           name: linux-sd-cuda
           path: out/
@@ -97,6 +121,8 @@ jobs:
     if: needs.plan.outputs.whisper == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    outputs:
+      held: ${{ steps.smoke.outcome != 'success' && 'whisper' || '' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -129,6 +155,7 @@ jobs:
         run: LLAMA_ACCELERATOR=cuda bash scripts/build-llama-linux.sh
       - name: Build whisper.cpp (CUDA, Vulkan, CPU) from the pinned source
         id: build
+        continue-on-error: true
         run: |
           ccache --zero-stats
           OFFGRID_BUILD_VOICE_FROM_SOURCE=1 bash scripts/build-voice-linux.sh
@@ -140,6 +167,9 @@ jobs:
           path: ${{ runner.temp }}/ccache
           key: ${{ steps.ccache.outputs.cache-primary-key }}
       - name: Smoke-test transcription
+        id: smoke
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
         run: |
           curl -fsSL -o "$RUNNER_TEMP/model.bin" "$WHISPER_MODEL_URL"
           curl -fsSL -o "$RUNNER_TEMP/jfk.wav" "$WHISPER_SAMPLE_URL"
@@ -147,6 +177,7 @@ jobs:
             | tee "$RUNNER_TEMP/out.txt"
           grep -qi 'ask not what your country can do for you' "$RUNNER_TEMP/out.txt"
       - name: Package
+        if: steps.smoke.outcome == 'success'
         run: |
           ref=$(node -p "require('./resources/engine-pins.json').whisper.ref")
           name="ogad-whisper-$ref-linux-x64-cuda12.8-multiarch-${{ needs.plan.outputs.stamp }}.tar.gz"
@@ -154,6 +185,7 @@ jobs:
           mkdir -p out && mv "$RUNNER_TEMP/$name" out/
           (cd out && sha256sum "$name" > linux-whisper.sha256 && echo "$name" > linux-whisper.name)
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        if: steps.smoke.outcome == 'success'
         with:
           name: linux-whisper
           path: out/
@@ -164,6 +196,8 @@ jobs:
     if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.linux-whisper.result == 'success' || needs.linux-whisper.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 150
+    outputs:
+      held: ${{ steps.hold.outputs.held }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -178,28 +212,61 @@ jobs:
           curl -fL --retry 3 -o "$RUNNER_TEMP/base.tar.gz" \
             "https://github.com/off-grid-ai/OGAD/releases/download/$(pin archives.release)/$(pin "archives['linux-native'].name")"
           echo "$(pin "archives['linux-native'].sha256")  $RUNNER_TEMP/base.tar.gz" | sha256sum -c -
-          mkdir -p build/linux-bin
-          tar -xzf "$RUNNER_TEMP/base.tar.gz" -C build/linux-bin --no-same-owner
+          mkdir -p build/linux-bin "$RUNNER_TEMP/base"
+          tar -xzf "$RUNNER_TEMP/base.tar.gz" -C "$RUNNER_TEMP/base" --no-same-owner
+          cp -a "$RUNNER_TEMP/base/." build/linux-bin/
       - name: Take whisper from the new whisper archive
-        if: needs.plan.outputs.whisper == 'true'
+        if: needs.plan.outputs.whisper == 'true' && needs.linux-whisper.outputs.held == ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: linux-whisper
           path: ${{ runner.temp }}/whisper
       - name: Unpack the new whisper (the release archive carries no CUDA folders)
-        if: needs.plan.outputs.whisper == 'true'
+        if: needs.plan.outputs.whisper == 'true' && needs.linux-whisper.outputs.held == ''
         run: |
           rm -rf build/linux-bin/whisper build/linux-bin/whisper-cpu
           tar -xzf "$RUNNER_TEMP/whisper/$(cat "$RUNNER_TEMP/whisper/linux-whisper.name")" -C build/linux-bin \
             --no-same-owner --exclude='whisper-cuda'
-      - name: Stage llama.cpp and Prism (Vulkan, CPU) and build stable-diffusion.cpp (Vulkan)
+      - name: Stage llama.cpp (Vulkan, CPU)
+        id: llama
+        continue-on-error: true
         run: |
-          for variant in standard prism; do
-            for accelerator in vulkan cpu; do
-              LLAMA_VARIANT=$variant LLAMA_ACCELERATOR=$accelerator bash scripts/build-llama-linux.sh
-            done
+          for accelerator in vulkan cpu; do
+            LLAMA_VARIANT=standard LLAMA_ACCELERATOR=$accelerator bash scripts/build-llama-linux.sh
           done
-          bash scripts/fetch-image-linux.sh
+      - name: Stage Prism (Vulkan, CPU)
+        id: prism
+        continue-on-error: true
+        run: |
+          for accelerator in vulkan cpu; do
+            LLAMA_VARIANT=prism LLAMA_ACCELERATOR=$accelerator bash scripts/build-llama-linux.sh
+          done
+      - name: Build stable-diffusion.cpp (Vulkan)
+        id: sd
+        if: needs.plan.outputs.hold_sd != 'true'
+        continue-on-error: true
+        run: bash scripts/fetch-image-linux.sh
+      - name: Hold the engines that did not build (keep the current archive's copy)
+        id: hold
+        env:
+          LLAMA: ${{ steps.llama.outcome }}
+          PRISM: ${{ steps.prism.outcome }}
+          SD: ${{ steps.sd.outcome }}
+          WHISPER_HELD: ${{ needs.linux-whisper.outputs.held }}
+        run: |
+          held="$WHISPER_HELD"
+          restore() {
+            engine=$1; shift
+            for dir in "$@"; do
+              rm -rf "build/linux-bin/$dir"
+              if [ -e "$RUNNER_TEMP/base/$dir" ]; then cp -a "$RUNNER_TEMP/base/$dir" "build/linux-bin/$dir"; fi
+            done
+            held="$held $engine"
+          }
+          [ "$LLAMA" = success ] || restore llama llama llama-cpu
+          [ "$PRISM" = success ] || restore prism llama-prism llama-prism-cpu
+          [ "$SD" = success ] || restore sd sd
+          echo "held=$(echo $held)" >> "$GITHUB_OUTPUT"
       - name: Smoke-test every engine
         run: |
           bin=build/linux-bin
@@ -237,13 +304,15 @@ jobs:
     needs: plan
     runs-on: macos-15
     timeout-minutes: 150
+    outputs:
+      held: ${{ steps.hold.outputs.held }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.plan.outputs.ref }}
           lfs: false
           persist-credentials: false
-      - name: Start from the current archive (Kev runtime)
+      - name: Start from the current archive (Kev runtime, and any engine that is held)
         run: |
           pin() { node -p "require('./resources/engine-pins.json').$1"; }
           curl -fL --retry 3 -o "$RUNNER_TEMP/base.tar.gz" \
@@ -252,7 +321,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/base"
           tar -xzf "$RUNNER_TEMP/base.tar.gz" -C "$RUNNER_TEMP/base"
           rm -rf resources/bin/kev-runtime
-          mv "$RUNNER_TEMP/base/kev-runtime" resources/bin/kev-runtime
+          cp -R "$RUNNER_TEMP/base/kev-runtime" resources/bin/kev-runtime
+      - name: Rebuild the Kev runtime when the MLX pin moved
+        id: mlx
+        continue-on-error: true
+        run: |
+          want=$(node -p "require('./resources/engine-pins.json').mlx.version")
+          have=$(resources/bin/kev-runtime/python/bin/python3 -c "import importlib.metadata as m; print(m.version('mlx'))" || true)
+          echo "Kev runtime MLX $have, pin $want"
+          [ "$have" = "$want" ] || bash scripts/build-kev-runtime.sh
       # The same compiler cache as linux-whisper, for the four engines this job compiles.
       - name: Locate the compiler cache
         run: |
@@ -267,18 +344,57 @@ jobs:
           path: ${{ runner.temp }}/ccache
           key: ccache-mac-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('resources/engine-pins.json', 'scripts/build-llama.sh', 'scripts/build-sd-macos.sh', 'scripts/build-whisper-cli.sh') }}
           restore-keys: ccache-mac-native-${{ runner.os }}-${{ runner.arch }}-
-      - name: Build llama.cpp, Prism, stable-diffusion.cpp and whisper.cpp (universal, macOS 13+)
-        id: build
+      # One step per engine (universal, macOS 13+), so one that fails holds only itself.
+      - name: Build llama.cpp
+        id: llama
+        continue-on-error: true
         run: |
           ccache --zero-stats
-          rm -rf resources/bin/llama resources/bin/llama-prism resources/bin/sd resources/bin/whisper
+          rm -rf resources/bin/llama
           LLAMA_VARIANT=standard bash scripts/build-llama.sh
+      - name: Build Prism
+        id: prism
+        continue-on-error: true
+        run: |
+          rm -rf resources/bin/llama-prism
           LLAMA_VARIANT=prism bash scripts/build-llama.sh
+      - name: Build stable-diffusion.cpp
+        id: sd
+        if: needs.plan.outputs.hold_sd != 'true'
+        continue-on-error: true
+        run: |
+          rm -rf resources/bin/sd
           bash scripts/build-sd-macos.sh
+      - name: Build whisper.cpp
+        id: whisper
+        continue-on-error: true
+        run: |
+          rm -rf resources/bin/whisper
           bash scripts/build-whisper-cli.sh
           ccache --show-stats
+      - name: Hold the engines that did not build (keep the current archive's copy)
+        id: hold
+        env:
+          LLAMA: ${{ steps.llama.outcome }}
+          PRISM: ${{ steps.prism.outcome }}
+          SD: ${{ steps.sd.outcome }}
+          WHISPER: ${{ steps.whisper.outcome }}
+          MLX: ${{ steps.mlx.outcome }}
+        run: |
+          held=""
+          restore() {
+            rm -rf "resources/bin/$2"
+            cp -R "$RUNNER_TEMP/base/$2" "resources/bin/$2"
+            held="$held $1"
+          }
+          [ "$LLAMA" = success ] || restore llama llama
+          [ "$PRISM" = success ] || restore prism llama-prism
+          [ "$SD" = success ] || restore sd sd
+          [ "$WHISPER" = success ] || restore whisper whisper
+          [ "$MLX" = success ] || restore mlx kev-runtime
+          echo "held=$(echo $held)" >> "$GITHUB_OUTPUT"
       - name: Save the compiler cache
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ccache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && steps.ccache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
@@ -320,12 +436,42 @@ jobs:
     needs: [plan, linux-sd-cuda, linux-whisper, linux-native, mac-native]
     if: ${{ !cancelled() && needs.linux-native.result == 'success' && needs.mac-native.result == 'success' && needs.linux-sd-cuda.result != 'failure' && needs.linux-whisper.result != 'failure' }}
     runs-on: ubuntu-24.04
+    env:
+      HELD: >-
+        ${{ needs.plan.outputs.hold_sd == 'true' && 'sd' || '' }}
+        ${{ needs.linux-sd-cuda.outputs.held }} ${{ needs.linux-whisper.outputs.held }}
+        ${{ needs.linux-native.outputs.held }} ${{ needs.mac-native.outputs.held }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.plan.outputs.ref }}
           lfs: false
           token: ${{ secrets.PUSH_TOKEN || github.token }}
+      # A held engine shipped from the current archive, so its pin goes back to the base branch's
+      # (the version that archive carries). On the base branch itself there is nothing to go back
+      # to, so a held engine there stops the publish rather than pin a version nobody built.
+      - name: Put held engines back on the base branch's pins
+        env:
+          BASE: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          held=$(echo $HELD | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
+          [ -n "$held" ] || exit 0
+          git fetch --depth 1 origin "$BASE"
+          git show "origin/$BASE:resources/engine-pins.json" > "$RUNNER_TEMP/base-pins.json"
+          node -e '
+            const fs = require("fs"); const file = "resources/engine-pins.json";
+            const pins = JSON.parse(fs.readFileSync(file, "utf8"));
+            const base = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            for (const engine of process.argv[2].split(" ")) {
+              if (JSON.stringify(pins[engine]) === JSON.stringify(base[engine])) {
+                console.error(`${engine} did not build and is already on the base pin`); process.exit(1);
+              }
+              pins[engine] = base[engine];
+            }
+            fs.writeFileSync(file, JSON.stringify(pins, null, 2) + "\n");
+          ' "$RUNNER_TEMP/base-pins.json" "$held"
+          echo "**Held on their current version (did not build):** $held" >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning::Held on their current version: $held"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: ${{ runner.temp }}/archives
@@ -355,5 +501,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add resources/engine-pins.json
-          git commit -m "Native engine archives ${{ needs.plan.outputs.stamp }}"
+          held=$(echo $HELD | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
+          git commit -m "Native engine archives ${{ needs.plan.outputs.stamp }}${held:+ (held: $held)}"
           git push origin "HEAD:${{ needs.plan.outputs.ref }}"

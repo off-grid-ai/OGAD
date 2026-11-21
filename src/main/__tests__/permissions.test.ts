@@ -97,7 +97,8 @@ describe('reading this machine-s permissions', () => {
       accessibility: true,
       screenRecording: true,
       localNetwork: true,
-      allGranted: true
+      allGranted: true,
+      microphone: 'granted'
     })
   })
 
@@ -195,7 +196,8 @@ describe('reading this machine-s permissions', () => {
         accessibility: true,
         screenRecording: true,
         localNetwork: true,
-        allGranted: true
+        allGranted: true,
+        microphone: 'granted'
       })
       // And it never calls the macOS-only APIs, which do not exist off darwin.
       expect(electron.isTrustedAccessibilityClient).not.toHaveBeenCalled()

@@ -182,8 +182,13 @@ runs:
         echo "electron=$(node -p "require('./package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
         echo "shared_dir=$(node -p "require('path').resolve('..', 'shared').split(require('path').sep).join('/')")" >> "$GITHUB_OUTPUT"
         echo "shared_sha=$(git -C _shared rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-        # Every shared package core or Pro imports; a package this shared commit lacks is skipped.
-        echo "shared_packages=models rag sync use automation speech ui design writing notes notes-editor" >> "$GITHUB_OUTPUT"
+        # Every shared package core or Pro consumes, read from their file: dependencies, so a package
+        # the app adds is built here without a second list to keep in step (features and i18n were
+        # missed that way, and every test that imports them failed to resolve). Sorted, which also
+        # builds each package before the ones that depend on it (automation and models before sync,
+        # notes before notes-editor). A package this shared commit lacks is skipped.
+        consumed=$(node -e 'const fs=require("fs");const names=[];for(const f of ["package.json","pro/package.json"]){if(!fs.existsSync(f))continue;const p=JSON.parse(fs.readFileSync(f,"utf8"));for(const v of Object.values({...p.dependencies,...p.devDependencies,...p.optionalDependencies})){const m=/^file:(?:\.\.\/)+shared\/packages\/(.+)$/.exec(v);if(m)names.push(m[1])}}console.log([...new Set(names)].sort().join(" "))')
+        echo "shared_packages=$consumed" >> "$GITHUB_OUTPUT"
     - name: Restore npm downloads
       if: ${{ inputs.workspace == 'true' }}
       id: npm_cache

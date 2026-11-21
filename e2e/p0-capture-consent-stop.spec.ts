@@ -19,11 +19,7 @@ import { completeOnboarding } from './helpers/onboarding'
 
 interface BoundaryEvent {
   event:
-    | 'fixture-ready'
-    | 'permission-read'
-    | 'source-enumeration'
-    | 'active-window'
-    | 'frame-capture'
+    'fixture-ready' | 'permission-read' | 'source-enumeration' | 'active-window' | 'frame-capture'
 }
 
 let app: ElectronApplication
@@ -58,7 +54,7 @@ const expandSidebar = async (): Promise<void> => {
 const gotoCaptureSettings = async (): Promise<void> => {
   await expandSidebar()
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
   const header = page.getByRole('button', { name: /^(All settings\s*)?Capture & processing/ })
   await expect(header).toBeVisible()
   if ((await header.getAttribute('aria-expanded')) !== 'true') await header.click()
@@ -75,16 +71,18 @@ test.beforeAll(async () => {
   screenshotPath = path.join(os.tmpdir(), 'offgrid-p0-capture-paused-render.png')
   const boundaryFixture = path.resolve('e2e/fixtures/p0-capture-native-boundary.cjs')
 
-  app = await electron.launch({
-    args: [boundaryFixture],
-    env: {
-      ...process.env,
-      OFFGRID_USER_DATA: userDataDir,
-      OFFGRID_P0_CAPTURE_NATIVE_LEDGER: ledgerPath,
-      OFFGRID_PRO: '1',
-      NODE_ENV: 'production'
-    }
-  })
+  app = skipGpuSetup(
+    await electron.launch({
+      args: [boundaryFixture],
+      env: {
+        ...process.env,
+        OFFGRID_USER_DATA: userDataDir,
+        OFFGRID_P0_CAPTURE_NATIVE_LEDGER: ledgerPath,
+        OFFGRID_PRO: '1',
+        NODE_ENV: 'production'
+      }
+    })
+  )
   page = await app.firstWindow()
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.waitForLoadState('domcontentloaded')

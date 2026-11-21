@@ -21,6 +21,7 @@ import { GodIcon } from '../GodIcon'
 import { deviceNoun, primaryModifier } from '@renderer/lib/device'
 import { isMac, type DevicePlatform } from '@offgrid/core/shared/device'
 import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
+import { FEATURE_NAMES as NAME } from '@offgrid/features'
 
 // Static catalogue of the Pro features. This ships in the OPEN build so the free
 // app can advertise everything Pro unlocks — the sidebar shows these as locked
@@ -73,13 +74,13 @@ export interface ProFeature {
 export const PRO_FEATURES: ProFeature[] = [
   {
     route: 'explore',
-    label: 'God',
+    label: NAME.assistant,
     icon: GodIcon,
     tagline: 'Your assistant. It knows your day and asks before it acts.',
     card: 'Your private assistant',
     group: 'work',
     description:
-      'Chat or talk with Ares. It answers from your memory, accounts and tools, raises what needs you, acts on websites and apps with your approval, and keeps you up to date on what is new in Off Grid AI. Wake-word audio is checked on your device and never saved.',
+      'Chat with it, or say "Ares" and talk. It answers from your memory, accounts and tools, raises what needs you, acts on websites and apps with your approval, and keeps you up to date on what is new in Off Grid AI. Wake-word audio is checked on your device and never saved.',
     highlights: [
       'Chat or voice, wake word "Ares"',
       'Approvals and what needs you',
@@ -89,7 +90,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'video',
-    label: 'Video',
+    label: NAME.video,
     icon: FilmStrip,
     tagline: 'Turn one sentence into a narrated short film.',
     card: 'Turn a line into film',
@@ -106,7 +107,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'tasks',
-    label: 'Tasks',
+    label: NAME.tasks,
     icon: ListChecks,
     tagline: 'See every active run in one place.',
     card: 'Every run in one place',
@@ -118,7 +119,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'day',
-    label: 'Day',
+    label: NAME.day,
     icon: CalendarBlank,
     tagline: 'Your day, planned for you.',
     card: 'Your day, planned',
@@ -134,7 +135,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'reflect',
-    label: 'Reflect',
+    label: NAME.reflect,
     icon: ChartLineUp,
     tagline: 'See where your time really goes.',
     card: 'Where your time goes',
@@ -154,7 +155,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'replay',
-    label: 'Replay',
+    label: NAME.replay,
     icon: Rewind,
     tagline: 'Rewind anything you saw.',
     card: 'Rewind what you saw',
@@ -175,7 +176,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'meetings',
-    label: 'Meetings',
+    label: NAME.meetings,
     icon: Microphone,
     tagline: 'Record & transcribe meetings, locally.',
     card: 'Meetings, written up',
@@ -191,7 +192,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'actions',
-    label: 'Actions',
+    label: NAME.actions,
     icon: CheckSquare,
     tagline: 'To-dos and actions, handled.',
     card: 'To-dos, handled',
@@ -207,7 +208,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'entities',
-    label: 'Entities',
+    label: NAME.entities,
     icon: Graph,
     tagline: 'A private graph of your work.',
     card: 'A map of your work',
@@ -223,7 +224,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'search',
-    label: 'Search',
+    label: NAME.search,
     icon: MagnifyingGlass,
     tagline: 'Search everything you’ve ever seen.',
     card: 'Search all you saw',
@@ -235,23 +236,23 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'notifications',
-    label: 'Notifications',
+    label: NAME.notifications,
     icon: Broadcast,
-    tagline: 'Approvals & to-dos, surfaced.',
-    card: 'Approvals in one place',
+    tagline: 'What happened while you were away.',
+    card: 'Every notice in one place',
     group: 'work',
     description:
-      'Off Grid AI reaches out first — a morning briefing, a heads-up before meetings, approvals waiting on your decision, and to-dos it pulled from your day — even when the window is closed.',
+      'Off Grid AI reaches out first — a morning briefing, a heads-up before meetings, files and notices from your other devices — even when the window is closed. Approvals wait in Actions.',
     highlights: [
       'Proactive briefings & meeting prep',
-      'Approval queue for actions',
-      'Auto-extracted to-dos'
+      'File sharing and device notices',
+      'Approvals wait in Actions'
     ],
     platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'voice',
-    label: 'Voice',
+    label: NAME.dictation,
     icon: Waveform,
     tagline: 'Talk instead of type, fully local.',
     card: 'Talk instead of typing',
@@ -266,7 +267,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'scribe',
-    label: 'Scribe',
+    label: NAME.scribe,
     icon: PenNib,
     tagline: 'Every message correct, clear and in your voice.',
     card: 'Clearer writing, any app',
@@ -281,7 +282,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'notes',
-    label: 'Notes',
+    label: NAME.notes,
     icon: Notebook,
     tagline: 'Your notes as plain files you own.',
     card: 'Notes you own',
@@ -296,7 +297,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'vault',
-    label: 'Vault',
+    label: NAME.vault,
     icon: ShieldCheck,
     tagline: 'Passwords and secrets, encrypted on this device.',
     card: 'Passwords, locked here',
@@ -316,7 +317,7 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'clipboard',
-    label: 'Clipboard',
+    label: NAME.clipboard,
     icon: ClipboardText,
     tagline: 'Every copy, kept and searchable.',
     card: 'Every copy, kept',
@@ -334,10 +335,10 @@ export const PRO_FEATURES: ProFeature[] = [
   },
   {
     route: 'devices',
-    label: 'Devices',
+    label: NAME.sync,
     icon: DevicesIcon,
-    tagline: 'Your chats and settings, on every device.',
-    card: 'Chats on every device',
+    tagline: 'Your chats, notes and settings, on every device.',
+    card: 'Sync across your devices',
     group: 'private',
     description:
       'Pair your computer and phone over your local network to keep chats, projects and model settings in step. Data moves through a direct encrypted connection between your devices. Nothing is uploaded to an Off Grid AI server.',

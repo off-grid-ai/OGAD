@@ -1,0 +1,571 @@
+[
+  {
+    "id": "dm-peer-state-not-on-wire",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "sync",
+    "screen": "Desktop Vault, Notes, Clipboard, Scribe headers; mobile Sync sharing",
+    "kind": "cross-product",
+    "title": "Neither device knows the other's sync switches",
+    "what": "Each device knows only its own switches. A receiver that has a category off, or a locked vault, drops the data and tells the sender nothing. The desktop header says '<Label> sync is on' from its own send switch alone. The phone drops copied text when its switch is off.",
+    "risk": "Desktop shows a green 'sync is on' while nothing reaches the phone. The user cannot tell which device holds it back.",
+    "rec": "shared: add one small 'sharing state' message per peer (each category on/off, receive on/off, vault open). pro + mobile: the page header reads it and says 'Off on <device>. Turn on <category> there.'",
+    "files": [
+      "shared/packages/sync/src/vault-sync.ts:514",
+      "shared/packages/sync/src/receive-policy.ts:352",
+      "desktop/pro/renderer/components/SyncCategoryAction.tsx:49",
+      "desktop/pro/renderer/sync-state.ts:157",
+      "mobile/pro/sync/clipboardSyncService.ts:256",
+      "mobile/pro/sync/vaultSyncService.ts:98"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "dm-vault-open-on-other-device",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "vault",
+    "screen": "Vault (both apps)",
+    "kind": "cross-product",
+    "title": "Vault never says to open the other vault",
+    "what": "Vault items move only while both vaults are unlocked. The phone vault locks every time the app goes to the background. Desktop says this only in a tooltip. The phone says it only in the empty state. With items present, neither side says the other vault is locked.",
+    "risk": "A password saved on the computer never reaches a phone that looks set up. The user assumes vault sync is broken.",
+    "rec": "shared: carry 'vault open' in the peer state message. pro + mobile: one line on the Vault page, 'Open your vault on <device> to sync', shown only while the other vault is locked.",
+    "files": [
+      "shared/packages/sync/src/vault-sync.ts:516",
+      "shared/packages/sync/src/control-center-data.ts:151",
+      "desktop/pro/main/sync/vault-sync-service.ts:113",
+      "desktop/pro/renderer/screens/VaultScreen.tsx:563",
+      "mobile/pro/vault/phoneVault.ts:104",
+      "mobile/pro/sync/vaultSyncService.ts:98",
+      "mobile/pro/vault/ui/VaultScreen.tsx:196"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "dm-approval-no-card-on-phone",
+    "product": "desktop+mobile",
+    "direction": "mobile->desktop",
+    "feature": "actions",
+    "screen": "Mobile chat and task card",
+    "kind": "cross-product",
+    "title": "Phone cannot approve an action it started",
+    "what": "The shared rule says any paired device may approve. The phone stores approval records but has no approval screen and never writes a decision. Desktop sends model-facing text, 'Waiting for the user's approval in Off Grid AI Desktop (Action Approval)'. The real desktop screen is Actions, tab Approvals.",
+    "risk": "A task started from the phone stalls until the user walks to the computer. The phone names a screen that does not exist.",
+    "rec": "mobile: show an Approve / Reject card from the synced approval record. Smallest first step: one line 'Approve on <device>: Actions, Approvals'. desktop: fix the screen name in the waiting text.",
+    "files": [
+      "shared/packages/sync/src/action-approval.ts:4",
+      "desktop/src/main/tools/nativeActionToolExtension.ts:383",
+      "desktop/pro/renderer/screens/ActionsScreen.tsx:357",
+      "mobile/pro/sync/stateSyncOutbound.ts:49"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "dm-removed-device-not-told",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "licence",
+    "screen": "Removed device: Pro page and Sync / Devices",
+    "kind": "cross-product",
+    "title": "A removed device loses Pro with no reason",
+    "what": "The device that removes another shows clear copy. The removed desktop only clears Pro. The removed phone only clears the licence and deletes the row. It then shows the never-bought Pro page.",
+    "risk": "Pro vanishes. The user thinks the licence broke and may buy again or write to support.",
+    "rec": "shared: one line, '<name> removed this device. Pair again to rejoin.' pro + mobile: show it once on a remote removal, with a Pair button.",
+    "files": [
+      "shared/packages/sync/src/membership-revocation.ts:516",
+      "desktop/pro/main/sync-ipc.ts:851",
+      "mobile/pro/sync/syncRuntimeCallbacks.ts:95",
+      "mobile/src/screens/ProDetailScreen/index.tsx:191"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-pro-by-pairing-hidden-on-phone",
+    "product": "desktop+mobile",
+    "direction": "desktop->mobile",
+    "feature": "licence",
+    "screen": "Mobile Pro page; desktop Pro page",
+    "kind": "cross-product",
+    "title": "Phone hides the pair-to-get-Pro path",
+    "what": "Desktop says pairing with a licensed device turns Pro on. The phone offers only 'I have a license key'. Opening Sync without Pro sends the user to checkout. The desktop Pro page says the licence covers the phone but gives only a download link.",
+    "risk": "A desktop buyer installs the phone app and sees a paywall. They pay twice or give up.",
+    "rec": "mobile: add a row on the Pro page, 'Pro on another device? Pair to turn it on here', that opens the scanner. desktop: under 'Get Off Grid AI Mobile' add 'Then scan the code in Devices'.",
+    "files": [
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:1598",
+      "desktop/src/renderer/src/components/onboarding/PickSteps.tsx:241",
+      "desktop/src/renderer/src/components/pro/UpgradeScreen.tsx:296",
+      "mobile/src/screens/ProDetailScreen/index.tsx:254",
+      "mobile/src/hooks/useOpenSync.ts:30"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-gateway-key-revoked-reason-dropped",
+    "product": "desktop+mobile",
+    "direction": "desktop->mobile",
+    "feature": "models",
+    "screen": "Mobile model picker and Remote servers",
+    "kind": "cross-product",
+    "title": "Phone drops the computer's 'pair again' reason",
+    "what": "When the computer revokes the phone's key it sends 'This computer's key for this phone was revoked. Pair again.' The phone logs it and clears the key. The phone then tells the user to copy an API key from Gateway and paste it in Remote servers.",
+    "risk": "The user pastes keys by hand. The right fix was to pair again.",
+    "rec": "mobile: keep the failure line on the paired server row and show it in place of the API-key text, with a Pair again button.",
+    "files": [
+      "shared/packages/sync/src/gateway-access.ts:34",
+      "desktop/pro/main/sync/gateway-access-mesh.ts:53",
+      "mobile/pro/sync/pairedGatewayAdoption.ts:118",
+      "mobile/src/services/offGridDesktopModels.ts:318"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-computer-unreachable-raw-error",
+    "product": "desktop+mobile",
+    "direction": "mobile->desktop",
+    "feature": "models",
+    "screen": "Mobile chat and model picker",
+    "kind": "cross-product",
+    "title": "Computer asleep: models vanish, chat shows raw error",
+    "what": "When the computer is asleep or closed, the phone model picker removes its models with no reason. A chat that fails posts the raw error and an alert, 'Generation Error'. A good line already exists in the phone's computer search: 'Can't reach {name}. Check it's on and on the same network.' Desktop logs phone requests but has nothing to send while off.",
+    "risk": "The user sees models disappear or a technical error. They do not know to wake the computer.",
+    "rec": "mobile: keep a greyed row '<name> is not reachable' in the picker. Map network failures in chat to the existing line, with Retry.",
+    "files": [
+      "mobile/src/components/ModelSelectorModal/index.tsx:185",
+      "mobile/src/screens/ChatScreen/useChatGenerationActions.ts:920",
+      "mobile/src/components/PairedComputerResults.tsx:33",
+      "desktop/pro/main/sync/gateway-access-mesh.ts:43",
+      "desktop/src/renderer/src/components/AIRequestLogs.tsx:322"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-transfer-refusal-raw-text",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "sync",
+    "screen": "Desktop Transfer activity; mobile Sync activity",
+    "kind": "cross-product",
+    "title": "Refused transfers show raw engine text",
+    "what": "A receiver with a kind turned off answers 'declined by receiver'. Both apps print that string unchanged beside a Retry button. Other raw strings: 'device is not connected', 'transfer timed out'.",
+    "risk": "Retry fails again. The user does not learn that Receiving is off on the other device.",
+    "rec": "shared: map known reasons to one line and a step, for example '<device> has Screenshots receiving off. Turn it on in Sync, Receiving there.' Both apps render that line.",
+    "files": [
+      "shared/packages/sync/src/transfer/manager.ts:964",
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:2101",
+      "mobile/pro/ui/SyncScreen/TransferActivitySection.tsx:167"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-pending-no-open-app-hint",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "sync",
+    "screen": "Desktop Transfer activity and device card; mobile Sync activity",
+    "kind": "cross-product",
+    "title": "Waiting transfer never says to open the phone app",
+    "what": "The phone syncs only while the app is open, and says so on its own Sync screen. Desktop says 'Waiting for this device to reconnect.' and never names the step. The phone's waiting row says only 'Pending'. For an offline device both apps offer only 'Pair again'.",
+    "risk": "The user waits for a file that will not move. Or they pair a healthy device again.",
+    "rec": "shared: add a pending reason with the peer platform to the activity item and the offline device row, 'Open Off Grid AI on <device>, on the same Wi-Fi.' Both apps render it.",
+    "files": [
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:2103",
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:2393",
+      "shared/packages/sync/src/control-center.ts:780",
+      "mobile/pro/ui/SyncScreen/TransferActivitySection.tsx:53",
+      "mobile/pro/ui/SyncScreen/KnownDevicesSection.tsx:127",
+      "mobile/pro/ui/SyncScreen/index.tsx:95"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-no-os-notification-on-arrival",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "sync",
+    "screen": "Receiving device, app in background",
+    "kind": "cross-product",
+    "title": "Arrivals raise no system notification",
+    "what": "A received file shows only in the in-app list and bell badge on both apps. Neither posts a system notification from sync. The phone asks for notification permission only in the film feature.",
+    "risk": "A file sent to the other device goes unseen until the user opens the app and looks.",
+    "rec": "pro + mobile: post a local system notification on receive, 'File from <device>', that opens the file. mobile: ask for notification permission when the user turns on Sync or Receiving.",
+    "files": [
+      "desktop/pro/renderer/notification-routing.ts:74",
+      "desktop/pro/main/sync-ipc.ts:1118",
+      "mobile/pro/sync/fileCompletionNotificationService.ts:1",
+      "mobile/pro/ui/HomeNotificationsButton.tsx:83",
+      "mobile/pro/video/studio/filmComposer.ts:80"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "dm-mobile-pages-lack-sync-control",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "sync",
+    "screen": "Mobile Vault, Notes, Improve",
+    "kind": "cross-product",
+    "title": "Phone pages lack the sync control desktop has",
+    "what": "Desktop has the sync header control on Vault, Notes, Clipboard and Scribe. The phone shows vault sync state only when the vault is empty. Phone Notes and Improve say nothing about sync.",
+    "risk": "The founder's Vault example repeats on the phone. A page looks complete while its sync is off.",
+    "rec": "mobile: one header icon that mirrors SyncCategoryAction (pair, on, off) on Vault, Notes and Improve, opening Sync sharing.",
+    "files": [
+      "desktop/pro/renderer/components/SyncCategoryAction.tsx:49",
+      "desktop/pro/renderer/notes/NotesScreen.tsx:89",
+      "desktop/pro/renderer/screens/ScribeScreen.tsx:854",
+      "mobile/pro/vault/ui/VaultScreen.tsx:196",
+      "mobile/pro/notes/ui/NotesScreen.tsx:235",
+      "mobile/pro/scribe/ui/ImproveScreen.tsx:251"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-remote-actions-off-no-reason",
+    "product": "desktop+mobile",
+    "direction": "mobile->desktop",
+    "feature": "tools",
+    "screen": "Mobile Tools, Desktop tools switch",
+    "kind": "cross-product",
+    "title": "Tools switch snaps back with no reason",
+    "what": "When 'Remote actions' is off on the computer, it answers the phone's request with a bare revoke. The phone removes the server and the switch returns to off. No reason is sent or shown.",
+    "risk": "The user flips the switch again and again. Nothing says the computer refuses.",
+    "rec": "pro: add a reason to the revoke message. mobile: show 'Turned off on <device>. Turn on Remote actions in Devices there.'",
+    "files": [
+      "desktop/pro/main/sync/tool-grant-mesh.ts:93",
+      "desktop/pro/renderer/components/ToolSharingControls.tsx:18",
+      "mobile/pro/mcp/mcpToolGrantService.ts:89",
+      "mobile/pro/ui/CompanionToolsSection.tsx:94"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-task-recovery-hint-never-sent",
+    "product": "desktop+mobile",
+    "direction": "mobile->desktop",
+    "feature": "tasks",
+    "screen": "Mobile task card",
+    "kind": "cross-product",
+    "title": "Failed task on computer gives phone no next step",
+    "what": "The phone has recovery lines ready, 'Open Off Grid AI Desktop on <name>.' and 'Reconnect <name> and try again.' It shows them only for a recoverable failure. Desktop always sends recoverable false and no recovery action. A missing Screen Recording permission arrives as desktop-only text with no computer name.",
+    "risk": "A Computer Use or Web Use task fails on the phone with instructions meant for someone at the computer.",
+    "rec": "pro: set recoverable true and recoveryAction 'open_execution_device' for setup and permission failures. No phone change needed.",
+    "files": [
+      "desktop/pro/main/sync/task-run-projection.ts:113",
+      "desktop/src/main/vision/computer-use-permissions.ts:15",
+      "mobile/pro/ui/task-card/presentation.ts:12",
+      "mobile/pro/ui/task-card/TaskNotices.tsx:65"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-task-control-times-out",
+    "product": "desktop+mobile",
+    "direction": "mobile->desktop",
+    "feature": "tasks",
+    "screen": "Mobile task card (stop, pause, guidance)",
+    "kind": "cross-product",
+    "title": "Refused stop or pause ends as a timeout",
+    "what": "When the computer no longer accepts this phone's task controls, it drops the request and sends no reply. The phone waits 15 seconds, then says the computer 'did not confirm the request. Try again.'",
+    "risk": "The user cannot stop a running task from the phone and is told to retry something that cannot work.",
+    "rec": "pro: answer a refused control with a rejected result and the reason. mobile already renders rejected controls.",
+    "files": [
+      "desktop/pro/main/sync/task-control-sync.ts:47",
+      "desktop/pro/main/sync/task-tool-mesh.ts:142",
+      "mobile/pro/ui/task-card/TaskNotices.tsx:36"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-pairing-failure-no-next-step",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "pairing",
+    "screen": "Desktop pairing dialog; mobile pairing sheet",
+    "kind": "cross-product",
+    "title": "Pairing failures state the fault, not the step",
+    "what": "Both apps print the same shared sentence for each failure. Examples: 'The personal mesh is full.', 'At least one device must have an active Pro license.', 'These devices use different Pro licenses.', 'The device could not be reached.' The sentence 'unavailable on this device' also shows on the other device.",
+    "risk": "Pairing fails and the user does not know which device to fix or how.",
+    "rec": "shared: give each failure code a next step and a local or remote wording in pairing/attempt.ts ('Remove a device in Sync first', 'Join the same Wi-Fi', 'Enter your key on <device>').",
+    "files": [
+      "shared/packages/sync/src/pairing/attempt.ts:178",
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:3043",
+      "mobile/pro/ui/PairingAttemptSheet.tsx:69"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-version-mismatch-times-out",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "pairing",
+    "screen": "Desktop pairing dialog; mobile pairing code sheet",
+    "kind": "cross-product",
+    "title": "Old app version ends as 'Pairing timed out'",
+    "what": "A pairing message with another version number is dropped. No reply goes back. Desktop has no 'update' copy in Sync. The phone QR scanner does say 'This code needs a newer version of Off Grid AI Mobile.' The phone's per-device code sheet turns the same case into 'That is not a pairing code.'",
+    "risk": "After one app updates, pairing fails with a timeout. Nobody says to update the other app.",
+    "rec": "shared: reject an unknown pairing version with a typed code and the line 'Update Off Grid AI on <device>.' mobile: pass the unsupported-version reason through the code sheet.",
+    "files": [
+      "shared/packages/sync/src/protocol/validation.ts:109",
+      "shared/packages/sync/src/pairing/attempt.ts:215",
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:3043",
+      "mobile/pro/ui/SyncScreen/PairingQrScanner.tsx:19",
+      "mobile/pro/ui/SyncScreen/PairingCodeSheet.tsx:156"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "dm-silent-join-refusal-logs-only",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "pairing",
+    "screen": "Desktop Devices; mobile Sync device list",
+    "kind": "cross-product",
+    "title": "Auto-join refusals go to logs only",
+    "what": "Devices on one licence should join without a code. Four refusal reasons exist: not on roster, roster stale, at capacity, no mesh secret. Both apps write them to logs. Both screens show plain 'Not paired' and 'Pair'.",
+    "risk": "Two devices on the same licence do not join. Nobody says why, for example that the licence is full.",
+    "rec": "shared: project the refusal reason onto the device row in control-center.ts with one line and a step. Both apps already render row issues.",
+    "files": [
+      "shared/packages/sync/src/mesh-admission.ts:59",
+      "desktop/pro/main/sync-ipc.ts:703",
+      "mobile/pro/sync/meshAdmission.ts:50"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-desktop-model-receive-has-no-job",
+    "product": "desktop+mobile",
+    "direction": "mobile->desktop",
+    "feature": "models",
+    "screen": "Desktop Transfer activity",
+    "kind": "cross-product",
+    "title": "Phone-sent model shows as loose files on desktop",
+    "what": "The phone starts one receive job per model and shows one named row. The desktop receive path starts no job. Desktop Activity lists raw file rows, so a vision model is two .gguf rows.",
+    "risk": "The desktop user cannot tell that a model is arriving or when it is ready.",
+    "rec": "pro: start and complete a receive job in the desktop sink and build model rows from jobs, as the phone does. The shared job model already exists.",
+    "files": [
+      "desktop/pro/main/sync/model-transfer-service.ts:642",
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:1451",
+      "shared/packages/sync/src/model-transfer-jobs.ts:232",
+      "mobile/pro/sync/modelTransferService.ts:289"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "dm-model-arrival-no-notice",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "models",
+    "screen": "Receiving device: bell and Models",
+    "kind": "cross-product",
+    "title": "No notice when a sent model is ready",
+    "what": "Completion notices cover shared files only. The phone notification list has no model items. Desktop only sends a progress event to its own window.",
+    "risk": "A model of several GB lands. Nothing tells the user or offers 'Open Models'.",
+    "rec": "shared: add a model completion notice, '<model> is ready', with an Open Models action. Both apps already render the notice list.",
+    "files": [
+      "shared/packages/sync/src/file-notifications.ts:123",
+      "desktop/pro/main/sync-ipc.ts:1118",
+      "mobile/pro/sync/notificationCenter.ts:22"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-model-send-failure-raw-on-desktop",
+    "product": "desktop+mobile",
+    "direction": "desktop->mobile",
+    "feature": "models",
+    "screen": "Desktop send-model dialog",
+    "kind": "cross-product",
+    "title": "Desktop prints raw model-send errors",
+    "what": "The phone translates the duplicate case: '<model> is already installed on <device>. Open Models on <device> to use or remove it.' Desktop prints the engine's message unchanged. Free space is checked on the phone for image models only.",
+    "risk": "A send to the phone fails with technical text. The user does not know the phone is full or already has the model.",
+    "rec": "shared: move transferFailureMessage to shared and add storage-full and disconnected cases. pro: use it in the send dialog.",
+    "files": [
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:1380",
+      "shared/packages/sync/src/model-package-transfer.ts:162",
+      "mobile/pro/ui/ModelTransferSheet/index.tsx:50",
+      "mobile/pro/sync/modelPackageSink.ts:372"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-unsendable-models-hidden",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "models",
+    "screen": "Send model picker (both apps)",
+    "kind": "cross-product",
+    "title": "Models the other device cannot run are hidden",
+    "what": "Both pickers filter out models the receiver cannot run. The reason text exists in shared and is never shown. Desktop empty state reads 'No OGAM(Off Grid AI Mobile)-compatible models are installed.' even for a Mac target. The phone reads 'No models here can run on that device yet.'",
+    "risk": "The user looks for a model they own and it is missing. No reason, no next step.",
+    "rec": "shared: return blocked models as disabled rows with the reason. Both apps show them greyed. Use one plain empty-state line on both.",
+    "files": [
+      "shared/packages/sync/src/transfer/model.ts:142",
+      "desktop/pro/main/sync/model-transfer-service.ts:604",
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:3319",
+      "mobile/pro/ui/ModelTransferSheet/index.tsx:334"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "dm-phone-media-permission-silent",
+    "product": "desktop+mobile",
+    "direction": "mobile->desktop",
+    "feature": "sync",
+    "screen": "Mobile Sync sharing (Screenshots); desktop Files",
+    "kind": "cross-product",
+    "title": "Refused photo permission: screenshots silently never arrive",
+    "what": "If the phone's media permission is refused, the screenshot watcher returns and sets no issue. The rule still reads as on. Desktop states its own case, 'Folder access was not granted. Sharing stays Off.' Source problems stay on the local screen and never reach the other device.",
+    "risk": "The user turns on screenshot sharing on the phone. Nothing arrives on the computer and neither device says why.",
+    "rec": "mobile: when permission is refused, set the screenshot source issue and a setup action that opens Settings. Later, shared: include source state in the peer state message.",
+    "files": [
+      "mobile/pro/sync/screenshotSyncSource.ts:74",
+      "mobile/pro/sync/syncControlCenterData.ts:88",
+      "desktop/pro/main/sync-ipc.ts:2074",
+      "desktop/pro/main/sync-ipc.ts:1317"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-notes-empty-state-wrong",
+    "product": "desktop+mobile",
+    "direction": "mobile->desktop",
+    "feature": "notes",
+    "screen": "Mobile Notes (empty)",
+    "kind": "cross-product",
+    "title": "Phone says notes stay on device; they sync",
+    "what": "The phone's empty Notes page says 'They stay on this device.' Notes sync is on by default on both apps. Desktop Notes shows the sync control in its header.",
+    "risk": "A user who expects notes to stay on the phone finds them on the computer. That breaks trust in a privacy product.",
+    "rec": "mobile: change the line to say notes sync to paired devices, and add the sync header icon.",
+    "files": [
+      "mobile/pro/notes/ui/NotesScreen.tsx:235",
+      "mobile/pro/sync/syncPreferences.ts:55",
+      "desktop/pro/main/sync/sync-prefs.ts:60",
+      "desktop/pro/renderer/notes/NotesScreen.tsx:89"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-note-sync-failures-log-only",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "notes",
+    "screen": "Notes (both apps)",
+    "kind": "cross-product",
+    "title": "Note sync problems reach logs only",
+    "what": "A note that fails to send, follow or merge is written to the log on both apps. Notes are hidden from the Activity list. A conflict keeps both copies and tells nobody.",
+    "risk": "A note that did not arrive looks the same as one never written. A conflict copy appears with no reason.",
+    "rec": "shared: expose a per-note state (arriving, failed, conflict copy kept). pro + mobile: show it on the note row with Retry.",
+    "files": [
+      "shared/packages/sync/src/control-center-data.ts:114",
+      "desktop/pro/main/sync/note-file-sync-service.ts:115",
+      "mobile/pro/sync/noteFileSyncService.ts:189"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "dm-desktop-pairing-no-path-to-phone-app",
+    "product": "desktop+mobile",
+    "direction": "desktop->mobile",
+    "feature": "pairing",
+    "screen": "Desktop Devices (pairing code and empty list)",
+    "kind": "cross-product",
+    "title": "Desktop pairing never points to the phone app",
+    "what": "Desktop says 'Scan from another Off Grid AI device, or enter the code.' A link to the mobile app exists only in the sidebar. The phone's empty state says 'Open Sync on a nearby device' and does not name the desktop app or its screen.",
+    "risk": "A new user at the QR code has no phone app and no link to it. A phone user looks for 'Sync' on a desktop that calls it 'Devices'.",
+    "rec": "pro: add 'No phone app yet? Get it' beside the QR, using the existing link, and 'On the phone: Sync, then scan.' mobile: name the desktop screen in the empty state.",
+    "files": [
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:1762",
+      "desktop/src/renderer/src/App.tsx:1505",
+      "mobile/pro/ui/SyncScreen/index.tsx:86"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-screen-names-differ",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "sync",
+    "screen": "Desktop Devices; mobile Sync",
+    "kind": "cross-product",
+    "title": "One screen, four names: Devices, Sync, Personal Mesh",
+    "what": "Desktop calls the screen 'Devices' and 'Devices and sync'. The phone calls it 'Sync'. Desktop setup says 'Pair Off Grid AI Mobile through Personal Mesh.' The phone says 'open Sync' in one sheet and 'open the Devices screen' in another. The phone guide button for its own Sync screen reads 'Open Devices'.",
+    "risk": "Each app sends the user to a screen name that does not exist on the other.",
+    "rec": "shared: one constant for the screen name (recommend 'Sync'). desktop, pro, mobile: use it in titles and in every pointer to the other app.",
+    "files": [
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:1595",
+      "desktop/src/renderer/src/components/pro/proCatalog.ts:337",
+      "desktop/src/renderer/src/components/setup/SetupPanel.tsx:303",
+      "mobile/pro/ui/SyncScreen/index.tsx:186",
+      "mobile/pro/ui/SyncScreen/PairingQrSheet.tsx:59",
+      "mobile/pro/ui/SyncScreen/PairingCodeSheet.tsx:155",
+      "mobile/src/screens/GuideScreen/useGuideAction.ts:37"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-feature-names-differ",
+    "product": "desktop+mobile",
+    "direction": "both",
+    "feature": "sync",
+    "screen": "Sync, Tools, Clipboard, Scribe, Activity (both apps)",
+    "kind": "cross-product",
+    "title": "Same features carry different names per app",
+    "what": "Desktop 'Remote actions' is the phone's 'Desktop tools'; the error sent to the phone says 'Remote task access'. Desktop 'Evict' is the phone's 'Forget'. Desktop 'Scribe' is the phone's 'Improve'; the sync category is 'Writing'. Category 'Copied text' is the phone's 'Clipboard sync'. Desktop 'Transfer activity' and 'Files' are the phone's 'Sync activity' and 'Synced files'. Desktop prints raw status words; the phone prints 'Sent', 'Could not send'. The phone says 'the Mac' for any computer.",
+    "risk": "Help text and error lines from one app use words the other app does not show. The user cannot find the control.",
+    "rec": "shared: one label table for these features, the remove verb and the status words. pro + mobile: read labels from it.",
+    "files": [
+      "desktop/pro/renderer/components/ToolSharingControls.tsx:18",
+      "desktop/pro/main/sync/task-tool-mesh.ts:142",
+      "desktop/pro/renderer/components/DeviceActions.tsx:189",
+      "desktop/pro/renderer/screens/ScribeScreen.tsx:851",
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:2053",
+      "shared/packages/sync/src/control-center-data.ts:137",
+      "mobile/pro/ui/CompanionToolsSection.tsx:52",
+      "mobile/pro/ui/SyncScreen/KnownDevicesSection.tsx:449",
+      "mobile/pro/scribe/ui/ImproveScreen.tsx:251",
+      "mobile/pro/ui/ClipboardScreen/index.tsx:230",
+      "mobile/pro/ui/SyncScreen/TransferActivitySection.tsx:53",
+      "mobile/pro/ui/task-card/TaskNotices.tsx:57"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "dm-devices-silent-on-model-lending",
+    "product": "desktop+mobile",
+    "direction": "desktop->mobile",
+    "feature": "models",
+    "screen": "Desktop Devices (paired phone card)",
+    "kind": "cross-product",
+    "title": "Desktop never says a paired phone uses its models",
+    "what": "Pairing gives the phone a key to this computer's models. The Devices screen does not mention it. The only off switches are Forget, or revoking 'Sync · <device>' in Gateway, API keys. The phone then gets the wrong advice (see dm-gateway-key-revoked-reason-dropped).",
+    "risk": "The desktop user does not know the phone can run models here, and has no clear place to turn it off.",
+    "rec": "pro: one line on the paired device card, 'Can use this computer's models', with a switch. It pairs with the phone-side fix for the revoked key.",
+    "files": [
+      "desktop/pro/main/sync/gateway-access-mesh.ts:43",
+      "desktop/src/main/model-server.ts:309",
+      "desktop/pro/renderer/screens/DevicesScreen.tsx:1598",
+      "mobile/pro/sync/pairedGatewayAdoption.ts:122"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "dm-clipboard-setup-differs-by-entry",
+    "product": "desktop+mobile",
+    "direction": "mobile->desktop",
+    "feature": "clipboard",
+    "screen": "Mobile Clipboard; desktop Clipboard",
+    "kind": "cross-product",
+    "title": "Phone copy limits never reach the desktop",
+    "what": "On iPhone the paste-permission guide opens only when Clipboard sync is turned on from Sync sharing, not from the Clipboard page. On Android the phone captures a copy only through 'Copy to Off Grid AI'. Desktop Clipboard shows 'Copied text sync is on' and says nothing of either limit.",
+    "risk": "The user copies on the phone and it never appears on the computer. Desktop shows sync as on.",
+    "rec": "mobile: trigger the paste guide from one shared hook used by both switches. pro: when the paired device is Android, add the hint 'On Android, choose Copy to Off Grid AI' to the Clipboard header tooltip.",
+    "files": [
+      "mobile/pro/ui/ClipboardScreen/index.tsx:76",
+      "mobile/pro/ui/ClipboardScreen/index.tsx:243",
+      "mobile/pro/ui/SyncScreen/SyncSharingSettingsScreen.tsx:120",
+      "desktop/pro/renderer/screens/ClipboardScreen.tsx:232",
+      "desktop/pro/renderer/components/SyncCategoryAction.tsx:55"
+    ],
+    "effort": "S"
+  }
+]

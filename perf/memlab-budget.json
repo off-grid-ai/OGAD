@@ -1,0 +1,5 @@
+{
+  "//": "Settings visited three times (perf/e2e/leaks.memlab.ts). 2026-11-21: 4 small clusters (motion keeps detached React nodes in its element store), heap snapshot +0.7 MB.",
+  "maxLeakClusters": 6,
+  "maxFinalOverBaselineSnapshotMB": 3
+}

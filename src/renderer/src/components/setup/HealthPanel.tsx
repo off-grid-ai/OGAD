@@ -202,7 +202,10 @@ export function HealthPanel(): React.ReactElement {
                   aria-label={c.label}
                   className="group flex items-center gap-2.5 rounded border border-neutral-800/60 bg-neutral-900/30 px-2.5 py-2 transition-colors duration-150 hover:border-neutral-700"
                 >
-                  <StatusIcon status={c.status} />
+                  {/* On the label's line: the details under it can wrap (design doc principle 6). */}
+                  <span className="flex h-4 shrink-0 items-center self-start">
+                    <StatusIcon status={c.status} />
+                  </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-mono text-[11px] text-neutral-200">{c.label}</div>
                     {isModel && (

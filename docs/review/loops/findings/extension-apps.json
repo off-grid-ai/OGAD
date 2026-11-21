@@ -1,0 +1,371 @@
+[
+  {
+    "id": "xa-scribe-off-looks-clean",
+    "product": "extension+desktop",
+    "direction": "desktop->extension",
+    "platform": "both",
+    "feature": "Scribe in the browser",
+    "screen": "Any text box in the browser (Scribe badge)",
+    "kind": "cross-product",
+    "title": "Scribe off on desktop shows as clean text",
+    "what": "The desktop Scribe switch 'Scribe on everywhere' turns checks off. A browser check then gets an empty issue list. The extension only reads features.writing (Pro and the hook), never the switch. So the badge shows 'No writing issues'.",
+    "risk": "The user thinks the text was checked and is clean. It was not checked. Nothing in the browser says Scribe is off on the desktop.",
+    "rec": "Desktop: add the switch to the bridge state (or answer the check with a 'scribe-off' code). Extension: show the badge as off with one line, 'Scribe is off in Off Grid AI Desktop', and a button that turns it on over the bridge.",
+    "files": [
+      "desktop/pro/main/writing/scribe.ts:106",
+      "desktop/src/main/extension-bridge/bridge-electron.ts:248",
+      "browser-extension/src/shared/writing/state.ts:27",
+      "browser-extension/src/shared/writing/badge.ts:37"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "xa-no-desktop-get-link",
+    "product": "extension+desktop",
+    "direction": "extension->desktop",
+    "platform": "both",
+    "feature": "Getting the desktop app",
+    "screen": "Extension panel: first open, 'Start Off Grid AI Desktop', and the pairing card",
+    "kind": "cross-product",
+    "title": "Extension never links to get the desktop app",
+    "what": "With no desktop, the panel says 'Start Off Grid AI Desktop' or 'Check the desktop address... update it to the latest version'. No link to download the desktop exists anywhere in the extension source. The only actions are Retry and 'Change desktop address'.",
+    "risk": "A person who installs the extension from the store first has a dead end. They do not learn that a separate app is needed or where to get it.",
+    "rec": "Extension: add one 'Get Off Grid AI Desktop' button (getoffgridai.co/desktop) to DesktopOffline and to the unavailable pairing card. Say in one line that the panel needs the desktop app.",
+    "files": [
+      "browser-extension/src/sidepanel/DesktopOffline.tsx:44",
+      "browser-extension/src/sidepanel/DesktopOffline.tsx:80",
+      "browser-extension/src/sidepanel/DesktopPairing.tsx:135",
+      "browser-extension/src/shared/desktop/select.ts:13"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "xa-scribe-browser-row-wrong",
+    "product": "extension+desktop",
+    "direction": "extension->desktop",
+    "platform": "both",
+    "feature": "Scribe: where it runs",
+    "screen": "Desktop Scribe screen, 'Browser' row",
+    "kind": "cross-product",
+    "title": "Scribe says 'Not connected' for a working browser",
+    "what": "The desktop Scribe row lists browsers from the live socket. The extension opens that socket only when Web Use is set to Default browser and all-sites access is granted. Scribe itself runs over plain sealed calls. So a paired browser that uses Scribe shows as 'Not connected' with a 'Get the extension' button.",
+    "risk": "The desktop tells a user to install an extension they already use. They cannot tell if Scribe works in the browser. The same 'Not connected' shows in the paired browser list.",
+    "rec": "Desktop: build this row from the paired browser store plus last-call time, not from the live socket. Show 'Paired · Chrome' and offer 'Get the extension' only when no browser is paired.",
+    "files": [
+      "desktop/pro/main/writing/index.ts:112",
+      "desktop/pro/renderer/screens/ScribeScreen.tsx:283",
+      "desktop/pro/renderer/screens/ScribeScreen.tsx:298",
+      "browser-extension/src/background/browser-tasks.ts:176",
+      "desktop/pro/renderer/components/PairedBrowserList.tsx:73"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "xa-free-pair-then-pro-wall",
+    "product": "extension+desktop",
+    "direction": "extension->desktop",
+    "platform": "both",
+    "feature": "Pairing without Pro",
+    "screen": "Desktop pairing dialog, then the extension pairing card",
+    "kind": "cross-product",
+    "title": "Pro wall appears only after pairing",
+    "what": "Pairing works without Pro. The desktop dialog says the browser can use 'your chats, tools and (with Pro) vault'. But every call except state, unpair and stop is refused with pro_required. The panel then says 'The browser extension is part of Off Grid AI Pro. Activate Pro in Off Grid AI Desktop'. There is no link. The desktop Pro page does not list the browser extension.",
+    "risk": "A free user completes the six-word pairing and then finds that nothing works. The dialog told them chats and tools were included. On the desktop Pro page they cannot find the thing they were sent to buy.",
+    "rec": "Desktop: fix the dialog line for free users and, after a free pairing, open the Pro page. Add 'Browser extension' to the Pro catalog. Extension: say the Pro need before the Pair button when the desktop reports no Pro (add a pro flag to /v1/extension/info).",
+    "files": [
+      "desktop/src/main/extension-bridge/bridge-electron.ts:202",
+      "desktop/src/main/extension-bridge/bridge-service.ts:138",
+      "browser-extension/src/sidepanel/DesktopPairing.tsx:154",
+      "desktop/src/renderer/src/components/pro/UpgradeScreen.tsx:15",
+      "browser-extension/src/shared/desktop/desktop-errors.ts:7"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "xa-web-use-waiting-no-reason",
+    "product": "extension+desktop",
+    "direction": "desktop->extension",
+    "platform": "both",
+    "feature": "Web Use in the default browser",
+    "screen": "Desktop Settings > Tasks > Web Use > Browser",
+    "kind": "cross-product",
+    "title": "'Waiting for your browser' hides the real blocker",
+    "what": "With Default browser chosen, the desktop waits for the extension's live socket. The extension connects only when its own switch 'Let Off Grid AI tasks use this browser' has granted all-sites access. The desktop hint says to open the browser and reload the extension. It never names that switch. Tasks run in the Off Grid AI browser meanwhile.",
+    "risk": "The setting looks on, but tasks keep running in the built-in browser, not signed in as the user. The user reloads the extension and nothing changes.",
+    "rec": "Desktop: change the hint to name the switch ('In the extension, turn on Settings > Tasks > Let Off Grid AI tasks use this browser'). Extension: when the desktop wants tasks and access is not granted, show the ask once in the panel with a one-click Allow.",
+    "files": [
+      "desktop/pro/shared/web-use-browser.ts:35",
+      "browser-extension/src/background/browser-tasks.ts:176",
+      "browser-extension/src/sidepanel/BrowserTasksRow.tsx:22",
+      "desktop/src/main/browser/web-use-host.ts:35"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "xa-removed-browser-unclear",
+    "product": "extension+desktop",
+    "direction": "desktop->extension",
+    "platform": "both",
+    "feature": "Removed browser and old desktop",
+    "screen": "Extension panel after the browser is removed on desktop",
+    "kind": "cross-product",
+    "title": "Removed browser and old desktop get one vague line",
+    "what": "The desktop answers 401 'unauthorized' for a removed browser, a bad key and a method it does not know. The extension maps all of these to 'Pair this browser again or update Off Grid AI Desktop'. After a removal the panel drops to the setup screen titled 'Off Grid AI Pro' with a Pair button. It never says the browser was removed on the desktop.",
+    "risk": "The user sees two different fixes in one line and must guess. A newer extension on an older desktop is told to pair again, which does not help. A removed browser looks like a fault.",
+    "rec": "Desktop: answer an unknown method from a known browser with a sealed 'unsupported' error, and keep 401 for an unknown device. Extension: on 401 with a stored pairing, show 'This browser was removed in Off Grid AI Desktop. Pair again.' and for 'unsupported' show the update line only.",
+    "files": [
+      "desktop/src/main/extension-bridge/bridge-service.ts:135",
+      "desktop/src/main/extension-bridge/bridge-service.ts:141",
+      "browser-extension/src/shared/desktop/desktop-errors.ts:24",
+      "browser-extension/src/shared/desktop/bridge-link.ts:206",
+      "browser-extension/src/sidepanel/SettingsScreen.tsx:75"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "xa-extension-link-coverage",
+    "product": "extension+desktop",
+    "direction": "desktop->extension",
+    "platform": "both",
+    "feature": "Installing the extension from the desktop",
+    "screen": "Desktop Vault, Web Use settings, Pro page, chat",
+    "kind": "cross-product",
+    "title": "Only Scribe links to the extension; link is Chrome-only",
+    "what": "The 'Get the extension' button exists only on the Scribe screen (and the guide topic). The Vault screen never mentions the browser or autofill. Web Use shows a disabled option 'Default browser (pair the extension first)' and a text hint, with no link. The Pro page does not list it. The one link goes to the Chrome Web Store for every user.",
+    "risk": "A Vault user never learns that the vault can fill and save passwords in the browser. A Web Use user must find the extension alone. A Firefox user is sent to a store that cannot install it.",
+    "rec": "Desktop: add one shared 'Get the extension' action that opens the store for the default browser (Chrome or Firefox). Use it in the Vault header when no browser is paired, beside the disabled Web Use option, and on the Pro page.",
+    "files": [
+      "desktop/src/renderer/src/constants/links.ts:16",
+      "desktop/pro/renderer/screens/ScribeScreen.tsx:296",
+      "desktop/pro/renderer/components/ComputerUseSettingsSection.tsx:453",
+      "desktop/pro/shared/web-use-browser.ts:9",
+      "desktop/pro/renderer/screens/VaultScreen.tsx:563",
+      "shared/packages/models/src/product-guide.ts:37"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "xa-no-unpair-in-extension",
+    "product": "extension+desktop",
+    "direction": "extension->desktop",
+    "platform": "both",
+    "feature": "Unpairing a browser",
+    "screen": "Extension Settings > Desktop",
+    "kind": "cross-product",
+    "title": "Extension has no Unpair control",
+    "what": "The desktop has an 'unpair' call and its text says a removal works 'the way its own Unpair does'. The extension never calls it. Settings > Desktop shows 'Paired as ...' and feature rows only. A browser can be removed only from the desktop.",
+    "risk": "A user cannot disconnect a browser from where they sit, for example on a shared computer. An uninstalled extension stays in the desktop list as 'Not connected' with no hint that it is gone.",
+    "rec": "Extension: add an Unpair icon button with an in-row confirm in Settings > Desktop that calls 'unpair' and clears the stored pairing.",
+    "files": [
+      "desktop/src/main/extension-bridge/bridge-rpc-handlers.ts:169",
+      "browser-extension/src/shared/bridge/protocol.ts:222",
+      "browser-extension/src/sidepanel/DesktopPairing.tsx:217",
+      "desktop/pro/renderer/components/PairedBrowserList.tsx:52"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "xa-paired-browsers-same-name",
+    "product": "extension+desktop",
+    "direction": "extension->desktop",
+    "platform": "both",
+    "feature": "Paired browser list",
+    "screen": "Desktop Tasks > Web Use > paired browsers; pairing dialog",
+    "kind": "cross-product",
+    "title": "Every Chrome pairs as 'Chrome extension'",
+    "what": "The extension names itself from the browser brand only: 'Chrome extension', 'Firefox extension'. Two profiles, or Chrome on two computers, get the same name. The desktop list shows the name and Remove. The pairing dialog shows the same name. The Scribe row merges them as 'Chrome extension ×2'.",
+    "risk": "The user cannot tell which row is which and may remove the wrong browser. In the pairing dialog a request from another device looks like their own.",
+    "rec": "Desktop: show the paired date and the peer (this computer or its address) on each row. Extension: let the name be edited once in Settings > Desktop and send it at pairing.",
+    "files": [
+      "browser-extension/src/background/desktop.ts:60",
+      "desktop/pro/renderer/components/PairedBrowserList.tsx:71",
+      "desktop/pro/renderer/screens/ScribeScreen.tsx:283",
+      "desktop/src/main/extension-bridge/bridge-electron.ts:203"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "xa-pair-timeout-says-declined",
+    "product": "extension+desktop",
+    "direction": "extension->desktop",
+    "platform": "both",
+    "feature": "Pairing a browser",
+    "screen": "Extension pairing card",
+    "kind": "cross-product",
+    "title": "Pairing timeout and retry block give wrong reasons",
+    "what": "The desktop dialog closes itself after 120 seconds and answers 'declined'. The desktop then refuses that address for 30 seconds with 'rate_limited', and refuses a second request with 'busy' while a dialog is open. The extension shows 'Pairing was declined in the desktop' for the timeout and 'Pairing did not finish. Try again.' for the other two.",
+    "risk": "A user who missed the dialog is told they declined. A retry within 30 seconds fails again with no reason, so pairing looks broken.",
+    "rec": "Desktop: answer the timeout with its own code. Extension: map timeout to 'The desktop did not get an answer. Try again.', busy to 'Answer the dialog open in Off Grid AI Desktop.', and rate_limited to 'Wait 30 seconds, then try again.'",
+    "files": [
+      "desktop/src/main/extension-bridge/bridge-electron.ts:213",
+      "desktop/src/main/extension-bridge/bridge-service.ts:95",
+      "desktop/src/main/extension-bridge/bridge-service.ts:102",
+      "desktop/src/main/extension-bridge/bridge-service.ts:111",
+      "browser-extension/src/shared/desktop/bridge-link.ts:155",
+      "browser-extension/src/sidepanel/DesktopPairing.tsx:178"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "xa-update-desktop-no-action",
+    "product": "extension+desktop",
+    "direction": "extension->desktop",
+    "platform": "both",
+    "feature": "Version mismatch",
+    "screen": "Extension panel: any 'Update Off Grid AI Desktop' line",
+    "kind": "cross-product",
+    "title": "'Update Desktop' lines give no way to update",
+    "what": "The extension has nine lines that say to update the desktop (chat, tools, vault, models, audio, settings options). None has a button or a link. The desktop never learns the extension version and has no line that says the extension is too old; the pairing request carries only the protocol number.",
+    "risk": "The user reads 'update' and has no next step in the panel. An old extension against a new desktop fails without any word on either side.",
+    "rec": "Extension: put one 'Update Desktop' action on these lines (releases page, or a bridge call that opens the desktop updater). Send the extension version in 'state' and show 'Update the extension' on the desktop paired browser row when it is too old.",
+    "files": [
+      "browser-extension/src/shared/desktop/desktop-errors.ts:8",
+      "browser-extension/src/shared/desktop/settings-options.ts:4",
+      "browser-extension/src/sidepanel/vault/VaultGateNotice.tsx:17",
+      "desktop/src/main/extension-bridge/bridge-service.ts:138",
+      "desktop/src/renderer/src/constants/links.ts:9"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "xa-vault-gate-no-button",
+    "product": "extension+desktop",
+    "direction": "extension->desktop",
+    "platform": "both",
+    "feature": "Vault in the browser",
+    "screen": "Extension Vault screen and in-field menu when the vault is not set up or needs Pro",
+    "kind": "cross-product",
+    "title": "Vault 'set up in Desktop' has no button",
+    "what": "For a vault that is not set up, needs Pro, or needs the desktop opened, the extension shows text only. Only 'not paired' gets an action. The bridge call 'requestUnlock' already brings the desktop window to its Vault screen for any state that is not unlocked, but the extension uses it only for a locked vault.",
+    "risk": "The user must find the desktop app and its Vault screen alone. The one-click path exists and is not offered.",
+    "rec": "Extension: add an 'Open Vault in Desktop' button to the not_initialized and pro_required notices (panel and in-field menu) that sends requestUnlock, then wait for the state to change as Unlock does.",
+    "files": [
+      "browser-extension/src/sidepanel/vault/VaultGateNotice.tsx:19",
+      "browser-extension/src/sidepanel/vault/VaultGateNotice.tsx:28",
+      "browser-extension/src/shared/inline/view-model.ts:53",
+      "desktop/pro/main/vault/extension-vault.ts:202",
+      "desktop/pro/main/vault/extension-vault-host.ts:29"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "xa-panel-settings-not-live-on-desktop",
+    "product": "extension+desktop",
+    "direction": "extension->desktop",
+    "platform": "both",
+    "feature": "Settings changed from the panel",
+    "screen": "Desktop Settings (Tools, Voice, Image, Transcription, Text) while open",
+    "kind": "cross-product",
+    "title": "Only Tasks settings update live on desktop",
+    "what": "The panel says a change 'shows there too'. The desktop announces a change to its windows only for Web Use and Computer Use settings. Tools, voice, image, transcription and text changes from the panel are saved, but an open desktop Settings screen is not told. The other way works: the panel watches a settings version.",
+    "risk": "An open desktop screen shows the old value. The user may think the change did not arrive, or save the old value back.",
+    "rec": "Desktop: send one 'settings changed' event to windows from settingsChanged() and have Settings screens re-read on it, as the task screen already does.",
+    "files": [
+      "desktop/src/main/task-settings-events.ts:9",
+      "desktop/src/main/extension-bridge/bridge-rpc-handlers.ts:158",
+      "desktop/src/main/database.ts:2060",
+      "desktop/src/preload/index.ts:265",
+      "browser-extension/src/sidepanel/DesktopSection.tsx:29"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "xa-feature-rows-wrong-reasons",
+    "product": "extension+desktop",
+    "direction": "desktop->extension",
+    "platform": "both",
+    "feature": "What the paired desktop offers",
+    "screen": "Extension Settings > Desktop feature rows",
+    "kind": "cross-product",
+    "title": "Feature rows name reasons that do not exist",
+    "what": "An off row says 'Off in the desktop' for chats and 'Not set up' for the vault. On the desktop both flags are just Pro plus a registered hook. No desktop switch turns chats off for browsers, and vault set-up state is not part of the flag. Scribe (writing) and Web Use (browserTasks) have no row.",
+    "risk": "The user looks for a desktop setting that is not there. They cannot see from this list whether Scribe or Web Use is available to the browser.",
+    "rec": "Extension: derive the notes from real states (vault status call for 'Not set up'), drop 'Off in the desktop', and add Scribe and Web Use rows with their own next step.",
+    "files": [
+      "browser-extension/src/shared/desktop/summary.ts:21",
+      "browser-extension/src/shared/desktop/summary.ts:25",
+      "desktop/src/main/extension-bridge/bridge-electron.ts:247",
+      "browser-extension/src/sidepanel/DesktopPairing.tsx:231"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "xa-desktop-silent-after-pairing",
+    "product": "extension+desktop",
+    "direction": "extension->desktop",
+    "platform": "both",
+    "feature": "Pairing a browser",
+    "screen": "Desktop, after the Pair dialog",
+    "kind": "cross-product",
+    "title": "Desktop shows nothing after a browser pairs",
+    "what": "After Pair, the dialog closes and the desktop shows no result. The paired browser list lives only under Settings > Tasks > Web Use and renders nothing when empty. Vault and Scribe screens do not show it. An eleventh browser drops the oldest one with no message.",
+    "risk": "The user does not know where the browser is listed or how to remove it later. A browser can lose its pairing with no reason shown on either side.",
+    "rec": "Desktop: after Pair, show a toast 'Chrome paired' with a 'Manage' action that opens the list. Give the list a one-line empty state. When the limit is hit, say which browser was removed.",
+    "files": [
+      "desktop/src/main/extension-bridge/bridge-electron.ts:215",
+      "desktop/pro/renderer/components/PairedBrowserList.tsx:23",
+      "desktop/pro/renderer/components/ComputerUseSettingsSection.tsx:459",
+      "desktop/src/main/extension-bridge/bridge-service.ts:121"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "xa-vault-browser-actions-untraced",
+    "product": "extension+desktop",
+    "direction": "extension->desktop",
+    "platform": "both",
+    "feature": "Save password and unlock from the browser",
+    "screen": "Desktop Vault screen",
+    "kind": "cross-product",
+    "title": "Desktop vault does not say the browser asked",
+    "what": "A login saved in the browser is added to the desktop vault with no event to the window. The Vault screen reloads only on window focus. An unlock request from the browser brings the desktop window to the vault gate, which shows the normal password form with no word that a browser is waiting.",
+    "risk": "A desktop window that suddenly comes to the front asking for the master password, with no reason, looks suspicious. A new entry appears with no sign of where it came from.",
+    "rec": "Desktop: pass the browser name with the navigate event and show one line on the gate, 'Chrome is waiting for your vault'. Send a vault-changed event after a browser save so the list updates and the new row is marked.",
+    "files": [
+      "desktop/pro/main/vault/extension-vault-host.ts:24",
+      "desktop/pro/main/vault/extension-vault.ts:161",
+      "desktop/pro/main/vault/extension-vault.ts:202",
+      "desktop/pro/renderer/screens/VaultScreen.tsx:431"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "xa-phone-extension-link",
+    "product": "extension+mobile",
+    "direction": "mobile->extension",
+    "platform": "chrome",
+    "feature": "Getting the extension from the phone",
+    "screen": "Mobile Pro tab, 'Browser extension' row",
+    "kind": "cross-product",
+    "title": "Phone opens the Chrome Web Store for the extension",
+    "what": "The phone's Pro tab lists 'Browser extension' and opens the shared link, which is the Chrome Web Store page. A phone cannot install a desktop Chrome extension. The row does not say it is for the computer or that it needs the desktop app. No Firefox link exists.",
+    "risk": "The tap lands on a store page that cannot install anything on the phone. The loop ends there.",
+    "rec": "Shared: point the extension link at a getoffgridai.co page that says 'On your computer' and offers Chrome and Firefox. Mobile: change the row line to say it runs in the browser on the computer, with the desktop app.",
+    "files": [
+      "mobile/src/screens/ProTabScreen.tsx:49",
+      "mobile/src/screens/GuideScreen/useGuideAction.ts:116",
+      "shared/packages/models/src/product-guide.ts:37"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "xa-extension-silent-on-phone",
+    "product": "extension+mobile",
+    "direction": "extension->mobile",
+    "platform": "both",
+    "feature": "Browser to phone, through the desktop",
+    "screen": "Extension Vault save offer and chat history",
+    "kind": "cross-product",
+    "title": "Extension never says what reaches the phone",
+    "what": "No direct link exists between the extension and the phone; the mobile source has no bridge code. Everything goes through the desktop: a login saved in the browser lands in the desktop vault, and reaches the phone only if Vault sync is on there. The panel shows phone chats with a 'Phone' label, so that hop works. The extension has no line about the phone for the vault, and cannot see the desktop's sync state.",
+    "risk": "A user saves a password in the browser and expects it on the phone. If Vault sync is off on the desktop it never arrives, and the browser gives no hint.",
+    "rec": "Desktop: add the vault sync state to the bridge 'state' answer. Extension: after a save, add one short line when sync is off, 'Saved on this computer. Turn on Vault sync in Desktop to get it on your phone.'",
+    "files": [
+      "desktop/pro/main/vault/extension-vault.ts:161",
+      "desktop/pro/renderer/screens/VaultScreen.tsx:563",
+      "browser-extension/src/sidepanel/HistoryRow.tsx:137",
+      "browser-extension/src/shared/bridge/protocol.ts:24"
+    ],
+    "effort": "M"
+  }
+]

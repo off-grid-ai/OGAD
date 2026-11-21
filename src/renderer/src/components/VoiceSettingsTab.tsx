@@ -1,3 +1,4 @@
+import { ReloadOnPanelChange } from './ReloadOnPanelChange'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   KOKORO_VOICE_CATALOG,
@@ -78,7 +79,16 @@ function PreferenceButtons<T extends string | number>({
   )
 }
 
+/** The voice section, re-read when the paired browser's panel changes it. */
 export function VoiceSettingsTab(): React.JSX.Element {
+  return (
+    <ReloadOnPanelChange section="voice">
+      <VoiceSettingsTabBody />
+    </ReloadOnPanelChange>
+  )
+}
+
+function VoiceSettingsTabBody(): React.JSX.Element {
   const [voices, setVoices] = useState<RuntimeSpeechVoice[]>([])
   const [remoteVoice, setRemoteVoice] = useState(false)
   const [miniMaxSpeech28, setMiniMaxSpeech28] = useState(false)

@@ -209,6 +209,51 @@ deb:
     - kde-spectacle
   recommends:
     - mesa-vulkan-drivers
+# Ubuntu App Center (Snap Store). Built only on request: `electron-builder --linux snap`.
+# Strict confinement: each plug below is a permission the app uses. audio-record and
+# camera need a store declaration request before the store auto-connects them.
+snapcraft:
+  base: core24
+  core24:
+    useLXD: true
+    grade: stable
+    confinement: strict
+    summary: Private AI studio that runs on your computer
+    plugs:
+      - default
+      - home
+      - removable-media
+      - network
+      - network-bind
+      - opengl
+      - audio-playback
+      - audio-record
+      - camera
+      - screencast-legacy
+      - hardware-observe
+      - system-observe
+      - location-observe
+    # The .deb's helper tools (paste, screen capture, the Scribe overlay, media).
+    stagePackages:
+      - xdotool
+      - x11-utils
+      - wtype
+      - grim
+      - python3-gi
+      - python3-gi-cairo
+      - gir1.2-gtk-3.0
+      - gir1.2-atspi-2.0
+      - gir1.2-gstreamer-1.0
+      - gir1.2-gst-plugins-base-1.0
+      - gstreamer1.0-pipewire
+      - gstreamer1.0-plugins-base
+      - gstreamer1.0-plugins-good
+      - gstreamer1.0-plugins-bad
+      - gstreamer1.0-plugins-ugly
+      - gstreamer1.0-pulseaudio
+      - gstreamer1.0-libav
+      - libvulkan1
+      - mesa-vulkan-drivers
 # Electron fuses (flipped at package time). ASAR integrity makes a tampered app.asar
 # refuse to load — the local-first anti-tamper lever (the license check works offline, so
 # this is the bar against cracking it). No telemetry unless the user opts in. Only the integrity fuses are

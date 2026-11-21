@@ -1,0 +1,96 @@
+name: Performance (nightly)
+
+# The heavy performance checks (perf/README.md), once a night on main:
+#   - the app journeys: cold start, idle CPU and memory per process, and the renderer cost of
+#     sending a chat message, opening Settings and opening Notes with 1,000 notes
+#   - the memlab leak check on Settings
+# Each run is compared with the median of the last seven nightly runs on this runner (the trend
+# file, carried from run to run in the Actions cache and uploaded as an artifact) and fails on a
+# regression. Local and CI measurement only: nothing here reports anywhere else.
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: perf-nightly
+  cancel-in-progress: false
+
+jobs:
+  perf:
+    name: app journeys + memlab
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-desktop
+        with:
+          cross-repo-token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ui-token: ${{ secrets.OPERATOR_UI_TOKEN }}
+      - name: Restore the trend
+        uses: actions/cache/restore@v4
+        with:
+          path: perf/trend
+          key: perf-trend-${{ github.run_id }}
+          restore-keys: perf-trend-
+      - name: Build the app
+        run: npx electron-vite build
+
+      - name: App journeys
+        id: journeys
+        timeout-minutes: 25
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+          PERF_RESULTS: ${{ runner.temp }}/desktop-e2e.json
+        run: xvfb-run -a npx playwright test --config perf/playwright.perf.config.ts
+      - name: Compare the journeys with the trend
+        id: journeys_trend
+        if: ${{ !cancelled() && steps.journeys.outcome == 'success' }}
+        continue-on-error: true
+        run: mkdir -p perf/trend && node perf/trend.mjs "$RUNNER_TEMP/desktop-e2e.json" perf/trend/desktop-e2e.jsonl
+
+      - name: Memory leaks (memlab)
+        id: leaks
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+          PERF_RESULTS: ${{ runner.temp }}/memlab.json
+          PERF_SNAPSHOTS: ${{ runner.temp }}/snapshots
+        run: xvfb-run -a node perf/memlab/run.mjs
+      - name: Compare memlab with the trend
+        id: leaks_trend
+        if: ${{ !cancelled() && hashFiles(format('{0}/memlab.json', runner.temp)) != '' }}
+        continue-on-error: true
+        run: mkdir -p perf/trend && node perf/trend.mjs "$RUNNER_TEMP/memlab.json" perf/trend/memlab.jsonl
+
+      - name: Save the trend
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v4
+        with:
+          path: perf/trend
+          key: perf-trend-${{ github.run_id }}
+      - name: Upload the results and the trend
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: perf-nightly
+          path: |
+            ${{ runner.temp }}/desktop-e2e.json
+            ${{ runner.temp }}/memlab.json
+            perf/trend/
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Fail on a regression
+        if: ${{ !cancelled() }}
+        env:
+          JOURNEYS: ${{ steps.journeys_trend.outcome }}
+          LEAKS: ${{ steps.leaks_trend.outcome }}
+        run: |
+          echo "journeys trend: $JOURNEYS, memlab trend: $LEAKS"
+          [ "$JOURNEYS" != failure ] && [ "$LEAKS" != failure ]

@@ -1,15 +1,15 @@
 diff --git a/examples/cli/main.cpp b/examples/cli/main.cpp
-index 44462eb..4f61bc6 100644
+index a29fd70..625a646 100644
 --- a/examples/cli/main.cpp
 +++ b/examples/cli/main.cpp
 @@ -51,6 +51,7 @@ struct SDCliParams {
-     preview_t preview_method = PREVIEW_NONE;
-     int preview_interval     = 1;
-     std::string preview_path = "preview.png";
+     std::string preview_method = "none";
+     int preview_interval       = 1;
+     std::string preview_path   = "preview.png";
 +    std::string decode_preview_path;
-     int preview_fps          = 16;
-     bool preview_noisy       = false;
-     bool color               = false;
+     int preview_fps            = 16;
+     bool preview_noisy         = false;
+     bool color                 = false;
 @@ -88,6 +89,11 @@ struct SDCliParams {
               "path to write preview image to (default: ./preview.png). For image generation, the filename can have %03d placeholder for sequential numbering. Multi-frame previews support .avi, .webm, and animated .webp",
               0,
@@ -22,7 +22,7 @@ index 44462eb..4f61bc6 100644
              {"",
               "--imat-out",
               "compute the imatrix for this run and save it to the provided path",
-@@ -431,6 +437,26 @@ void step_callback(int step, int frame_count, sd_image_t* image, bool is_noisy,
+@@ -424,6 +430,28 @@ void step_callback(int step, int frame_count, const sd_tensor_t* const* tensors,
      }
  }
  
@@ -31,16 +31,18 @@ index 44462eb..4f61bc6 100644
 +    fflush(stderr);
 +}
 +
-+static void video_decoded_frame(const sd_image_t* frame, void* data) {
++static void video_decoded_frame(const sd_tensor_t* frame, void* data) {
 +    auto* params = static_cast<SDCliParams*>(data);
-+    if (params->decode_preview_path.empty() || frame == nullptr || frame->data == nullptr) return;
++    if (params->decode_preview_path.empty() || frame == nullptr) return;
++    SDImage image = tensor_image_view(frame);
++    if (image.data == nullptr) return;
 +    const auto temporary = params->decode_preview_path + ".tmp.png";
-+    if (write_image_to_file(temporary, frame->data, frame->width, frame->height,
-+                            frame->channel, "", params->compression_quality)) {
++    if (write_image_to_file(temporary, image.data, image.width, image.height,
++                            image.channel, "", params->compression_quality)) {
 +        std::error_code error;
 +        fs::rename(temporary, params->decode_preview_path, error);
 +        if (!error) {
-+            fprintf(stderr, "OFFGRID_VIDEO_FRAME %u %u\n", frame->width, frame->height);
++            fprintf(stderr, "OFFGRID_VIDEO_FRAME %u %u\n", image.width, image.height);
 +            fflush(stderr);
 +        }
 +    }
@@ -49,9 +51,9 @@ index 44462eb..4f61bc6 100644
  static fs::path get_video_audio_sidecar_path(const SDCliParams& cli_params) {
      fs::path out_path     = fs::u8path(cli_params.output_path);
      fs::path base_path    = out_path;
-@@ -772,6 +798,10 @@ int main(int argc, const char* argv[]) {
-                             cli_params.preview_noisy,
-                             (void*)&cli_params);
+@@ -757,6 +785,10 @@ int main(int argc, const char* argv[]) {
+         return 1;
+     }
  
 +    if (cli_params.mode == VID_GEN) {
 +        sd_set_video_decode_callback(video_decode_progress, video_decoded_frame, &cli_params);

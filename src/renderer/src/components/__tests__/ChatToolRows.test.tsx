@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatToolRows } from '../ChatToolRows'
-import { taskReferenceFromResult } from '../chat-tool-projection'
+import { taskReferenceFromResult } from '@offgrid/failures'
 import { resetTaskSessionStoreForTests } from '@renderer/lib/task-session-store'
 import {
   closeTaskWorkspace,

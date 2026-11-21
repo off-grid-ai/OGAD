@@ -13,3 +13,16 @@ export function announceTaskSettings(key: string, value: unknown): void {
     if (!win.isDestroyed()) win.webContents.send(TASK_SETTINGS_CHANGED, { key, value })
   }
 }
+
+const SETTINGS_CHANGED_ELSEWHERE = 'settings:changed-elsewhere'
+
+/**
+ * A paired browser changed a Settings section (text, voice, image, ...): every open desktop screen
+ * showing it re-reads, so it never shows the old value or saves it back.
+ */
+export function announceSettingsChangedElsewhere(section: string): void {
+  if (typeof BrowserWindow === 'undefined') return
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(SETTINGS_CHANGED_ELSEWHERE, { section })
+  }
+}

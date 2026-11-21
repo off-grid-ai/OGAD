@@ -1,0 +1,6 @@
+off-grid-ai.deb
+snap/gui/off-grid-ai.png
+*.snap
+parts/
+stage/
+prime/

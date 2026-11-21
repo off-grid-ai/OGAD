@@ -1,3 +1,4 @@
+import { ReloadOnPanelChange } from './ReloadOnPanelChange'
 import { flow, track } from '@renderer/lib/analytics'
 import { useEffect, useMemo, useState } from 'react'
 import { modelDisplayName } from '@offgrid/models'
@@ -116,7 +117,16 @@ function catalogModelName(catalog: RemoteVisionCatalogModel[] | undefined, id: s
   )
 }
 
+/** The remote section, re-read when the paired browser's panel changes it. */
 export function RemoteVisionSettingsTab(): React.JSX.Element {
+  return (
+    <ReloadOnPanelChange section="remote">
+      <RemoteVisionSettingsTabBody />
+    </ReloadOnPanelChange>
+  )
+}
+
+function RemoteVisionSettingsTabBody(): React.JSX.Element {
   const [settings, setSettings] = useState(EMPTY_SETTINGS)
   const [form, setForm] = useState<ServerForm>(EMPTY_FORM)
   const [remoteEnabled, setRemoteEnabled] = useState(false)
@@ -703,46 +713,47 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 )
             )
             .map((kind) => (
-            <Row
-              inline
-              key={kind}
-              label={
-                kind === 'video'
-                  ? 'Video'
-                  : kind === 'image'
-                    ? 'Image'
-                    : kind === 'voice'
-                      ? 'Voice'
-                      : 'Transcription'
-              }
-              hint={
-                kind === 'video' && remoteVisionProviderForEndpoint(form.endpoint) === 'openrouter'
-                  ? 'Uses the nearest supported clip size and duration. Stop ends the download; the provider may still finish and charge for the video.'
-                  : undefined
-              }
-              controlId={`remote-server-${kind}-model`}
-            >
-              <SettingsSelect
-                id={`remote-server-${kind}-model`}
-                label={`${kind} model`}
-                value={form.mediaModels[kind] ?? ''}
-                searchable
-                options={[
-                  { value: '', label: `No ${kind} model` },
-                  ...models
-                    .filter((model) => model.kind === kind)
-                    .map((model) => ({ value: model.id, label: model.name }))
-                ]}
-                onValueChange={(value) => {
-                  setForm((current) => ({
-                    ...current,
-                    mediaModels: { ...current.mediaModels, [kind]: value || undefined }
-                  }))
-                  setStatus('Not saved.')
-                }}
-              />
-            </Row>
-          ))}
+              <Row
+                inline
+                key={kind}
+                label={
+                  kind === 'video'
+                    ? 'Video'
+                    : kind === 'image'
+                      ? 'Image'
+                      : kind === 'voice'
+                        ? 'Voice'
+                        : 'Transcription'
+                }
+                hint={
+                  kind === 'video' &&
+                  remoteVisionProviderForEndpoint(form.endpoint) === 'openrouter'
+                    ? 'Uses the nearest supported clip size and duration. Stop ends the download; the provider may still finish and charge for the video.'
+                    : undefined
+                }
+                controlId={`remote-server-${kind}-model`}
+              >
+                <SettingsSelect
+                  id={`remote-server-${kind}-model`}
+                  label={`${kind} model`}
+                  value={form.mediaModels[kind] ?? ''}
+                  searchable
+                  options={[
+                    { value: '', label: `No ${kind} model` },
+                    ...models
+                      .filter((model) => model.kind === kind)
+                      .map((model) => ({ value: model.id, label: model.name }))
+                  ]}
+                  onValueChange={(value) => {
+                    setForm((current) => ({
+                      ...current,
+                      mediaModels: { ...current.mediaModels, [kind]: value || undefined }
+                    }))
+                    setStatus('Not saved.')
+                  }}
+                />
+              </Row>
+            ))}
         </div>
       </SettingsSection>
 

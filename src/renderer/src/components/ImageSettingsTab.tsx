@@ -1,3 +1,4 @@
+import { ReloadOnPanelChange } from './ReloadOnPanelChange'
 import { useEffect, useRef, useState } from 'react'
 import {
   resolveImageParams,
@@ -38,7 +39,16 @@ const typedText = (value: number | null, details: { reason: string; event: Event
     ? ((details.event.target as HTMLInputElement | null)?.value ?? '')
     : String(value ?? '')
 
+/** The image section, re-read when the paired browser's panel changes it. */
 export function ImageSettingsTab(): React.JSX.Element {
+  return (
+    <ReloadOnPanelChange section="image">
+      <ImageSettingsTabBody />
+    </ReloadOnPanelChange>
+  )
+}
+
+function ImageSettingsTabBody(): React.JSX.Element {
   const [models, setModels] = useState<{ value: string; label: string }[]>([])
   const [model, setModel] = useState('')
   const [params, setParams] = useState<ImageParamStore>({})

@@ -166,6 +166,10 @@ export class ModalityQueue {
   private cfg: PolicyConfig = { ...DEFAULT_POLICY }
   /** Background passes stay waiting until this time (see FOREGROUND_GRACE_MS). */
   private backgroundHeldUntil = 0
+  /** Work the person is watching that makes many model calls with gaps between them (a Web Use
+   *  task): while one holds the queue, background passes neither start nor keep running. */
+  private foregroundHolds = new Map<number, string>()
+  private holdCounter = 0
   private graceTimer: ReturnType<typeof setTimeout> | null = null
   private readonly foregroundGraceMs: number
 
@@ -399,17 +403,35 @@ export class ModalityQueue {
     }
   }
 
-  /** Foreground work (speech, a chat turn) is running or waiting: stop the preemptible
-   *  background jobs that are running, so their model requests free the GPU now. */
+  /**
+   * Keep background passes out until the returned release is called, and stop any running now.
+   * For foreground work that calls the model many times with pauses between calls (a Web Use
+   * task reads the page between steps): without it, a capture pass slipped into each pause and
+   * the task's next call waited behind it (found live: a plan queued behind capture extract).
+   */
+  holdForeground(label: string): () => void {
+    const id = ++this.holdCounter
+    this.foregroundHolds.set(id, label)
+    this.pump()
+    return () => {
+      if (!this.foregroundHolds.delete(id)) return
+      this.holdBackground()
+      this.pump()
+    }
+  }
+
+  /** Foreground work (speech, a chat turn, a held task) is running or waiting: stop the
+   *  preemptible background jobs that are running, so their model requests free the GPU now. */
   private preemptBackground(): void {
     const foreground =
-      [...this.running.values()].find((e) => e.job.tier < 3)?.job ??
-      this.waiting.find((w) => w.job.tier < 3)?.job
+      [...this.running.values()].find((e) => e.job.tier < 3)?.job.label ??
+      this.waiting.find((w) => w.job.tier < 3)?.job.label ??
+      this.foregroundHolds.values().next().value
     if (!foreground) return
     for (const entry of this.running.values()) {
       if (!entry.controller || entry.preempted) continue
       entry.preempted = true
-      entry.controller.abort(new PreemptedError(foreground.label))
+      entry.controller.abort(new PreemptedError(foreground))
     }
   }
 
@@ -436,7 +458,8 @@ export class ModalityQueue {
     for (;;) {
       const runningArr = [...this.running.values()].map((e) => e.job)
       const waitingArr = this.waiting.map((w) => w.job)
-      const backgroundHeld = Date.now() < this.backgroundHeldUntil
+      const backgroundHeld =
+        this.foregroundHolds.size > 0 || Date.now() < this.backgroundHeldUntil
       const next = selectNext(runningArr, waitingArr, this.cfg, backgroundHeld)
       if (!next) return
 

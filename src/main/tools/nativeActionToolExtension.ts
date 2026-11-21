@@ -361,7 +361,7 @@ export class NativeActionToolExtension implements ToolExtension {
     if (isTaskAction(actionType) && unattendedRun) {
       const label = actionType === 'computer_use' ? 'Computer Use' : 'Web Use'
       return taskReply(
-        `${taskReference}${label}: Waiting for the user's approval in Off Grid AI Desktop (Action Approval); it runs once they approve. Tell the user it is waiting for them.`,
+        `${taskReference}${label}: Waiting for the user's approval in Actions > Approvals in Off Grid AI Desktop, or on any paired phone; it runs once they approve. Tell the user it is waiting for them and where to approve it.`,
         'pending'
       )
     }
@@ -380,7 +380,7 @@ export class NativeActionToolExtension implements ToolExtension {
     ])
     if (raced.kind === 'parked' && unattendedRun) {
       return reply(
-        `${taskReference}"${spec.title(args)}": Waiting for the user's approval in Off Grid AI Desktop (Action Approval); it runs once they approve. Tell the user it is waiting for them.`,
+        `${taskReference}"${spec.title(args)}": Waiting for the user's approval in Actions > Approvals in Off Grid AI Desktop, or on any paired phone; it runs once they approve. Tell the user it is waiting for them and where to approve it.`,
         'pending'
       )
     }

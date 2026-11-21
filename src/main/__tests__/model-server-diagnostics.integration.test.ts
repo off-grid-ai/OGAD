@@ -9,6 +9,8 @@ import { flushDiagnosticLog } from '../diagnostics-log'
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-diagnostics-'))
 const logPath = path.join(root, 'desktop.log')
 const originalLogPath = process.env.OFFGRID_DIAGNOSTIC_LOG
+// Its own profile, so the gateway reads its own (empty) key store, not one another test left behind.
+const originalDataDir = process.env.OFFGRID_DATA_DIR
 let port = 0
 
 async function freePort(): Promise<number> {
@@ -38,6 +40,7 @@ async function fetchGateway(): Promise<Response> {
 
 beforeAll(async () => {
   process.env.OFFGRID_DIAGNOSTIC_LOG = logPath
+  process.env.OFFGRID_DATA_DIR = path.join(root, 'profile')
   port = await freePort()
   startModelServer(port)
 })
@@ -46,6 +49,8 @@ afterAll(() => {
   stopModelServer()
   if (originalLogPath === undefined) delete process.env.OFFGRID_DIAGNOSTIC_LOG
   else process.env.OFFGRID_DIAGNOSTIC_LOG = originalLogPath
+  if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = originalDataDir
   fs.rmSync(root, { recursive: true, force: true })
 })
 

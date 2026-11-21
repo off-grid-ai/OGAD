@@ -86,13 +86,12 @@ export function SettingsCard({
             'overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900/60 backdrop-blur-sm',
             open && group && 'col-span-full' // take over the grid width as the L2 detail
           )}
-          initial={{ opacity: 0, filter: 'blur(10px)' }}
-          animate={{ opacity: 1, filter: 'blur(0px)' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           // popLayout pulls the exiting card out of flow so the rest reflow smoothly;
-          // it fades + blurs + eases back rather than vanishing.
+          // it fades and eases back rather than vanishing.
           exit={{
             opacity: 0,
-            filter: 'blur(8px)',
             scale: 0.97,
             transition: { duration: 0.22, ease: [0.4, 0, 0.2, 1] }
           }}
@@ -170,11 +169,10 @@ export function ProPlaceholder({
           // the placeholder's text when sibling cards open/close.
           layout="position"
           className="relative rounded-2xl border border-neutral-800 bg-neutral-900/40 px-4 py-3"
-          initial={{ opacity: 0, filter: 'blur(10px)' }}
-          animate={{ opacity: 1, filter: 'blur(0px)' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           exit={{
             opacity: 0,
-            filter: 'blur(8px)',
             scale: 0.97,
             transition: { duration: 0.22, ease: [0.4, 0, 0.2, 1] }
           }}

@@ -1,0 +1,259 @@
+{
+ "id": "names",
+ "title": "One name per feature everywhere",
+ "problem": "The same feature has different names in the guide, the nav, the Pro page and the other product.",
+ "fix": "Pick one user-facing name per feature in shared and use it in every catalog, nav label, button and guide topic.",
+ "count": 13,
+ "items": [
+  {
+   "id": "desktop-connectors-toggle-and-name",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Chat (memory-chat) + menu; Integrations (connectors); command palette",
+   "kind": "not-named",
+   "title": "'Connectors' in chat, 'Integrations' everywhere else",
+   "what": "Chat has '+ > Connectors On/Off'. It only flips a switch: it does not show whether anything is connected and has no link to manage them. The sidebar and the screen are named 'Integrations'. Typing 'connectors' in the command palette finds nothing (aliases are integrations, mcp, tools). The guide and chat settings say 'Connectors'.",
+   "risk": "The user turns Connectors on with none connected, nothing changes, and they cannot find the page by that word.",
+   "rec": "Pick one word. Add 'connectors' to the palette aliases. Add a 'Manage' item in the + menu using the onOpenConnectors prop that already exists, and show 'none connected' there.",
+   "files": [
+    "src/renderer/src/components/MemoryChat/index.tsx:5973",
+    "src/renderer/src/App.tsx:1121",
+    "src/renderer/src/components/ConnectorsScreen.tsx:634",
+    "src/renderer/src/lib/paletteScreens.ts:37",
+    "../shared/packages/models/src/product-guide.ts:189"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-voice-image-settings-not-in-settings",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Settings (settings); command palette; Voice (voice)",
+   "kind": "not-named",
+   "title": "Voice and image settings are not in Settings",
+   "what": "Voice (spoken replies), Image, Transcription and Tools options live in a side drawer that is also called 'Settings'. It opens only from Models, the model picker, Storage and Chat. The Settings screen has no entry for them and the command palette cannot find 'voice settings'. The sidebar item 'Voice' is dictation, and dictation snippets sit under Scribe > Dictation with no link between the two.",
+   "risk": "A user who opens Settings to change the voice or image options finds nothing.",
+   "rec": "Add a 'Model settings' card in Settings and palette entries that call the existing openModelSettingsPanel(tab). Link Voice and Scribe > Dictation to each other.",
+   "files": [
+    "src/renderer/src/components/Settings.tsx:34",
+    "src/renderer/src/components/SettingsPanel.tsx:683",
+    "src/renderer/src/lib/paletteScreens.ts:51",
+    "src/renderer/src/components/ModelsScreen.tsx:914",
+    "pro/renderer/screens/VoiceScreen.tsx:567",
+    "pro/renderer/screens/ScribeScreen.tsx:730"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-notifications-sold-as-approvals",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Notifications (notifications); Pro page; Actions (actions)",
+   "kind": "not-named",
+   "title": "Approvals promised in Notifications live in Actions",
+   "what": "The Pro page describes Notifications as 'Approvals in one place' and 'Approval queue for actions'. The Notifications screen has only All and Sharing tabs and says 'File sharing and device notices appear here'. Approvals live in Actions.",
+   "risk": "The user opens Notifications to approve something and finds nothing.",
+   "rec": "Fix the Pro copy, or add a 'Pending approvals (n)' row in Notifications that opens Actions.",
+   "files": [
+    "src/renderer/src/components/pro/proCatalog.ts:240",
+    "src/renderer/src/components/pro/proCatalog.ts:247",
+    "pro/renderer/screens/NotificationList.tsx:335",
+    "src/renderer/src/lib/internal-tab-route.ts:45",
+    "pro/renderer/screens/ActionsScreen.tsx:525"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "extension-site-access-switch-hidden",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel > Settings",
+   "kind": "not-named",
+   "title": "Site access switch hides under Tasks",
+   "what": "The access card says \"Revoke any time in Settings\". The only switch is Settings > Tasks > \"Let Off Grid AI tasks use this browser\". That one switch also turns off page reading, vault icons, save prompts and Scribe on every site. It sits inside the Desktop-backed section, so it is not shown at all when Desktop is away. The setup-only Settings has no Tasks tab.",
+   "risk": "A user who wants to check or remove site access cannot find it. A user who turns off \"tasks\" also loses autofill and writing help without being told. With Desktop closed there is no switch at all.",
+   "rec": "Add a \"Site access\" row to Settings > General (always shown) using the existing useSiteAccess grant and revoke. List what it powers in the hint. Keep the Tasks row as a pointer to the same state.",
+   "files": [
+    "browser-extension/src/sidepanel/EmptyState.tsx:205",
+    "browser-extension/src/sidepanel/BrowserTasksRow.tsx:23",
+    "browser-extension/src/sidepanel/TasksSettings.tsx:115",
+    "browser-extension/src/sidepanel/DesktopSection.tsx:26",
+    "browser-extension/src/sidepanel/useSiteAccess.ts:47",
+    "browser-extension/src/sidepanel/SettingsScreen.tsx:81"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "extension-composer-features-vanish",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel > Chat composer and answer actions",
+   "kind": "not-named",
+   "title": "Screenshot, mic and read-aloud vanish silently",
+   "what": "\"Attach screenshot\" is left out of the + menu when the model has no vision. The mic is not drawn when no transcription model is installed. Read aloud is not offered when there is no speech model or Desktop's voice switch is off. \"Create image\" in the same menu does it right: it stays, greyed, with \"Install an image model\" and opens Models.",
+   "risk": "A user who saw the mic or screenshot yesterday cannot find it today and has no idea a model or a Desktop setting controls it.",
+   "rec": "Apply the Create image pattern to all three: keep the control, mark it unavailable with a one-line hint, and open Models on the right tab (vision text model, Transcription, Voice) or Settings > Voice.",
+   "files": [
+    "browser-extension/src/sidepanel/Composer.tsx:57",
+    "browser-extension/src/sidepanel/ChatComposer.tsx:164",
+    "browser-extension/src/sidepanel/ChatComposer.tsx:206",
+    "browser-extension/src/sidepanel/Panel.tsx:282"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "extension-scribe-no-settings-home",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel > Settings",
+   "kind": "not-named",
+   "title": "Scribe has no place in Settings",
+   "what": "Settings has ten tabs and none is Writing. Sites where Scribe was turned off are stored but listed nowhere. The copy \"Off on this site. Turn it back on in Settings.\" exists but no such setting does. The all-sites ask for Scribe is shown once on the badge and never again; later it can only be granted from the chat's access card or Settings > Tasks.",
+   "risk": "A user who turned Scribe off on a site, or dismissed the one-time ask, cannot find where to turn it back on. A user who wants Scribe off everywhere has no switch.",
+   "rec": "Add a Writing tab (or a Writing group in General): \"Check writing on every site\" bound to the same site-access state, and the list of turned-off sites with a remove button (the stored list and writing.siteOn already exist).",
+   "files": [
+    "browser-extension/src/sidepanel/SettingsScreen.tsx:43",
+    "browser-extension/src/shared/writing/copy.ts:16",
+    "browser-extension/src/background/scribe.ts:83",
+    "browser-extension/src/content/scribe-badge.ts:29"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "extension-pointers-to-other-tabs",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel > Settings > Desktop and General; chat error text",
+   "kind": "not-named",
+   "title": "Messages name another tab but do not go there",
+   "what": "The pairing card says \"Check the desktop address in General settings\". Saving the address says \"Open Desktop settings to check the link or pair\". Both are plain text one tab away. One error tells the user to \"change the gateway URL in the extension settings\"; the field is called \"Desktop address\".",
+   "risk": "Small detours at the exact moment the user is already stuck on connecting. \"Gateway URL\" is a name they will not find.",
+   "rec": "Turn the two pointers into buttons that switch the tab (setTab is local to SettingsScreen). After a saved address, run the link check at once and show the result. Rename \"gateway URL\" to \"Desktop address\".",
+   "files": [
+    "browser-extension/src/sidepanel/DesktopPairing.tsx:134",
+    "browser-extension/src/sidepanel/SettingsScreen.tsx:135",
+    "browser-extension/src/shared/gateway/errors.ts:40"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "guide-desktop-hides-free-voice-mode",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Desktop guide: 'Voice' topic and 'Voice mode on the phone' topic",
+   "kind": "not-named",
+   "title": "Desktop guide sells voice mode as phone Pro",
+   "what": "Feature parts make voice mode free on desktop (voice-mode tier desktop: free, guide desktop: 'chat'). The desktop chat topic never mentions talking or answers aloud. The desktop guide shows 'Voice mode on the phone' (Pro, Get it). The desktop 'Voice' topic is dictation, while on the phone 'Voice mode' means spoken conversation.",
+   "risk": "Desktop users think spoken chat needs a phone and Pro. 'Voice' means two different things across products.",
+   "rec": "shared: add a voice highlight to the desktop 'chat' topic. Rename the desktop Pro topic 'Dictation' to match the change map and the phone 'Speech to text'.",
+   "files": [
+    "shared/packages/models/src/product-guide.ts:138-149",
+    "shared/packages/models/src/product-guide.ts:297-310",
+    "desktop/src/renderer/src/components/pro/proCatalog.ts:252-265",
+    "shared/packages/features/dist/index.js:113"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "guide-extension-has-no-guide",
+   "product": "extension",
+   "direction": "extension",
+   "platform": null,
+   "screen": "Extension: no 'What it does for you' surface",
+   "kind": "not-named",
+   "title": "Extension has no guide for its 74 flows",
+   "what": "The knowledge base holds 74 checked extension flows and 15 not-supported answers. Only the desktop and phone guides answer them, prefixed 'In the browser extension:'. The change map lists 'guide' as missing on extension.",
+   "risk": "A user in the browser panel cannot ask how to fill, pair or run a task. They must switch to the desktop app.",
+   "rec": "browser-extension: add an Ask/guide screen over GuideSurface 'extension' using guideFlowAnswer. shared: add the 'extension' surface.",
+   "files": [
+    "shared/packages/models/src/product-guide.ts:9",
+    "shared/packages/models/src/guide-howto.ts:295-300",
+    "shared/packages/models/src/guide-kb/extension.json:1",
+    "desktop/scripts/change-map/README.md:1"
+   ],
+   "effort": "L"
+  },
+  {
+   "id": "guide-phone-scribe-opens-notes",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": null,
+   "screen": "Phone guide topic Scribe -> 'Open Notes'",
+   "kind": "not-named",
+   "title": "Scribe topic opens Notes; controls say Improve",
+   "what": "The Scribe topic's button reads 'Open Notes'. Every flow calls the feature 'Improve' (Improve this paragraph, Share > Improve, Improve the selected text). Nothing on the phone is labelled Scribe.",
+   "risk": "A user looks for Scribe, lands in Notes, and finds no screen with that name.",
+   "rec": "shared: label the phone topic 'Improve' (or put 'Scribe' on the Improve sheet). mobile: open the Improve sheet or a chat, not Notes.",
+   "files": [
+    "shared/packages/models/src/product-guide.ts:337-348",
+    "mobile/src/screens/GuideScreen/guideTopics.ts:130",
+    "mobile/src/screens/GuideScreen/useGuideAction.ts:35"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "guide-god-assistant-names",
+   "product": "desktop+mobile",
+   "direction": "mobile->desktop",
+   "platform": null,
+   "screen": "Desktop guide topic 'God' (route explore); phone flow desktop-task 'Assistant'",
+   "kind": "not-named",
+   "title": "One assistant, three names: God, Ares, Assistant",
+   "what": "The Pro catalog labels it 'God'. Its description says 'Chat or talk with Ares'. Feature parts call it 'Assistant'. The phone flow says '(in a chat) > Assistant' with a paired desktop.",
+   "risk": "Users cannot connect the phone's Assistant to the desktop's God. Search and Ask match one name only.",
+   "rec": "desktop + shared: pick one user-facing name and use it in the catalog label, feature parts and phone flow. Keep Ares as the wake word only.",
+   "files": [
+    "desktop/src/renderer/src/components/pro/proCatalog.ts:75-86",
+    "shared/packages/features/dist/index.js:225",
+    "shared/packages/models/src/guide-kb/mobile.json:108"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "guide-android-improve-share-wording",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": null,
+   "screen": "Phone guide topic Scribe; desktop guide topic 'Off Grid AI on your phone'",
+   "kind": "not-named",
+   "title": "Guide says Share menu; Android uses selection menu",
+   "what": "Both topics say to improve text 'from the Share menu'. The Android flow is the text selection menu 'Improve'. Share > Improve is iPhone only.",
+   "risk": "Android users look in Share and do not find it.",
+   "rec": "shared: say 'from the text menu (Android) or Share (iPhone)'.",
+   "files": [
+    "shared/packages/models/src/product-guide.ts:231",
+    "shared/packages/models/src/product-guide.ts:343",
+    "shared/packages/models/src/guide-kb/mobile.json:121"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-scribe-improve-not-named",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Pro tab, Guide, Home, share from another app",
+   "kind": "not-named",
+   "title": "Scribe opens Notes; shared text hits a bare paywall",
+   "what": "The Scribe guide topic and the Home 'clearer writing' card both open the Notes list. The real screen is called Improve. Without Pro, text sent to Improve from another app is dropped and the general Pro page opens, with no line about Improve.",
+   "risk": "You tap Scribe and land on a list of notes with nothing called Scribe or Improve. Without Pro you select text in another app and get a sales page with no reason, and your text is gone.",
+   "rec": "Point the Scribe entries at the Improve screen with sample text and label the button 'Try Improve'. Without Pro, open the Improve guide topic (it says Pro and has Get Pro) in place of the general Pro page.",
+   "files": [
+    "mobile/src/screens/GuideScreen/guideTopics.ts:131",
+    "mobile/src/screens/GuideScreen/useGuideAction.ts:35",
+    "mobile/src/screens/HomeScreen/index.tsx:215",
+    "mobile/src/services/scribeEntry.ts:100",
+    "mobile/pro/scribe/index.ts:39"
+   ],
+   "effort": "S"
+  }
+ ]
+}

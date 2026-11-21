@@ -213,6 +213,9 @@ export default defineConfig({
         '@lezer/common',
         '@lezer/highlight',
         '@lezer/lr',
+        // The i18n JSX runtime lives in the shared repo, which has no React: its `react/jsx-runtime`
+        // must be this app's React.
+        'react',
         ...(operatorUiRoot
           ? [
               'react',
@@ -245,7 +248,9 @@ export default defineConfig({
           ]
         }
       },
-      react(),
+      // JSX compiles against @offgrid/i18n's runtime: React's own, with text children and readable props
+      // shown in the app language. In English it hands React the same props, so nothing changes.
+      react({ jsxImportSource: '@offgrid/i18n' }),
       tailwindcss()
     ]
   }

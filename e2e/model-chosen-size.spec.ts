@@ -2,12 +2,18 @@
  * The size picked in a model's panel is the size that loads. Real built app, real Hugging Face
  * file list; only the file bytes are small stand-ins (fixtures/model-picks-network-boundary.cjs).
  */
-import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
+import {
+  _electron as electron,
+  expect,
+  test,
+  type ElectronApplication,
+  type Page
+} from '@playwright/test'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { completeOnboarding } from './helpers/onboarding'
-import { targetIsPackaged } from './helpers/launch'
+import { targetIsPackaged, skipGpuSetup } from './helpers/launch'
 
 let app: ElectronApplication | null = null
 let page: Page
@@ -18,17 +24,19 @@ test.describe.configure({ timeout: 240_000 })
 
 test.beforeEach(async () => {
   profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-chosen-size-'))
-  app = await electron.launch({
-    args: [path.resolve('e2e/fixtures/model-picks-network-boundary.cjs')],
-    env: {
-      ...process.env,
-      OFFGRID_USER_DATA: profileDir,
-      OFFGRID_PICKS_SOURCE_DIR: profileDir,
-      OFFGRID_PICKS_STANDIN: '1',
-      OFFGRID_PRO: '0',
-      NODE_ENV: 'production'
-    }
-  })
+  app = skipGpuSetup(
+    await electron.launch({
+      args: [path.resolve('e2e/fixtures/model-picks-network-boundary.cjs')],
+      env: {
+        ...process.env,
+        OFFGRID_USER_DATA: profileDir,
+        OFFGRID_PICKS_SOURCE_DIR: profileDir,
+        OFFGRID_PICKS_STANDIN: '1',
+        OFFGRID_PRO: '0',
+        NODE_ENV: 'production'
+      }
+    })
+  )
   page = await app.firstWindow()
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.waitForLoadState('domcontentloaded')
@@ -46,8 +54,12 @@ test('downloading the Smaller size of a model makes that size the one in use', a
   await page.getByRole('button', { name: 'Models', exact: true }).click()
   // A chat model none of whose files is pinned to a SHA-256: the stand-in bytes cannot match a pin.
   const catalog = (await page.evaluate(() =>
-    (window as unknown as { api: { getModelCatalog: () => Promise<unknown> } }).api.getModelCatalog()
-  )) as { models: { name: string; kind: string; replacedBy?: string; files: { sha256?: string }[] }[] }
+    (
+      window as unknown as { api: { getModelCatalog: () => Promise<unknown> } }
+    ).api.getModelCatalog()
+  )) as {
+    models: { name: string; kind: string; replacedBy?: string; files: { sha256?: string }[] }[]
+  }
   const model = catalog.models.find(
     (entry) =>
       (entry.kind === 'vision' || entry.kind === 'text') &&

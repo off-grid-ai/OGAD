@@ -1,32 +1,26 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index 3a06aea..80b9a7a 100644
+index c5a25c6..42f1be5 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
-@@ -515,6 +515,9 @@ typedef struct {
-     int sample_pass;
-     int total_steps;
- } sd_preview_info_t;
-+// The decoded frame is borrowed for the duration of this callback only.
-+typedef void (*sd_video_decode_progress_cb_t)(int completed, int total, void* data);
-+typedef void (*sd_video_decoded_frame_cb_t)(const sd_image_t* frame, void* data);
- typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void* user_data);
- 
- // Resolves <image:source> markers. Pixels are borrowed and copied before the
-@@ -529,6 +532,9 @@ SD_API void sd_set_progress_callback(sd_progress_cb_t cb, void* data);
+@@ -250,6 +250,13 @@ typedef void (*sd_generation_progress_cb_t)(const sd_generation_progress_t* prog
  // total == 0 means unknown; sample_pass counts from 1 since callback registration.
- // Register/clear only while the context is idle. Passing nullptr clears the callback.
+ // Register/clear only while the context is idle. Passing NULL clears the callback.
  SD_API void sd_set_generation_progress_callback(sd_ctx_t* ctx, sd_generation_progress_cb_t cb, void* data);
++// The decoded frame is a U8 [C,W,H] tensor borrowed for the duration of this callback only;
++// retain it to keep it.
++typedef void (*sd_video_decode_progress_cb_t)(int completed, int total, void* data);
++typedef void (*sd_video_decoded_frame_cb_t)(const sd_tensor_t* frame, void* data);
 +// Reports final video decode sections and the first complete frame, without an extra decode.
 +// total == 0 means the section count is not yet known. Does not report sampling previews.
 +SD_API void sd_set_video_decode_callback(sd_video_decode_progress_cb_t progress, sd_video_decoded_frame_cb_t frame, void* data);
- // In each sampling pass, a positive interval previews every Nth denoiser step, while a
- // negative interval previews only completed logical step -interval. Zero previews the final
- // completed step of the first sampling pass (base-resolution or high-noise).
+ 
+ typedef struct {
+     int sample_pass;
 diff --git a/src/core/util.cpp b/src/core/util.cpp
-index 9de1ace..6b7abfd 100644
+index 220134f..c7b5bb4 100644
 --- a/src/core/util.cpp
 +++ b/src/core/util.cpp
-@@ -373,6 +373,30 @@ int32_t sd_get_num_physical_cores() {
+@@ -374,6 +374,37 @@ int32_t sd_get_num_physical_cores() {
      return n_threads > 0 ? (n_threads <= 4 ? n_threads : n_threads / 2) : 4;
  }
  
@@ -44,9 +38,16 @@ index 9de1ace..6b7abfd 100644
 +    if (sd_video_decode_active && sd_decode_progress_cb)
 +        sd_decode_progress_cb(completed, total, sd_decode_cb_data);
 +}
-+void sd_video_decoded_frame(const sd_image_t* frame) {
-+    if (frame && frame->data && sd_decoded_frame_cb)
-+        sd_decoded_frame_cb(frame, sd_decode_cb_data);
++void sd_video_decoded_frame(const sd::Image* frame) {
++    if (!frame || !frame->data || !sd_decoded_frame_cb)
++        return;
++    const int64_t shape[] = {frame->channel, frame->width, frame->height};
++    sd_tensor_t* tensor   = sd_tensor_create(SD_TENSOR_U8, 3, shape, frame->data,
++                                             size_t(frame->channel) * frame->width * frame->height);
++    if (!tensor)
++        return;
++    sd_decoded_frame_cb(tensor, sd_decode_cb_data);
++    sd_tensor_free(tensor);
 +}
 +void sd_set_video_decode_callback(sd_video_decode_progress_cb_t progress, sd_video_decoded_frame_cb_t frame, void* data) {
 +    sd_decode_progress_cb = progress;
@@ -57,7 +58,7 @@ index 9de1ace..6b7abfd 100644
  static sd_progress_cb_t sd_progress_cb = nullptr;
  void* sd_progress_cb_data              = nullptr;
  
-@@ -595,6 +619,8 @@ static int show_eta      = -1;  // -1 - estimate duration, 0 - hide, 1 - show
+@@ -596,6 +627,8 @@ static int show_eta      = -1;  // -1 - estimate duration, 0 - hide, 1 - show
  static float passed_time = 0.f;
  
  void pretty_progress(int step, int steps, float time) {
@@ -66,7 +67,7 @@ index 9de1ace..6b7abfd 100644
      if (sd_progress_cb) {
          sd_progress_cb(step, steps, time, sd_progress_cb_data);
          return;
-@@ -624,6 +650,8 @@ void pretty_progress(int step, int steps, float time) {
+@@ -625,6 +658,8 @@ void pretty_progress(int step, int steps, float time) {
  }
  
  void pretty_bytes_progress(int step, int steps, uint64_t bytes_processed, float elapsed_seconds) {
@@ -76,10 +77,10 @@ index 9de1ace..6b7abfd 100644
          float time = elapsed_seconds / (step + 1e-6f);
          sd_progress_cb(step, steps, time, sd_progress_cb_data);
 diff --git a/src/core/util.h b/src/core/util.h
-index 0929f60..a65841b 100644
+index 082565a..cb50f99 100644
 --- a/src/core/util.h
 +++ b/src/core/util.h
-@@ -99,6 +99,18 @@ std::vector<std::pair<std::string, float>> parse_prompt_attention(const std::str
+@@ -102,6 +102,18 @@ std::vector<std::pair<std::string, float>> parse_prompt_attention(const std::str
  std::vector<std::pair<std::string, float>> split_quotation_attention(
      const std::vector<std::pair<std::string, float>>& parsed_attention);
  
@@ -93,16 +94,16 @@ index 0929f60..a65841b 100644
 +    bool previous;
 +};
 +void sd_video_decode_progress(int completed, int total);
-+void sd_video_decoded_frame(const sd_image_t* frame);
++void sd_video_decoded_frame(const sd::Image* frame);
 +
  sd_progress_cb_t sd_get_progress_callback();
  void* sd_get_progress_callback_data();
  
 diff --git a/src/pipeline/video.cpp b/src/pipeline/video.cpp
-index ab64540..9e28eeb 100644
+index 529bbb6..e128769 100644
 --- a/src/pipeline/video.cpp
 +++ b/src/pipeline/video.cpp
-@@ -1288,7 +1288,11 @@ namespace sd::pipeline {
+@@ -1289,7 +1289,11 @@ namespace sd::pipeline {
                      (int)video_latent.shape()[3]);
          // auto z = sd::load_tensor_from_file_as_tensor<float>("ltx_vae_z.bin");
          int64_t t4            = ggml_time_ms();
@@ -115,7 +116,7 @@ index ab64540..9e28eeb 100644
          int64_t t5            = ggml_time_ms();
          LOG_INFO("decode_first_stage completed, taking %.2fs", (t5 - t4) * 1.0f / 1000);
          if (vid.empty()) {
-@@ -1315,6 +1319,7 @@ namespace sd::pipeline {
+@@ -1316,6 +1320,7 @@ namespace sd::pipeline {
  
          for (int64_t i = 0; i < vid.shape()[2]; i++) {
              result_images[i] = tensor_to_sd_image(vid, static_cast<int>(i));

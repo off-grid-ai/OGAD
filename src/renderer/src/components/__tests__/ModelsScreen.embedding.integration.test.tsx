@@ -30,7 +30,8 @@ const chooseEmbeddingModel = vi.fn(async () => ({ success: true }))
 let ModelsScreen: typeof import('../ModelsScreen').ModelsScreen
 beforeAll(async () => {
   ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
-})
+  // The first import compiles the whole Models screen: allow for a busy machine, as App tests do.
+}, 30_000)
 afterEach(() => {
   cleanup()
   searchModels.mockClear()

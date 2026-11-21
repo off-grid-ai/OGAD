@@ -25,6 +25,8 @@ let sink: Sink | undefined
 let epoch = 0
 const context = new AsyncLocalStorage<AIRequestHandle>()
 const unrecorded = new AsyncLocalStorage<true>()
+/** Counts a caller attaches to the requests it starts, such as a prompt breakdown. */
+const extraMetrics = new AsyncLocalStorage<Record<string, unknown>>()
 /** Who asked for this work: the browser extension, or (by default) the app or the gateway API. */
 const requestOrigin = new AsyncLocalStorage<'extension'>()
 
@@ -65,6 +67,14 @@ let observer: AIRequestObserver | undefined
 /** Install the usage-statistics observer. It runs inline, so it must not block or throw. */
 export function setAIRequestObserver(next: AIRequestObserver | undefined): void {
   observer = next
+}
+
+/**
+ * Run `fn` so the request log records `metrics` beside the engine's own on each request `fn`
+ * starts (not on their nested attempts). Only the request log sees them; usage statistics do not.
+ */
+export function withAIRequestMetrics<T>(metrics: Record<string, unknown>, fn: () => T): T {
+  return extraMetrics.run(metrics, fn)
 }
 
 /** Run `fn` as work the browser extension asked for. */
@@ -192,6 +202,7 @@ export class AIRequestHandle {
   private reasoning = ''
   private runtime?: RuntimeBackend
   private readonly parent = context.getStore()
+  private readonly extraMetrics?: Record<string, unknown>
   private readonly observed: boolean
   private readonly origin: AIRequestOrigin = currentOrigin()
   private readonly hasImage: boolean
@@ -199,6 +210,8 @@ export class AIRequestHandle {
   private record: AIRequestRecord
   constructor(meta: Metadata) {
     const parent = context.getStore()
+    const extra = extraMetrics.getStore()
+    if (extra && parent?.extraMetrics !== extra) this.extraMetrics = extra
     this.observed =
       !!observer && !parent && unrecorded.getStore() !== true && meta.countAsGeneration !== false
     this.hasImage = this.observed && meta.modality === 'text' && carriesImage(meta.request)
@@ -320,6 +333,11 @@ export class AIRequestHandle {
               ...(this.record.backend ? { computeBackend: this.record.backend } : {})
             }) as Record<string, unknown>
         }
+        if (this.extraMetrics)
+          this.record.metrics = {
+            ...this.record.metrics,
+            ...(snapshotAIValue(this.extraMetrics) as Record<string, unknown>)
+          }
         this.record.response = snapshotAIValue(
           this.record.response ?? result ?? { content: this.content, reasoning: this.reasoning }
         )

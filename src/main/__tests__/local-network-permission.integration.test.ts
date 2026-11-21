@@ -53,7 +53,8 @@ describe('Local Network permission boundary', () => {
       accessibility: true,
       screenRecording: true,
       localNetwork: true,
-      allGranted: true
+      allGranted: true,
+      microphone: 'granted'
     })
     expect(boundary.closeCount).toBe(1)
   })
@@ -67,7 +68,8 @@ describe('Local Network permission boundary', () => {
       accessibility: true,
       screenRecording: true,
       localNetwork: false,
-      allGranted: false
+      allGranted: false,
+      microphone: 'granted'
     })
     expect(boundary.closeCount).toBe(1)
   })

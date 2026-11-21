@@ -171,6 +171,8 @@ const settled = async (taskId: string): Promise<void> =>
   vi.waitFor(() => expect(getTaskRun(taskId)?.status).not.toBe('running'), { timeout: 10_000 })
 
 beforeAll(async () => {
+  // Pairing a browser is a Pro feature; this journey pairs one.
+  vi.stubGlobal('__OFFGRID_PRO__', true)
   // Load the Web Use host while the platform is still this machine's: its native libraries
   // (onnxruntime under transformers.js) pick their binary by platform, as they do in the app.
   // Only the fake Mac desktop below needs darwin. The host loads transformers.js only when a run

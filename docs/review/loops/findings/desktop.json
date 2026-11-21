@@ -1,0 +1,589 @@
+[
+  {
+    "id": "desktop-chat-no-text-model",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "text",
+    "screen": "Chat (memory-chat) composer and empty state",
+    "kind": "state-elsewhere",
+    "title": "Chat with no model looks ready, then fails",
+    "what": "With no text model the model chip in the composer disappears (it only renders when a model name exists). Send stays live. The reply is a plain text bubble: 'Models not downloaded. Please complete onboarding to download the AI model.' Onboarding is already finished and the bubble has no button. The sidebar dot reads 'Model stopped', not 'No model'. The Active models panel says 'get one in Models' as text with no link.",
+    "risk": "A user who skipped setup or deleted the model has a dead chat and an instruction they cannot follow.",
+    "rec": "When there is no model, keep the chip and label it 'Get a model' (opens Models via the existing og:navigate event). Change the error text to 'No chat model. Get one in Models' with the same link. Give the status dot a 'No model' label. In the Active models panel pass a 'Get one' button as the empty slot content, the way VideoProUpsell already does.",
+    "files": [
+      "src/renderer/src/components/MemoryChat/index.tsx:6101",
+      "src/main/llm.ts:1572",
+      "src/shared/chat-generation-error.ts:2",
+      "src/main/chat-health.ts:36",
+      "src/renderer/src/App.tsx:328",
+      "src/renderer/src/components/ModelPicker.tsx:364",
+      "src/renderer/src/components/VideoProUpsell.tsx:5"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-meeting-recorder-error-hidden",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "meetings",
+    "screen": "Meetings (meetings) and the app-wide recording pill",
+    "kind": "state-elsewhere",
+    "title": "Meeting recording errors show in one pane only",
+    "what": "A recorder error (could not start, could not save, the other side is no longer being recorded) renders only inside the Recorded list pane, and only while that pane is open. The app-wide recording pill shows only 'Recording' or 'Transcribing'.",
+    "risk": "Meetings record on their own while the user is on another screen. A failed or one-sided recording goes unseen until the call is over.",
+    "rec": "Show rec.error in the existing recording pill in App.tsx and keep the pill visible while an error is set. Also render it above the tab switch in Meetings so the Calendar tab shows it too.",
+    "files": [
+      "pro/renderer/screens/MeetingsScreen.tsx:472",
+      "src/renderer/src/App.tsx:1274",
+      "pro/main/meeting-native.ts:225",
+      "pro/main/meeting-controller.ts:173"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-meeting-no-speech-model",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "meetings",
+    "screen": "Meetings (meetings) detail and Record button",
+    "kind": "state-elsewhere",
+    "title": "No speech model reads as 'Transcription failed, retry'",
+    "what": "The engine throws 'No transcription model found — download Whisper from Models first.' Meetings replaces it with a generic 'Transcription failed... retry transcription'. The screen shows 'Transcript not available' with a Retry icon. Record does not check for a speech model first, and the model picker lists installed models only.",
+    "risk": "The user records a whole call, gets no transcript, and Retry fails the same way every time.",
+    "rec": "Pass the real reason through. Reuse the Day view JournalWaitLine pattern: 'Needs a speech model. Get a model' linking to Models. Show the same line beside Record when no speech model is installed.",
+    "files": [
+      "pro/main/meetings.ts:703",
+      "src/main/transcription/whisper-cli.ts:215",
+      "pro/renderer/screens/MeetingsScreen.tsx:816",
+      "pro/renderer/screens/MeetingsScreen.tsx:454",
+      "pro/renderer/screens/DayView.tsx:758"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-licence-lapsed-no-reason",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "licensing",
+    "screen": "App shell and Upgrade page (shown on every Pro route)",
+    "kind": "dead-end",
+    "title": "Lapsed licence lands on a plain buy page",
+    "what": "When the licence stops being valid the app removes every Pro screen and routes to Day, which now shows the normal Upgrade page: 'Off Grid AI Pro · Unlock Pro'. Nothing says the licence expired, was revoked or lost its seat.",
+    "risk": "A paying user loses their screens and is told to buy Pro again, with no reason.",
+    "rec": "Pass the licence info to UpgradeScreen. Add one notice line ('Your Pro licence expired on …' or 'This device lost its seat') above the existing licence key field.",
+    "files": [
+      "src/renderer/src/App.tsx:604",
+      "src/renderer/src/App.tsx:640",
+      "src/renderer/src/components/pro/UpgradeScreen.tsx:143",
+      "src/renderer/src/components/pro/UpgradeScreen.tsx:251"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-capture-state-missing-on-memory-screens",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "memory",
+    "screen": "Day (day), Reflect (reflect), Entities (entities), Search (search)",
+    "kind": "state-elsewhere",
+    "title": "Empty memory screens never say capture is off",
+    "what": "Capture state is read only by Replay's header and Settings. Day says 'No activity captured yet.' Reflect and Entities say the same kind of line. Search says 'Turn on capture and your activity shows up here' as text with no control. None of them show whether capture is paused, stopped or missing Screen Recording permission.",
+    "risk": "Capture paused or blocked looks the same as a quiet day. Day is the landing screen, so the user thinks the product does nothing.",
+    "rec": "Put the existing CaptureToggle in these headers or empty states. It already shows Paused / Permission required / Stopped with Resume / Review permissions / Restart.",
+    "files": [
+      "pro/renderer/screens/DayView.tsx:874",
+      "pro/renderer/screens/DayView.tsx:1682",
+      "pro/renderer/screens/ReflectScreen.tsx:257",
+      "pro/renderer/screens/EntitiesScreen.tsx:965",
+      "pro/renderer/screens/SearchResultGrid.tsx:102",
+      "pro/renderer/CaptureToggle.tsx:47"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-dictation-hotkey-state-hidden",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "dictation",
+    "screen": "Voice (voice) header",
+    "kind": "state-elsewhere",
+    "title": "Dictation shortcut fails or changes mode silently",
+    "what": "If the hold-to-talk helper cannot run (Accessibility not granted) the app only logs it and falls back to tap. If no shortcut can be bound it only logs 'no hotkey source available'. The Voice header still says 'Hold ⌥Space to dictate'.",
+    "risk": "The user presses the key and nothing happens, or 'hold' acts as 'tap'. No reason, no fix.",
+    "rec": "Return bound / mode in effect / Accessibility in the dictation state call. Show one status row on Voice with 'Allow' (the same row Scribe uses for Accessibility) and 'Change shortcut'.",
+    "files": [
+      "pro/main/dictation/controller.ts:313",
+      "pro/main/dictation/controller.ts:329",
+      "pro/renderer/screens/VoiceScreen.tsx:1035",
+      "pro/renderer/components/voice/voiceApi.ts:43",
+      "pro/renderer/screens/ScribeScreen.tsx:254"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "desktop-dictation-no-model-or-mic",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "dictation",
+    "screen": "Voice (voice) and the dictation overlay",
+    "kind": "dead-end",
+    "title": "Dictation with no model or mic flashes and hides",
+    "what": "'Start dictation' is always live. With no speech model the overlay shows 'No transcription model installed — download Whisper from Models.' for about 3 seconds, then hides. A denied microphone shows the raw error or 'Microphone unavailable'. Neither has a button. The message says Whisper even when another engine is chosen. Microphone is not a row in Settings > Setup & health > System permissions.",
+    "risk": "A first-time user cannot dictate and gets no path to the fix.",
+    "rec": "Add a readiness row on Voice (speech model, microphone) reusing the TranscriptionModels download list and the existing window.api.openMicrophoneSettings() button from chat. Add a Microphone row to PermissionsPanel. Name the chosen engine in the message.",
+    "files": [
+      "pro/main/dictation/controller.ts:391",
+      "src/renderer/src/components/DictationOverlay.tsx:178",
+      "src/renderer/src/components/DictationOverlay.tsx:277",
+      "pro/renderer/screens/VoiceScreen.tsx:1046",
+      "src/renderer/src/components/PermissionsPanel.tsx:122",
+      "src/renderer/src/components/MemoryChat/index.tsx:5790"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "desktop-google-connectors-dead-in-free",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "agents",
+    "screen": "Integrations (connectors) gallery",
+    "kind": "blocked-no-reason",
+    "title": "Gmail and Calendar Connect is dead on free",
+    "what": "Gmail and Google Calendar need a Google client set up first. The setup form comes from Pro. Without Pro the form does not render, so Connect stays disabled for good. The only reason is a hover title: 'Set up your Google client first'.",
+    "risk": "A free user sees two headline integrations with a dead button, no Pro badge and nowhere to set it up.",
+    "rec": "When the Pro setup slot is empty, show a Pro lock on these two cards that opens the Upgrade page. Show the reason as text, not only on hover.",
+    "files": [
+      "src/renderer/src/components/ConnectorsScreen.tsx:57",
+      "src/renderer/src/components/ConnectorsScreen.tsx:208",
+      "src/renderer/src/components/ConnectorsScreen.tsx:217",
+      "src/renderer/src/components/connectorCatalog.ts:74",
+      "src/renderer/src/components/connectorCatalog.ts:88"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-chat-image-no-model",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "image",
+    "screen": "Chat (memory-chat) Image chip and + menu",
+    "kind": "state-elsewhere",
+    "title": "Image mode turns on with no image model",
+    "what": "The Image chip always switches image mode on. Sending gives a plain text bubble: 'No image model installed. Download one from Models.' with no link. In the + menu 'Generate image' is greyed out with no reason.",
+    "risk": "The user writes a prompt, waits, and gets a line of text. The other entry is greyed with no word why.",
+    "rec": "Copy the video pattern already in this file: keep the item, dim it, give it a title, and on click open Models on the Image tab (og:navigate with subroute 'image'). Do the same on the chip.",
+    "files": [
+      "src/renderer/src/components/MemoryChat/index.tsx:6186",
+      "src/renderer/src/components/MemoryChat/index.tsx:5892",
+      "src/main/imagegen.ts:901",
+      "src/renderer/src/components/MemoryChat/index.tsx:5876"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-chat-video-no-model-pack",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "video",
+    "screen": "Chat (memory-chat) Video chip and + menu",
+    "kind": "state-elsewhere",
+    "title": "Video mode in chat starts without a model",
+    "what": "On Pro, video mode switches on even when no complete video model pack is downloaded. The only hint is a hover tooltip. '+ > Generate video' is greyed with no reason. A failed send writes plain text: 'Choose a complete video model in Models, then try again.'",
+    "risk": "The Video screen handles this well; chat does not. Same prompt, different result.",
+    "rec": "In chooseVideoMode, when no video model is ready, call the existing getVideoModel action (the one behind VideoError's 'Get the video model' link) instead of turning the mode on.",
+    "files": [
+      "src/renderer/src/components/MemoryChat/index.tsx:4406",
+      "src/renderer/src/components/MemoryChat/index.tsx:5897",
+      "src/renderer/src/components/MemoryChat/index.tsx:6203",
+      "pro/renderer/video/VideoError.tsx:14"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-vault-recovery-phrase-state",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "vault",
+    "screen": "Vault (vault) gate and Vault security panel",
+    "kind": "state-elsewhere",
+    "title": "Vault can have no recovery phrase, unseen",
+    "what": "When the vault is created, if making the recovery phrase fails the vault just opens with no phrase and no message. Vault security offers only Change password. The 'has a phrase?' check exists in the API but no screen calls it. 'Forgot password' only works with a phrase.",
+    "risk": "The user believes they can recover the vault. A forgotten password then means a lost vault.",
+    "rec": "In VaultSecurityPanel show 'Recovery phrase: set / not set' with a 'Create' button that calls the existing recoverySetup and shows RecoveryPhraseReveal. Show the failure at creation.",
+    "files": [
+      "pro/renderer/screens/use-vault-gate.ts:33",
+      "pro/renderer/screens/VaultSecurityPanel.tsx:130",
+      "pro/renderer/vaultApi.ts:81",
+      "pro/renderer/screens/VaultGate.tsx:136"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-meeting-summary-is-transcript-slice",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "meetings",
+    "screen": "Meetings (meetings) detail, Summary",
+    "kind": "state-elsewhere",
+    "title": "Failed summary shows cut transcript as 'Summary'",
+    "what": "If summarising fails (for example no text model), the error is only logged and the summary is set to the first 280 characters of the transcript. The screen prints it under 'Summary'.",
+    "risk": "The user reads a cut-off transcript as the summary. No reason, no 'summarise again'. The only path is Re-transcribe, which redoes everything.",
+    "rec": "Store no summary on failure. Show the JournalWaitLine line: 'Needs a model. Get a model' or 'Summary failed. Try again'.",
+    "files": [
+      "pro/main/meetings.ts:773",
+      "pro/main/meetings.ts:788",
+      "pro/renderer/screens/MeetingsScreen.tsx:765",
+      "pro/renderer/screens/DayView.tsx:758"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-load-failure-reads-as-empty",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "memory",
+    "screen": "Replay (replay), Reflect (reflect), Day (day), Meetings calendar",
+    "kind": "dead-end",
+    "title": "A failed load says 'nothing captured'",
+    "what": "Replay logs a load error and shows 'No frames captured yet today.' Reflect has no catch and shows its empty text. Day's block load has no error handling. The Meetings calendar turns any error into 'No meetings in this range.'",
+    "risk": "The user thinks their history is gone. There is no retry.",
+    "rec": "Add an error state with Retry on each, the way MeetingActivitySection and SearchResultGrid already separate 'failed' from 'empty'.",
+    "files": [
+      "pro/renderer/screens/ReplayScreen.tsx:317",
+      "pro/renderer/screens/ReplayScreen.tsx:628",
+      "pro/renderer/screens/ReflectScreen.tsx:147",
+      "pro/renderer/screens/DayView.tsx:1351",
+      "pro/renderer/screens/MeetingsCalendar.tsx:85",
+      "pro/renderer/screens/MeetingActivitySection.tsx:124"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-licence-activation-failure-no-next-step",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "licensing",
+    "screen": "Upgrade page and onboarding 'Enter license key'",
+    "kind": "dead-end",
+    "title": "Licence key failure gives no next step",
+    "what": "A failed activation prints one line: 'This license has no available device slots.', 'This license has expired.' or 'That license key is invalid or revoked.' The shared failure record also carries a title and a 'retryable' flag; neither is used.",
+    "risk": "A user with a full or expired licence is stuck. No manage devices, no renew, no retry, no support link.",
+    "rec": "Use 'retryable' to show Retry. Add one link per failure (manage devices, renew, contact) with the existing openExternal call.",
+    "files": [
+      "src/renderer/src/components/pro/UpgradeScreen.tsx:52",
+      "src/renderer/src/components/pro/UpgradeScreen.tsx:89",
+      "../shared/packages/sync/src/personal-mesh-activation.ts:50",
+      "src/renderer/src/components/onboarding/GuideStep.tsx:47"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-clipboard-capture-off",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "memory",
+    "screen": "Clipboard (clipboard)",
+    "kind": "state-elsewhere",
+    "title": "Clipboard capture off looks like 'nothing copied'",
+    "what": "The Clipboard screen never reads the capture switch (it lives in the Clipboard settings drawer). With capture off the empty state says 'Nothing copied yet. Copy anything and it shows up here.'",
+    "risk": "The user copies things, nothing appears, and the feature looks broken.",
+    "rec": "Read the setting on the screen. When off, the empty state says 'Clipboard capture is off' with a 'Turn on' button.",
+    "files": [
+      "pro/renderer/screens/ClipboardScreen.tsx:298",
+      "pro/renderer/components/clipboard/ClipboardSettingsPanel.tsx:93",
+      "pro/main/clipboard.ts:469"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-sync-not-running-no-retry",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "sync",
+    "screen": "Vault, Notes, Clipboard, Scribe headers; Devices (devices); Settings > Device sync",
+    "kind": "dead-end",
+    "title": "Sync not running: control vanishes, no retry",
+    "what": "When sync status cannot be read, the new header control (SyncCategoryAction) renders nothing. The Devices screen shows a red banner with Dismiss only. Settings shows 'Sync is not running: …' with only 'Manage devices'. The switches in Sync sharing also have no error handling: a failed write leaves the switch as it was with no message.",
+    "risk": "On Vault or Notes the sync control just disappears. On the Sync screen there is a reason but no way to restart.",
+    "rec": "Give SyncCategoryAction an error state ('Sync is not running') that opens the Sync screen. Add Retry (the existing refresh) to both banners. Route switch failures into the screen's existing error banner.",
+    "files": [
+      "pro/renderer/components/SyncCategoryAction.tsx:32",
+      "pro/renderer/components/SyncCategoryAction.tsx:64",
+      "pro/renderer/screens/DevicesScreen.tsx:1819",
+      "pro/renderer/screens/DevicesScreen.tsx:889",
+      "pro/renderer/settings-sync.tsx:199"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-chat-voice-input-failure-generic",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "stt",
+    "screen": "Chat (memory-chat) mic button and voice mode",
+    "kind": "dead-end",
+    "title": "Voice input failure hides the real reason",
+    "what": "The engine gives clear reasons such as 'No transcription model found'. Chat keeps two special cases and otherwise shows 'Transcription failed. Check the speech-to-text model in Settings > Setup & health.' as amber text with no button. Microphone denied does get an 'Open System Settings' button.",
+    "risk": "With no speech model the mic button fails every time, with no route to the fix.",
+    "rec": "Copy the mic-denied alert next to it and add a 'Get a speech model' button that opens Models on the transcription tab. Pass the engine's message through.",
+    "files": [
+      "src/renderer/src/components/use-chat-voice-turns.ts:290",
+      "src/shared/transcription-recovery.ts:4",
+      "src/renderer/src/components/MemoryChat/index.tsx:5797",
+      "src/renderer/src/components/MemoryChat/index.tsx:5779"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-replay-failed-frame-wrong-action",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "vision",
+    "screen": "Replay (replay) frame panel",
+    "kind": "blocked-no-reason",
+    "title": "Failed frames hide the reason, offer wrong fix",
+    "what": "A failed or blocked frame shows only 'Processing failed' or 'Processing blocked'; the reason is a hover title. The only action is 'Reprocess this frame'. Only one of five outcomes gets a message. The notice that says 'retry will not help, change the model or raise context' exists, but only in Settings.",
+    "risk": "The user presses Reprocess again and again and nothing changes.",
+    "rec": "Show the reason inline. For blocked frames reuse BlockedFrameNotice with a 'Get a model' link. Report every reprocess outcome.",
+    "files": [
+      "pro/renderer/screens/ReplayScreen.tsx:793",
+      "pro/renderer/screens/ReplayScreen.tsx:515",
+      "pro/main/crm/reprocess.ts:68",
+      "pro/renderer/CaptureFailureRecovery.tsx:15",
+      "pro/renderer/settings-sections.tsx:289"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-connectors-toggle-and-name",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "agents",
+    "screen": "Chat (memory-chat) + menu; Integrations (connectors); command palette",
+    "kind": "not-named",
+    "title": "'Connectors' in chat, 'Integrations' everywhere else",
+    "what": "Chat has '+ > Connectors On/Off'. It only flips a switch: it does not show whether anything is connected and has no link to manage them. The sidebar and the screen are named 'Integrations'. Typing 'connectors' in the command palette finds nothing (aliases are integrations, mcp, tools). The guide and chat settings say 'Connectors'.",
+    "risk": "The user turns Connectors on with none connected, nothing changes, and they cannot find the page by that word.",
+    "rec": "Pick one word. Add 'connectors' to the palette aliases. Add a 'Manage' item in the + menu using the onOpenConnectors prop that already exists, and show 'none connected' there.",
+    "files": [
+      "src/renderer/src/components/MemoryChat/index.tsx:5973",
+      "src/renderer/src/App.tsx:1121",
+      "src/renderer/src/components/ConnectorsScreen.tsx:634",
+      "src/renderer/src/lib/paletteScreens.ts:37",
+      "../shared/packages/models/src/product-guide.ts:189"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-broken-connector-wrong-advice",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "agents",
+    "screen": "Integrations (connectors) detail; chat Settings drawer > connectors",
+    "kind": "dead-end",
+    "title": "Broken connector: wrong advice, hidden elsewhere",
+    "what": "Any 401 becomes 'Sign-in required — click Test to authorize in your browser', also for connectors that use a token. 'Change token' appears only after the user opens Edit. In the chat settings drawer the connector rows show On/Off and Remove but no status, so a dead token still reads 'On'. A custom server is added without a test and a failed add shows nothing.",
+    "risk": "The user clicks Test forever. Chat silently loses a tool while the switch says On.",
+    "rec": "For token connectors in error, show 'Change token' beside the error (the form is already wired). Show the status chip in the chat settings rows with an 'Open Integrations' link. Run the existing test after adding a custom server.",
+    "files": [
+      "src/renderer/src/components/ConnectorsScreen.tsx:150",
+      "src/renderer/src/components/ConnectorsScreen.tsx:884",
+      "src/renderer/src/components/ConnectorsScreen.tsx:523",
+      "src/renderer/src/components/SettingsPanel.tsx:1453"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-gateway-no-health",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "models",
+    "screen": "Gateway (gateway)",
+    "kind": "state-elsewhere",
+    "title": "Gateway page never says if it is running",
+    "what": "The page shows the base URL, code samples, keys and endpoints. Whether the gateway is up, and Restart, are shown only in Settings > Setup & health. If reading API keys fails there is an alert with no retry button.",
+    "risk": "A user copies the URL into another tool, gets 'connection refused', and this page shows nothing wrong.",
+    "rec": "Put the gateway row from HealthPanel (state pill + Restart) in the page header. Add the existing 'Refresh status' button to the key-load error.",
+    "files": [
+      "src/renderer/src/components/GatewayScreen.tsx:209",
+      "src/renderer/src/components/setup/HealthPanel.tsx:234",
+      "src/main/setup.ts:164",
+      "src/renderer/src/components/GatewayApiKeysSettings.tsx:59"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-setup-plan-failure-dead-button",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "onboarding",
+    "screen": "First run 'Set up your local AI' and Settings > Setup & health",
+    "kind": "blocked-no-reason",
+    "title": "Setup list fails to load, button goes dead",
+    "what": "If the setup plan cannot be loaded, the error is swallowed. The model list is hidden and 'Set up selected' is disabled because nothing is selected. No message, no retry.",
+    "risk": "A first-run user sees a dead main button. The only way out is a small 'browse & pick a model yourself' link.",
+    "rec": "Keep the error and show the existing Alert with a 'Check again' button (the recheck pattern is already in this file).",
+    "files": [
+      "src/renderer/src/components/setup/SetupPanel.tsx:160",
+      "src/renderer/src/components/setup/SetupPanel.tsx:274",
+      "src/renderer/src/components/setup/SetupPanel.tsx:334"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-clipboard-quick-paste-silent",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "memory",
+    "screen": "Clipboard (clipboard) header and quick paste popup",
+    "kind": "state-elsewhere",
+    "title": "Quick paste shortcut can fail without a word",
+    "what": "The shortcut is fixed (Ctrl/Cmd+Shift+C). If another app holds it, the failure is only logged and the screen still shows the key. Pasting reports success before the keystroke is sent; a failed keystroke (no Accessibility) is only logged.",
+    "risk": "The popup never opens, or closes and pastes nothing. No reason shown.",
+    "rec": "Return the registration and paste result to the screen. Show 'Shortcut in use' or 'Allow Accessibility' on the Clipboard header.",
+    "files": [
+      "pro/main/clipboard.ts:48",
+      "pro/main/clipboard.ts:480",
+      "pro/main/text-injection.ts:19",
+      "pro/renderer/screens/ClipboardScreen.tsx:224"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "desktop-calendar-empty-not-connected",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "meetings",
+    "screen": "Day (day) calendar card; Meetings (meetings) Calendar tab",
+    "kind": "state-elsewhere",
+    "title": "Empty calendar does not say none is connected",
+    "what": "Day says 'Nothing on your calendar today.' Meetings says 'No meetings in this range.' Neither checks whether a calendar is connected or offers Connect.",
+    "risk": "The user cannot tell an empty week from a calendar that was never connected.",
+    "rec": "When no calendar is connected, show the existing GoogleQuickConnection / MicrosoftQuickConnection buttons in the empty state.",
+    "files": [
+      "pro/renderer/screens/DayView.tsx:394",
+      "pro/renderer/screens/MeetingsCalendar.tsx:140",
+      "pro/renderer/QuickProviderConnections.tsx:22"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-sync-three-names",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "sync",
+    "screen": "Sidebar, Devices (devices) title, Settings, Pro page",
+    "kind": "not-named",
+    "title": "Sync has three names and stale Pro copy",
+    "what": "The sidebar and Pro page say 'Devices and sync'. The screen title is 'Devices'. The Settings card is 'Device sync'. The tab is 'Sync sharing'. The Pro page says sync covers 'chats, projects and model settings' and leaves out notes, vault, clipboard and writing. Vault copy says sync is 'via EasyShare', a name used nowhere else.",
+    "risk": "The user looks for 'Sync' and meets three labels. The Pro page undersells what syncs.",
+    "rec": "Use one name on the sidebar, the screen title and the Settings card. List every synced category in the Pro copy. Drop 'EasyShare'.",
+    "files": [
+      "src/renderer/src/components/pro/proCatalog.ts:337",
+      "src/renderer/src/components/pro/proCatalog.ts:343",
+      "src/renderer/src/components/pro/proCatalog.ts:305",
+      "pro/renderer/screens/DevicesScreen.tsx:1595",
+      "src/renderer/src/components/pro/proSettingsCatalog.ts:50",
+      "src/renderer/src/components/Settings.tsx:44"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-voice-image-settings-not-in-settings",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "tts",
+    "screen": "Settings (settings); command palette; Voice (voice)",
+    "kind": "not-named",
+    "title": "Voice and image settings are not in Settings",
+    "what": "Voice (spoken replies), Image, Transcription and Tools options live in a side drawer that is also called 'Settings'. It opens only from Models, the model picker, Storage and Chat. The Settings screen has no entry for them and the command palette cannot find 'voice settings'. The sidebar item 'Voice' is dictation, and dictation snippets sit under Scribe > Dictation with no link between the two.",
+    "risk": "A user who opens Settings to change the voice or image options finds nothing.",
+    "rec": "Add a 'Model settings' card in Settings and palette entries that call the existing openModelSettingsPanel(tab). Link Voice and Scribe > Dictation to each other.",
+    "files": [
+      "src/renderer/src/components/Settings.tsx:34",
+      "src/renderer/src/components/SettingsPanel.tsx:683",
+      "src/renderer/src/lib/paletteScreens.ts:51",
+      "src/renderer/src/components/ModelsScreen.tsx:914",
+      "pro/renderer/screens/VoiceScreen.tsx:567",
+      "pro/renderer/screens/ScribeScreen.tsx:730"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-failed-document-looks-ready",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "documents",
+    "screen": "Chat (memory-chat) attachments; Projects (projects) knowledge base",
+    "kind": "dead-end",
+    "title": "A document that failed to read looks ready",
+    "what": "In chat, an attached document whose indexing fails keeps its 'ready' pill. In the 'Documents in this chat' list a failed row says 'Could not be read' with no retry. In Projects a failed document says 'Couldn't read'; the reason is hover-only and the only way back is delete and add again.",
+    "risk": "The user asks about a document the model never read and gets answers with no grounding.",
+    "rec": "Map the 'failed' phase to the error pill in chat. Show the reason as a second line in both lists. Add a retry icon (needs a small re-index call; none exists today).",
+    "files": [
+      "src/renderer/src/components/MemoryChat/helper.tsx:425",
+      "src/renderer/src/components/MemoryChat/components/ChatDocuments.tsx:110",
+      "src/renderer/src/components/ProjectsScreen.tsx:927",
+      "src/preload/index.ts:886"
+    ],
+    "effort": "M"
+  },
+  {
+    "id": "desktop-notifications-sold-as-approvals",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "todos",
+    "screen": "Notifications (notifications); Pro page; Actions (actions)",
+    "kind": "not-named",
+    "title": "Approvals promised in Notifications live in Actions",
+    "what": "The Pro page describes Notifications as 'Approvals in one place' and 'Approval queue for actions'. The Notifications screen has only All and Sharing tabs and says 'File sharing and device notices appear here'. Approvals live in Actions.",
+    "risk": "The user opens Notifications to approve something and finds nothing.",
+    "rec": "Fix the Pro copy, or add a 'Pending approvals (n)' row in Notifications that opens Actions.",
+    "files": [
+      "src/renderer/src/components/pro/proCatalog.ts:240",
+      "src/renderer/src/components/pro/proCatalog.ts:247",
+      "pro/renderer/screens/NotificationList.tsx:335",
+      "src/renderer/src/lib/internal-tab-route.ts:45",
+      "pro/renderer/screens/ActionsScreen.tsx:525"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-suggest-actions-failure-green",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "agents",
+    "screen": "Actions (actions)",
+    "kind": "dead-end",
+    "title": "'Suggest actions' failure shows in green, no link",
+    "what": "With nothing connected, Suggest actions returns 'No connected tools yet — connect an integration first.' The screen shows errors and successes in the same green box, and has no link to Integrations. Entities > Organize has the same shape: it ends with no result and no error.",
+    "risk": "The user reads a failure as success, then has to find Integrations alone.",
+    "rec": "Use error styling for errors and add a 'Connect' link (og:navigate to Integrations). Give Organize a one-line result.",
+    "files": [
+      "pro/main/crm/agent.ts:197",
+      "pro/renderer/screens/ActionsScreen.tsx:265",
+      "pro/renderer/screens/ActionsScreen.tsx:426",
+      "pro/renderer/screens/EntitiesScreen.tsx:163"
+    ],
+    "effort": "S"
+  },
+  {
+    "id": "desktop-sync-no-per-category-result",
+    "product": "desktop",
+    "direction": "desktop",
+    "feature": "sync",
+    "screen": "Vault, Notes, Clipboard, Scribe headers; Devices (devices) > Sync sharing; Models (models)",
+    "kind": "dead-end",
+    "title": "Sync on, but no sign anything synced",
+    "what": "The header control says only 'X sync is on'. Every category hides its activity, so there is no 'last synced' or 'failed' per category. The Sync screen shows per-device 'Last connected' and one global count. 'Model settings' is the one switchable category whose own screen (Models) has no sync control at all.",
+    "risk": "The user turns on Notes or Vault sync and cannot tell whether anything moved or failed.",
+    "rec": "Add last-synced time and pending count per category to the sync status. Show it in the SyncCategoryAction tooltip and in the Sync sharing row. Let SyncCategoryAction take 'model-settings' and mount it on Models.",
+    "files": [
+      "pro/renderer/components/SyncCategoryAction.tsx:15",
+      "pro/renderer/components/SyncCategoryAction.tsx:49",
+      "../shared/packages/sync/src/control-center-data.ts:83",
+      "pro/renderer/screens/DevicesScreen.tsx:185"
+    ],
+    "effort": "M"
+  }
+]

@@ -40,7 +40,10 @@ const DEVICE_ID = 'desktop-release-107'
 
 beforeAll(() => {
   taskHistory.configureTaskExecutionDevice({ id: DEVICE_ID, name: 'Studio Mac' })
-  configureTaskControlSync(DEVICE_ID, (deviceId) => deviceId === 'mobile-release-107')
+  // The refusal rule names what blocks a device; the paired phone is not blocked.
+  configureTaskControlSync(DEVICE_ID, (deviceId) =>
+    deviceId === 'mobile-release-107' ? undefined : 'not_paired'
+  )
 })
 
 afterAll(() => {

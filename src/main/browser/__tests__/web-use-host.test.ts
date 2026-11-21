@@ -9,6 +9,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-web-use-host-'))
 const previousDataDir = process.env.OFFGRID_DATA_DIR
 process.env.OFFGRID_DATA_DIR = profile
+// Pairing asks whether Pro is on (the browser's features are Pro), so the build constant is set.
+vi.stubGlobal('__OFFGRID_PRO__', true)
 
 // Electron's own browser view: an inert surface that accepts every call. Off Grid AI's browser
 // host builds on it; nothing here renders.

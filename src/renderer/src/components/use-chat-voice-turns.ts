@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { explainFailure } from '@offgrid/failures'
 import { transcriptionRecoveryMessage } from '../../../shared/transcription-recovery'
 import {
+  EMPTY_LIVE_TRANSCRIPT,
   SpeechEndpointTimer,
   audioFilename,
   chooseRecorderMime,
+  type LiveTranscript,
   type VoiceTurnMode
 } from '@offgrid/speech'
+import { ChatLiveTranscriber } from './chat-live-transcription'
 import { captureUrlForPath } from '../../../shared/ogcapture-url'
 
 /*
@@ -58,6 +62,8 @@ interface CompletedCapture {
   chunks: Blob[]
   mime: string
   duration: number
+  /** Everything heard live, settled. '' when the microphone could not be tapped or heard nothing. */
+  liveText: string
 }
 
 interface ChatVoiceTurns {
@@ -71,6 +77,8 @@ interface ChatVoiceTurns {
   cancel: () => void
   /** Feeds the live microphone envelope to a waveform without re-rendering the chat. */
   subscribeAmplitudes: (listener: (amplitudes: number[]) => void) => () => void
+  /** Feeds what has been heard so far, guesses and settled text, without re-rendering the chat. */
+  subscribeLiveTranscript: (listener: (transcript: LiveTranscript) => void) => () => void
 }
 
 const LEVEL_SAMPLE_MS = 50
@@ -94,6 +102,12 @@ function rms(samples: Float32Array): number {
   let sum = 0
   for (const sample of samples) sum += sample * sample
   return Math.sqrt(sum / samples.length)
+}
+
+/** Settles the live transcript's last segment and returns everything heard; '' without one. */
+async function settledLiveText(live: ChatLiveTranscriber | null): Promise<string> {
+  if (!live) return ''
+  return (await live.finish()).trim()
 }
 
 function captureIsBlocked(
@@ -169,6 +183,24 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
   const previousPlaybackRef = useRef(false)
   const rearmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const transcriptionRequestRef = useRef<string | null>(null)
+  /** Words on screen while the person speaks; the turn's text when it ends. */
+  const liveRef = useRef<ChatLiveTranscriber | null>(null)
+  const liveTranscriptRef = useRef<LiveTranscript>(EMPTY_LIVE_TRANSCRIPT)
+  const liveListenersRef = useRef(new Set<(transcript: LiveTranscript) => void>())
+  const publishLive = useCallback((next: LiveTranscript): void => {
+    liveTranscriptRef.current = next
+    liveListenersRef.current.forEach((listener) => listener(next))
+  }, [])
+  const subscribeLiveTranscript = useCallback(
+    (listener: (transcript: LiveTranscript) => void): (() => void) => {
+      liveListenersRef.current.add(listener)
+      listener(liveTranscriptRef.current)
+      return () => {
+        liveListenersRef.current.delete(listener)
+      }
+    },
+    []
+  )
 
   const updatePhase = useCallback((next: ChatVoicePhase): void => {
     phaseRef.current = next
@@ -206,6 +238,9 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       if (transcriptionRequest) {
         void optionsRef.current.cancelTranscription?.(transcriptionRequest).catch(() => {})
       }
+      liveRef.current?.cancel()
+      liveRef.current = null
+      publishLive(EMPTY_LIVE_TRANSCRIPT)
       const resources = resourcesRef.current
       resourcesRef.current = null
       chunksRef.current = []
@@ -223,15 +258,33 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       phaseRef.current = 'idle'
       if (notify && mountedRef.current) setPhase('idle')
     },
-    [stopAnalysis, stopTracks]
+    [publishLive, stopAnalysis, stopTracks]
+  )
+
+  /** The turn's words: what was heard live, or else the whole recording transcribed once. */
+  const turnText = useCallback(
+    async (liveText: string, bytes: Uint8Array, extension: string): Promise<string> => {
+      if (liveText) return liveText
+      const requestId = crypto.randomUUID()
+      transcriptionRequestRef.current = requestId
+      return (await optionsRef.current.transcribeAudio(bytes, extension, requestId)).trim()
+    },
+    []
   )
 
   const transcribeRecording = useCallback(
-    async ({ sequence, owner, chunks, mime, duration }: CompletedCapture): Promise<void> => {
+    async ({
+      sequence,
+      owner,
+      chunks,
+      mime,
+      duration,
+      liveText
+    }: CompletedCapture): Promise<void> => {
       // After every wait: still the chat this turn was recorded in?
       const sameChat = (): boolean => (optionsRef.current.ownerId ?? null) === owner
       const blob = new Blob(chunks, { type: mime })
-      if (blob.size === 0) {
+      if (blob.size === 0 && !liveText) {
         if (sequence === sequenceRef.current) {
           setError("Didn't record any audio. Try again.")
           updateSuspended(optionsRef.current.mode === 'handsfree')
@@ -243,11 +296,10 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       try {
         const extension = audioFilename(mime).split('.').pop() ?? 'webm'
         const bytes = new Uint8Array(await blob.arrayBuffer())
-        const requestId = crypto.randomUUID()
-        transcriptionRequestRef.current = requestId
-        const text = (await optionsRef.current.transcribeAudio(bytes, extension, requestId)).trim()
+        const text = await turnText(liveText, bytes, extension)
         if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
         if (!text) {
+          publishLive(EMPTY_LIVE_TRANSCRIPT)
           setError("Didn't catch that. Tap the microphone and try again.")
           updateSuspended(optionsRef.current.mode === 'handsfree')
           updatePhase('idle')
@@ -280,6 +332,8 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         if (elsewhere) setAwaitingReply(false)
         const delivered =
           elsewhere && !clip ? false : optionsRef.current.onTranscript(text, clip, owner) !== false
+        // The words now live in the message or the draft.
+        publishLive(EMPTY_LIVE_TRANSCRIPT)
         if (!delivered) {
           setError('That voice note was recorded in another chat, so it was not sent here.')
           updatePhase('idle')
@@ -289,7 +343,9 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
         setError(
           transcriptionRecoveryMessage(cause) ??
-            'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
+            (explainFailure(cause).code === 'no-speech-model'
+              ? explainFailure(cause).line
+              : 'Transcription failed. Check the speech-to-text model in Settings > Setup & health.')
         )
         updateSuspended(optionsRef.current.mode === 'handsfree')
         updatePhase('idle')
@@ -297,7 +353,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         if (sequence === sequenceRef.current) transcriptionRequestRef.current = null
       }
     },
-    [updatePhase, updateSuspended]
+    [publishLive, turnText, updatePhase, updateSuspended]
   )
 
   const finishCaptureRef = useRef<(suspendAfter: boolean) => void>(() => {})
@@ -385,6 +441,14 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         startedAtRef.current = Date.now()
         discardRef.current = false
         publishAmplitudes(silentAmplitudes())
+        publishLive(EMPTY_LIVE_TRANSCRIPT)
+        liveRef.current?.cancel()
+        const live = new ChatLiveTranscriber(
+          (wav, requestId) => optionsRef.current.transcribeAudio(wav, 'wav', requestId),
+          (requestId) => void optionsRef.current.cancelTranscription?.(requestId).catch(() => {}),
+          publishLive
+        )
+        liveRef.current = live.start(stream) ? live : null
 
         recorder.ondataavailable = (event) => {
           if (event.data.size > 0) chunksRef.current.push(event.data)
@@ -396,12 +460,20 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           if (discardRef.current || sequence !== sequenceRef.current) return
           const chunks = chunksRef.current
           chunksRef.current = []
-          void transcribeRecording({
+          const capture = {
             sequence,
             owner,
             chunks,
             mime: mimeRef.current,
             duration: Math.max(0, (Date.now() - startedAtRef.current) / 1000)
+          }
+          // What was shown live IS the turn: settle its last segment and send exactly that. The
+          // whole recording is transcribed again only when nothing was heard live.
+          const turnLive = liveRef.current
+          void settledLiveText(turnLive).then((liveText) => {
+            if (liveRef.current === turnLive) liveRef.current = null
+            if (sequence !== sequenceRef.current) return
+            void transcribeRecording({ ...capture, liveText })
           })
         }
 
@@ -467,6 +539,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
     [
       publishAmplitudes,
       publishLevel,
+      publishLive,
       refreshTranscriptionLabel,
       stopAnalysis,
       stopTracks,
@@ -646,6 +719,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
     start,
     toggle,
     cancel,
-    subscribeAmplitudes
+    subscribeAmplitudes,
+    subscribeLiveTranscript
   }
 }

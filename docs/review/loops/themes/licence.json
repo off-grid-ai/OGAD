@@ -1,0 +1,242 @@
+{
+ "id": "licence",
+ "title": "Licence and Pro: say why, give the way back",
+ "problem": "An expired, removed or missing licence drops you on the plain buy page, or a Pro wall appears only after you set things up.",
+ "fix": "shared: one licence-state line (\"expired on \u2026\", \"removed by <device>\", \"needs Pro\") with Renew, Pair again or Enter key. Desktop, phone and extension render it.",
+ "count": 12,
+ "items": [
+  {
+   "id": "dm-removed-device-not-told",
+   "product": "desktop+mobile",
+   "direction": "both",
+   "platform": null,
+   "screen": "Removed device: Pro page and Sync / Devices",
+   "kind": "cross-product",
+   "title": "A removed device loses Pro with no reason",
+   "what": "The device that removes another shows clear copy. The removed desktop only clears Pro. The removed phone only clears the licence and deletes the row. It then shows the never-bought Pro page.",
+   "risk": "Pro vanishes. The user thinks the licence broke and may buy again or write to support.",
+   "rec": "shared: one line, '<name> removed this device. Pair again to rejoin.' pro + mobile: show it once on a remote removal, with a Pair button.",
+   "files": [
+    "shared/packages/sync/src/membership-revocation.ts:516",
+    "desktop/pro/main/sync-ipc.ts:851",
+    "mobile/pro/sync/syncRuntimeCallbacks.ts:95",
+    "mobile/src/screens/ProDetailScreen/index.tsx:191"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "dm-pro-by-pairing-hidden-on-phone",
+   "product": "desktop+mobile",
+   "direction": "desktop->mobile",
+   "platform": null,
+   "screen": "Mobile Pro page; desktop Pro page",
+   "kind": "cross-product",
+   "title": "Phone hides the pair-to-get-Pro path",
+   "what": "Desktop says pairing with a licensed device turns Pro on. The phone offers only 'I have a license key'. Opening Sync without Pro sends the user to checkout. The desktop Pro page says the licence covers the phone but gives only a download link.",
+   "risk": "A desktop buyer installs the phone app and sees a paywall. They pay twice or give up.",
+   "rec": "mobile: add a row on the Pro page, 'Pro on another device? Pair to turn it on here', that opens the scanner. desktop: under 'Get Off Grid AI Mobile' add 'Then scan the code in Devices'.",
+   "files": [
+    "desktop/pro/renderer/screens/DevicesScreen.tsx:1598",
+    "desktop/src/renderer/src/components/onboarding/PickSteps.tsx:241",
+    "desktop/src/renderer/src/components/pro/UpgradeScreen.tsx:296",
+    "mobile/src/screens/ProDetailScreen/index.tsx:254",
+    "mobile/src/hooks/useOpenSync.ts:30"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "dm-pairing-failure-no-next-step",
+   "product": "desktop+mobile",
+   "direction": "both",
+   "platform": null,
+   "screen": "Desktop pairing dialog; mobile pairing sheet",
+   "kind": "cross-product",
+   "title": "Pairing failures state the fault, not the step",
+   "what": "Both apps print the same shared sentence for each failure. Examples: 'The personal mesh is full.', 'At least one device must have an active Pro license.', 'These devices use different Pro licenses.', 'The device could not be reached.' The sentence 'unavailable on this device' also shows on the other device.",
+   "risk": "Pairing fails and the user does not know which device to fix or how.",
+   "rec": "shared: give each failure code a next step and a local or remote wording in pairing/attempt.ts ('Remove a device in Sync first', 'Join the same Wi-Fi', 'Enter your key on <device>').",
+   "files": [
+    "shared/packages/sync/src/pairing/attempt.ts:178",
+    "desktop/pro/renderer/screens/DevicesScreen.tsx:3043",
+    "mobile/pro/ui/PairingAttemptSheet.tsx:69"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-licence-lapsed-no-reason",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "App shell and Upgrade page (shown on every Pro route)",
+   "kind": "dead-end",
+   "title": "Lapsed licence lands on a plain buy page",
+   "what": "When the licence stops being valid the app removes every Pro screen and routes to Day, which now shows the normal Upgrade page: 'Off Grid AI Pro \u00b7 Unlock Pro'. Nothing says the licence expired, was revoked or lost its seat.",
+   "risk": "A paying user loses their screens and is told to buy Pro again, with no reason.",
+   "rec": "Pass the licence info to UpgradeScreen. Add one notice line ('Your Pro licence expired on \u2026' or 'This device lost its seat') above the existing licence key field.",
+   "files": [
+    "src/renderer/src/App.tsx:604",
+    "src/renderer/src/App.tsx:640",
+    "src/renderer/src/components/pro/UpgradeScreen.tsx:143",
+    "src/renderer/src/components/pro/UpgradeScreen.tsx:251"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-licence-activation-failure-no-next-step",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Upgrade page and onboarding 'Enter license key'",
+   "kind": "dead-end",
+   "title": "Licence key failure gives no next step",
+   "what": "A failed activation prints one line: 'This license has no available device slots.', 'This license has expired.' or 'That license key is invalid or revoked.' The shared failure record also carries a title and a 'retryable' flag; neither is used.",
+   "risk": "A user with a full or expired licence is stuck. No manage devices, no renew, no retry, no support link.",
+   "rec": "Use 'retryable' to show Retry. Add one link per failure (manage devices, renew, contact) with the existing openExternal call.",
+   "files": [
+    "src/renderer/src/components/pro/UpgradeScreen.tsx:52",
+    "src/renderer/src/components/pro/UpgradeScreen.tsx:89",
+    "../shared/packages/sync/src/personal-mesh-activation.ts:50",
+    "src/renderer/src/components/onboarding/GuideStep.tsx:47"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "xa-free-pair-then-pro-wall",
+   "product": "extension+desktop",
+   "direction": "extension->desktop",
+   "platform": "both",
+   "screen": "Desktop pairing dialog, then the extension pairing card",
+   "kind": "cross-product",
+   "title": "Pro wall appears only after pairing",
+   "what": "Pairing works without Pro. The desktop dialog says the browser can use 'your chats, tools and (with Pro) vault'. But every call except state, unpair and stop is refused with pro_required. The panel then says 'The browser extension is part of Off Grid AI Pro. Activate Pro in Off Grid AI Desktop'. There is no link. The desktop Pro page does not list the browser extension.",
+   "risk": "A free user completes the six-word pairing and then finds that nothing works. The dialog told them chats and tools were included. On the desktop Pro page they cannot find the thing they were sent to buy.",
+   "rec": "Desktop: fix the dialog line for free users and, after a free pairing, open the Pro page. Add 'Browser extension' to the Pro catalog. Extension: say the Pro need before the Pair button when the desktop reports no Pro (add a pro flag to /v1/extension/info).",
+   "files": [
+    "desktop/src/main/extension-bridge/bridge-electron.ts:202",
+    "desktop/src/main/extension-bridge/bridge-service.ts:138",
+    "browser-extension/src/sidepanel/DesktopPairing.tsx:154",
+    "desktop/src/renderer/src/components/pro/UpgradeScreen.tsx:15",
+    "browser-extension/src/shared/desktop/desktop-errors.ts:7"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "xa-removed-browser-unclear",
+   "product": "extension+desktop",
+   "direction": "desktop->extension",
+   "platform": "both",
+   "screen": "Extension panel after the browser is removed on desktop",
+   "kind": "cross-product",
+   "title": "Removed browser and old desktop get one vague line",
+   "what": "The desktop answers 401 'unauthorized' for a removed browser, a bad key and a method it does not know. The extension maps all of these to 'Pair this browser again or update Off Grid AI Desktop'. After a removal the panel drops to the setup screen titled 'Off Grid AI Pro' with a Pair button. It never says the browser was removed on the desktop.",
+   "risk": "The user sees two different fixes in one line and must guess. A newer extension on an older desktop is told to pair again, which does not help. A removed browser looks like a fault.",
+   "rec": "Desktop: answer an unknown method from a known browser with a sealed 'unsupported' error, and keep 401 for an unknown device. Extension: on 401 with a stored pairing, show 'This browser was removed in Off Grid AI Desktop. Pair again.' and for 'unsupported' show the update line only.",
+   "files": [
+    "desktop/src/main/extension-bridge/bridge-service.ts:135",
+    "desktop/src/main/extension-bridge/bridge-service.ts:141",
+    "browser-extension/src/shared/desktop/desktop-errors.ts:24",
+    "browser-extension/src/shared/desktop/bridge-link.ts:206",
+    "browser-extension/src/sidepanel/SettingsScreen.tsx:75"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "xa-no-unpair-in-extension",
+   "product": "extension+desktop",
+   "direction": "extension->desktop",
+   "platform": "both",
+   "screen": "Extension Settings > Desktop",
+   "kind": "cross-product",
+   "title": "Extension has no Unpair control",
+   "what": "The desktop has an 'unpair' call and its text says a removal works 'the way its own Unpair does'. The extension never calls it. Settings > Desktop shows 'Paired as ...' and feature rows only. A browser can be removed only from the desktop.",
+   "risk": "A user cannot disconnect a browser from where they sit, for example on a shared computer. An uninstalled extension stays in the desktop list as 'Not connected' with no hint that it is gone.",
+   "rec": "Extension: add an Unpair icon button with an in-row confirm in Settings > Desktop that calls 'unpair' and clears the stored pairing.",
+   "files": [
+    "desktop/src/main/extension-bridge/bridge-rpc-handlers.ts:169",
+    "browser-extension/src/shared/bridge/protocol.ts:222",
+    "browser-extension/src/sidepanel/DesktopPairing.tsx:217",
+    "desktop/pro/renderer/components/PairedBrowserList.tsx:52"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "extension-pro-required-dead-end",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel when paired with a Desktop that has no Pro; Vault; in-field menu",
+   "kind": "cross-product",
+   "title": "Needs Pro: no link to get or activate it",
+   "what": "Without Pro on Desktop the whole panel is replaced by one line: \"Activate Pro in Off Grid AI Desktop, then check again.\" The vault and the in-field menu say the same in their own words. None links to the Pro page or opens Desktop's licence screen. Scribe's badge is simply not drawn.",
+   "risk": "A free user who installs the extension hits a wall with no price, no buy link and no path to the place where Pro is activated.",
+   "rec": "Add two actions to the one PairingCard Pro state: \"See Off Grid AI Pro\" (website) and \"Open Off Grid AI Desktop\" (offgrid://open, ideally to its licence screen). Reuse that card in the vault's pro_required notice.",
+   "files": [
+    "browser-extension/src/sidepanel/DesktopPairing.tsx:145",
+    "browser-extension/src/sidepanel/panel-gate.ts:25",
+    "browser-extension/src/sidepanel/vault/VaultGateNotice.tsx:15",
+    "browser-extension/src/shared/inline/view-model.ts:55",
+    "browser-extension/src/shared/writing/badge.ts:28"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-licence-expired-no-reason",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Pro page (after expiry redirect), Settings Pro row",
+   "kind": "dead-end",
+   "title": "Expired or removed licence lands on the sales page",
+   "what": "When the licence expires or this phone is removed from it, the app resets to the Pro page. That page shows the same sales content as for someone who never bought. The 'expired' flag is read only by the redirect, never by a screen. The key sheet opens empty.",
+   "risk": "In the middle of a task the app jumps to a price page. Nothing says 'your licence expired' or 'this phone was removed from your licence'. There is no Renew or Reactivate button.",
+   "rec": "On the Pro page, when the expired flag is set (or a saved key has no access), show one line above the button and relabel it Renew or Reactivate this phone. The offline note on the same page is the pattern to copy.",
+   "files": [
+    "mobile/src/navigation/useProExpiryRedirect.ts:61",
+    "mobile/src/navigation/useProExpiryRedirect.ts:76",
+    "mobile/src/screens/ProDetailScreen/index.tsx:191",
+    "mobile/src/stores/proAccessSlice.ts:14"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-licence-key-door-missing",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Pro tab, Settings, Home",
+   "kind": "not-named",
+   "title": "No way to enter a licence key while online",
+   "what": "Every Get Pro button opens the web checkout. The page with 'I have a license key' opens only when offline, from a web link, or on expiry. The Pro tab shows its licence row only when licensed. Its one buy control is a banner; dismissing that banner (here or in Settings) removes it for good.",
+   "risk": "Someone who bought on the computer, or paid and closed the sheet, sees only Get Pro. After dismissing the banner, the Pro tab has no way to buy or activate at all.",
+   "rec": "Show the Pro tab licence row for unlicensed users as 'Enter licence key', opening the Pro page with the existing unlock param. Keep a fixed Get Pro row on the Pro tab that ignores the dismissed flag.",
+   "files": [
+    "mobile/src/hooks/useGetPro.ts:30",
+    "mobile/src/screens/ProTabScreen.tsx:63",
+    "mobile/src/screens/ProTabScreen.tsx:89",
+    "mobile/src/components/settings/ProUpsellBanner.tsx:39",
+    "mobile/src/screens/ProDetailScreen/index.tsx:108"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-activation-errors-no-step",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Enter licence key sheet",
+   "kind": "dead-end",
+   "title": "Licence key errors give no next step",
+   "what": "The sheet shows only the error title and text: 'This license has expired', 'invalid or revoked', 'could not be registered', 'Remove it from your devices and try again'. The only other control is 'Not a member yet? Get Pro'.",
+   "risk": "An expired key has no Renew. Other errors have no support contact. 'Remove it from your devices' points to a screen an unlicensed phone cannot open.",
+   "rec": "One action under the error: Renew (the checkout) for expired, 'Contact support' (the support email helper Settings uses) for the rest.",
+   "files": [
+    "mobile/src/screens/ProDetailScreen/ProUnlockModal.tsx:178",
+    "mobile/src/screens/ProDetailScreen/ProUnlockModal.tsx:208",
+    "shared/packages/sync/src/personal-mesh-activation.ts:61",
+    "shared/packages/sync/src/personal-mesh-activation.ts:116",
+    "mobile/src/utils/supportEmail.ts:11"
+   ],
+   "effort": "S"
+  }
+ ]
+}

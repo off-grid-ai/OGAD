@@ -1,0 +1,138 @@
+<title>Product Loops Proposal</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a decision sheet. Summary first, then one row per fix pattern; each opens to its findings. */
+:root {
+  --bg: #f6f7f5; --surface: #ffffff; --fg: #141a16; --muted: #5d6862; --line: #dfe3df;
+  --accent: #0f7a4f; --accent-soft: #e3f2ea; --warn: #9a5b00; --warn-soft: #fbefd9;
+  --sans: "Inter", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d110f; --surface: #151a17; --fg: #e7ece8; --muted: #94a199; --line: #26302a;
+  --accent: #4cc98f; --accent-soft: #15301f; --warn: #e6a64a; --warn-soft: #33260f; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0d110f; --surface: #151a17; --fg: #e7ece8; --muted: #94a199; --line: #26302a;
+  --accent: #4cc98f; --accent-soft: #15301f; --warn: #e6a64a; --warn-soft: #33260f; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 14px/1.55 var(--sans); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.eyebrow { font: 500 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+h1 { font-weight: 400; font-size: 32px; line-height: 1.15; margin: 8px 0 6px; text-wrap: balance; }
+.lede { color: var(--muted); max-width: 68ch; margin: 0; }
+.bluf { list-style: none; padding: 0; margin: 22px 0 28px; display: grid; gap: 6px; }
+.bluf li { display: flex; gap: 10px; align-items: baseline; }
+.bluf li::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); transform: translateY(-2px); }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0 0 24px; font: 12px var(--mono); color: var(--muted); }
+.stats b { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+.themes { display: grid; gap: 10px; }
+.theme { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.theme > summary { list-style: none; cursor: pointer; padding: 14px 16px; display: grid; grid-template-columns: 44px minmax(0,1fr) auto; gap: 4px 14px; align-items: start; }
+.theme > summary::-webkit-details-marker { display: none; }
+.theme > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+.count { font: 500 22px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--accent); }
+.ttl { font-size: 16px; font-weight: 500; }
+.prob { color: var(--muted); margin-top: 2px; }
+.fix { margin-top: 8px; padding: 8px 10px; background: var(--accent-soft); border-radius: 6px; }
+.fix b { font: 500 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.chip { font: 11px var(--mono); padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+.call { display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 150px; }
+.call button { font: 500 12px var(--sans); padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; text-align: left; transition: background .12s, border-color .12s; }
+.call button:hover { border-color: var(--accent); }
+.call button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.call .who { font: 11px var(--mono); color: var(--muted); min-height: 14px; }
+.items { border-top: 1px solid var(--line); padding: 4px 16px 12px; }
+.item { padding: 12px 0; border-bottom: 1px solid var(--line); display: grid; gap: 4px; }
+.item:last-child { border-bottom: 0; }
+.item h3 { margin: 0; font-size: 14px; font-weight: 500; }
+.meta { font: 11px var(--mono); color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.kv { display: grid; grid-template-columns: 56px minmax(0,1fr); gap: 2px 10px; }
+.kv dt { font: 500 10px/1.9 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.kv dd { margin: 0; min-width: 0; }
+.kv dd.risk { color: var(--warn); }
+.files { font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.note { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 70ch; }
+@media (max-width: 640px) { .theme > summary { grid-template-columns: 34px minmax(0,1fr); } .call { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; min-width: 0; } }
+@media (prefers-reduced-motion: reduce) { .call button { transition: none; } }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">Off Grid AI · loop audit · 20 Nov 2026</div>
+  <h1>Product loops: where people get stuck</h1>
+  <p class="lede">Six read-only audits: desktop, mobile, browser extension, desktop ↔ mobile, extension ↔ desktop and mobile, and the shipped guide against the real screens. Every finding cites code. Pick a call on each pattern; nothing is built until you do.</p>
+  <ul class="bluf" id="bluf"></ul>
+  <div class="stats" id="stats"></div>
+  <div class="themes" id="themes"></div>
+  <p class="note">Read from code, not yet checked in the running apps. After your calls, the change review page carries before and after shots on Mac, iPhone, Android, Chrome and Firefox for each fix. Raw findings: <span class="files">desktop/docs/review/loops/findings/</span>.</p>
+</div>
+
+<script>
+const DATA = /*DATA*/null;
+const OPTIONS = [['shared', 'Build the shared fix'], ['worst', 'Fix the worst only'], ['later', 'Not now']];
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const prodTotals = {};
+DATA.themes.forEach((t) => Object.entries(t.products).forEach(([p, n]) => (prodTotals[p] = (prodTotals[p] || 0) + n)));
+const cross = DATA.themes.reduce((n, t) => n + t.items.filter((i) => i.kind === 'cross-product').length, 0);
+const small = DATA.themes.reduce((n, t) => n + t.items.filter((i) => i.effort === 'S').length, 0);
+const biggest = DATA.themes.slice(0, 3).map((t) => t.title.split(':')[0].toLowerCase());
+document.getElementById('bluf').innerHTML = [
+  `${DATA.total} places where a screen leaves people stuck, in ${DATA.themes.length} repeating patterns.`,
+  `${cross} of them cross products: the fix needs both sides.`,
+  `Biggest patterns: ${biggest.join('; ')}.`,
+  `${small} are small fixes. Most patterns close with one shared rule plus a line on each screen.`,
+  `Recommendation: build the shared fix for every pattern, sync state and licence first.`
+].map((s) => `<li>${esc(s)}</li>`).join('');
+document.getElementById('stats').innerHTML = Object.entries(prodTotals).sort((a, b) => b[1] - a[1])
+  .map(([p, n]) => `<span>${esc(p)} <b>${n}</b></span>`).join('');
+document.getElementById('themes').innerHTML = DATA.themes.map((t) => `
+  <details class="theme" id="t-${t.id}">
+    <summary>
+      <span class="count">${t.count}</span>
+      <div style="min-width:0">
+        <div class="ttl">${esc(t.title)}</div>
+        <div class="prob">${esc(t.problem)}</div>
+        <div class="fix"><b>Proposed fix</b>${esc(t.fix)}</div>
+        <div class="chips">${Object.entries(t.products).map(([p, n]) => `<span class="chip">${esc(p)} ${n}</span>`).join('')}
+          ${Object.entries(t.effort).map(([e, n]) => `<span class="chip">${esc(e)} ${n}</span>`).join('')}</div>
+      </div>
+      <div class="call" data-call="${t.id}" role="group" aria-label="Your call on ${esc(t.title)}">
+        ${OPTIONS.map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="false">${l}</button>`).join('')}
+        <span class="who"></span>
+      </div>
+    </summary>
+    <div class="items">${t.items.map((i) => `
+      <div class="item">
+        <h3>${esc(i.title)}</h3>
+        <div class="meta"><span>${esc(i.direction || i.product)}</span>${i.platform ? `<span>${esc(i.platform)}</span>` : ''}<span>${esc(i.kind)}</span><span>effort ${esc(i.effort)}</span><span>${esc(i.screen)}</span></div>
+        <dl class="kv"><dt>Today</dt><dd>${esc(i.what)}</dd><dt>Risk</dt><dd class="risk">${esc(i.risk)}</dd><dt>Fix</dt><dd>${esc(i.rec)}</dd></dl>
+        <div class="files">${(i.files || []).map(esc).join(' · ')}</div>
+      </div>`).join('')}
+    </div>
+  </details>`).join('');
+
+// Calls: one doc per pattern in `calls` ({screen, choice, by, at}), read by the graph-engineering loop.
+document.querySelectorAll('.call').forEach((g) => g.addEventListener('click', (e) => e.stopPropagation()));
+(async () => {
+  const db = await window.claude?.use?.('db');
+  const user = await window.claude?.use?.('user');
+  const show = (id, doc) => {
+    const g = document.querySelector(`[data-call="${id}"]`);
+    if (!g) return;
+    g.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(doc?.choice === b.dataset.v)));
+    const who = g.querySelector('.who');
+    if (!doc?.by) { who.textContent = ''; return; }
+    user?.profiles([doc.by]).then((ps) => { who.textContent = `${ps?.[doc.by]?.name || 'Someone'} · ${new Date(doc.at).toLocaleDateString()}`; }).catch(() => {});
+  };
+  if (!db) { document.querySelectorAll('.call button').forEach((b) => (b.disabled = true)); return; }
+  db.collection('calls').onSnapshot((snap) => snap.docs.forEach((d) => show(d.id, d.data())));
+  document.querySelectorAll('.call button').forEach((b) => b.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const id = b.closest('.call').dataset.call;
+    const doc = { screen: id, choice: b.dataset.v, by: user ? await user.id() : null, at: Date.now() };
+    show(id, doc);
+    try { await db.doc(`calls/${id}`).set(doc); } catch { b.closest('.call').querySelector('.who').textContent = 'Not saved. Try again.'; }
+  }));
+})();
+</script>

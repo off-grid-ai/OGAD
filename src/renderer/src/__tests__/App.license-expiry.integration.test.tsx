@@ -54,6 +54,9 @@ function installLicenseBoundary({
     isPro: initialIsPro,
     proEntitlementBootstrapEnabled: false,
     proOn,
+    // Day reads its journal on open; main answers an empty day as { text: '', empty: true }.
+    proInvoke: async (channel: string) =>
+      channel === 'crm:day-journal-result' ? { text: '', empty: true } : undefined,
     license: {
       status: async () => status,
       activate: async () => ({ ok: false, reason: 'invalid_credential' }),

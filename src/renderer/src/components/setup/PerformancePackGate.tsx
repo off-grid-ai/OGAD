@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { PerformancePackPanel } from './PerformancePackPanel'
 import type { PerformancePackStatus } from '../../../../shared/performance-pack'
+import { FIRST_RUN_SESSION_KEY } from '../onboarding/picks'
 
 const SKIPPED_KEY = 'performance_pack_intro_complete'
 
@@ -28,7 +29,9 @@ export function PerformancePackGate({
       )
   }, [])
 
-  if (!status) return <>{children}</>
+  // The GPU offer waits until a later launch: the session that finished onboarding goes straight to
+  // its first reply.
+  if (!status || sessionStorage.getItem(FIRST_RUN_SESSION_KEY) === 'true') return <>{children}</>
   if (
     dismissed ||
     ![

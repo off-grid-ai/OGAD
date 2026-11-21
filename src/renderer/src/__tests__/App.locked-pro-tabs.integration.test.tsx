@@ -18,6 +18,7 @@ import { registerProView } from '../bootstrap/proView'
 import { PRO_FEATURES } from '../components/pro/proCatalog'
 import { TooltipProvider } from '../components/ui/tooltip'
 import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
+import { withUtm } from '@offgrid/core/shared/utm'
 import {
   installAppBoundary,
   installAppBrowserBoundary,
@@ -103,7 +104,7 @@ describe('<App/> locked Pro navigation integration', () => {
 
     await user.click(screen.getByRole('button', { name: /Get Pro/ }))
     expect(openExternal).toHaveBeenCalledOnce()
-    expect(openExternal).toHaveBeenCalledWith(PRO_PURCHASE_URL)
+    expect(openExternal).toHaveBeenCalledWith(withUtm(PRO_PURCHASE_URL, 'upgrade-screen'))
 
     await waitFor(() => {
       expect(getRegisteredNav()).toEqual([])

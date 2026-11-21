@@ -94,17 +94,19 @@ const capturedPngs = (): string[] => {
 
 const launch = async (): Promise<void> => {
   const fixture = path.resolve('e2e/fixtures/app120-app122-capture-privacy-native-boundary.cjs')
-  app = await electron.launch({
-    args: [fixture],
-    env: {
-      ...process.env,
-      OFFGRID_USER_DATA: userDataDir,
-      OFFGRID_APP120_APP122_NATIVE_LEDGER: ledgerPath,
-      OFFGRID_APP120_APP122_NATIVE_CONTROL: controlPath,
-      OFFGRID_PRO: '1',
-      NODE_ENV: 'production'
-    }
-  })
+  app = skipGpuSetup(
+    await electron.launch({
+      args: [fixture],
+      env: {
+        ...process.env,
+        OFFGRID_USER_DATA: userDataDir,
+        OFFGRID_APP120_APP122_NATIVE_LEDGER: ledgerPath,
+        OFFGRID_APP120_APP122_NATIVE_CONTROL: controlPath,
+        OFFGRID_PRO: '1',
+        NODE_ENV: 'production'
+      }
+    })
+  )
   page = await app.firstWindow()
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.waitForLoadState('domcontentloaded')
@@ -119,7 +121,7 @@ const expandSidebar = async (): Promise<void> => {
 const gotoCaptureSettings = async (): Promise<void> => {
   await expandSidebar()
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
   const section = page.getByRole('button', { name: /^(All settings\s*)?Capture & processing/ })
   await expect(section).toBeVisible()
   if ((await section.getAttribute('aria-expanded')) !== 'true') await section.click()

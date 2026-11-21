@@ -37,11 +37,32 @@ CONCEPTS = {
   'todos':     ('To-dos and people', 'feature', r'(todo|(^|[/-])crm|people|entity|briefing|identity|dossier)'),
   'agents':    ('Agents', 'feature', r'(computer-use|web-use|automation|operator|(^|[/-])agent|(^|[/-])use([/-]|$)|action-pipeline)'),
   'sync':      ('Devices and sync', 'feature', r'((^|[/-])sync|pair|mesh|transfer|discovery|companion)'),
-  'models':    ('Model library', 'infra', r'(model-(download|manager|browser|catalog|residency|picks)|download|catalog|hugging-?face|huggingface|active-model|engine-pack|device-picks|best-settings|fastest-settings|recommend|boost-promo)'),
+  'models':    ('Model library', 'infra', r'(model-(download|manager|browser|catalog|residency|picks)|download|catalog|hugging-?face|huggingface|active-model|engine-pack|device-picks|best-settings|fastest-settings|recommend|boost-promo|bundled-model|asset-pack|ai-pack|arriving-chat-model)'),
   'licensing': ('Pro licensing', 'infra', r'(licens|keygen|entitlement|fingerprint|paywall|purchase|revenuecat|checkout|pro-pricing|pro-detail|pro-unlock|get-pro)'),
-  'analytics': ('Analytics', 'infra', r'(analytics|session-tally|usage-snapshot)'),
+  'analytics': ('Analytics', 'infra', r'(analytics|session-tally|usage-snapshot|(^|[/-])utm([/-]|\.|$))'),
   'guide': ('What it does for you', 'infra', r'(feature-guide|guide-ask|guide-knowledge|guide-media|product-guide|(?<!mcp-)guide-screen|guide-topic|guide-picture|use-guide-action)'),
+  'share':     ('Share loop', 'infra', r'(share-?card|media-?share)'),
+  'rating':    ('Review prompt', 'infra', r'(share-?prompt|in-app-review|rating-(ask|prompt)|good-reply-run)'),
+  'language':  ('App language', 'infra', r'((^|[/-])i18n([/-]|$)|locale-store|app-language|language-screen)'),
+  'onboarding': ('First run: what you want, which ones, how it works', 'infra', r'^(?!articles/).*((?<!mcp-)onboarding|auto-setup|packages/features/src)'),
 }
+
+# Which consumer products a concept must exist in. A feature says so itself in shared features.json
+# (`platforms`); a concept that is not a feature (onboarding, the guide, analytics...) belongs in every product
+# a feature runs on, unless it is narrowed here with the reason. The map used to list only where code already
+# was, so a product with none (the extension's first run) never got a step and nobody saw the gap.
+PRODUCTS = ['desktop', 'mobile', 'extension']
+NARROW = {'share': (['mobile'], 'the mark says "on my phone"; desktop and the extension have no share loop'),
+          'rating': (['mobile'], 'store review prompts exist only in the phone stores'),
+          'models': (['desktop', 'mobile'], 'the extension runs on the computer app\'s models')}
+
+def expected(k, kind, feats):
+    if kind == 'feature' and k in feats:
+        pl = feats[k].get('platforms', {})
+        return [a for a in PRODUCTS if pl.get(a, 'no') != 'no']
+    if k in NARROW:
+        return NARROW[k][0]
+    return [a for a in PRODUCTS if any(f.get('platforms', {}).get(a, 'no') != 'no' for f in feats.values())] or PRODUCTS
 
 SKIP = re.compile(r'(^|/)(docs|outputs|\.artifacts|node_modules|dist|coverage|generated|\.github|scripts|fastlane|patches|vendor|Pods|\.vscode|test-results|marketing|demo-gifs|resources|preview-ui|tools|_includes|_layouts)(/|$)|\.(png|jpe?g|gif|webp|svg|mp4|mov|ttf|otf|woff2?|lock|ico|icns|car|mp3|wav|pdf|zip|bin|onnx|txt|md)$|package(-lock)?\.json$|tsconfig|eslint|vite|vitest|playwright|knip|jest|babel|metro')
 TEST = re.compile(r'(__tests__|\.test\.|\.spec\.|(^|/)e2e/|integration-tests/|swift-tests/|(^|/)test/)')
@@ -138,8 +159,11 @@ def build(root):
     out = {'c': {}, 'col': {k: {'n': len(v), 'files': sorted(v, key=len)[:5]} for k, v in pairs.items() if len(v) >= 2}}
     for k, (name, kind, _) in CONCEPTS.items():
         f = feats.get(k, {})
+        cs = {ck: {'n': len(v), 'f': (v[:12] if ck.endswith('checklist') else sorted(v, key=len)[:8]), 'all': v} for ck, v in cells[k].items()}
+        apps = expected(k, kind, feats)
+        has = lambda a: any(cs.get(f'{s}|{l}', {}).get('n') for s in (a, f'{a}-pro') for l in ('owner', 'engine', 'logic', 'view'))
         out['c'][k] = {'name': name, 'kind': kind, 'does': f.get('does', ''), 'group': f.get('group', 'infra'),
-                       'cells': {ck: {'n': len(v), 'f': (v[:12] if ck.endswith('checklist') else sorted(v, key=len)[:8]), 'all': v} for ck, v in cells[k].items()}}
+                       'apps': apps, 'missing': [a for a in apps if not has(a)], 'cells': cs}
     return out
 
 SURF = [('shared', 'shared'), ('desktop', 'desktop'), ('desktop-pro', 'desktop/pro'), ('mobile', 'mobile'), ('mobile-pro', 'mobile/pro'), ('extension', 'extension'), ('website', 'website')]
@@ -169,6 +193,8 @@ def plan(m, k):
     for s in APPS:
         fl = files(s, 'logic') + files(s, 'view') + (files(s, 'owner') if s == 'desktop' else [])
         if fl: add(f'Adapt {S[s]} ({len(fl)} files)', gate(s), fl)
+    for a in c.get('missing', []):
+        add(f'Build it on {S[a]}: nothing there yet', 'or write down why it does not apply (NARROW in scan.py)', [])
     data = [f for s, _ in SURF for f in files(s, 'data')]
     if data: add('Update catalog rows', 'check: catalog tests', data)
     if n(m, k, 'website', 'copy'): add(f"Review website copy ({n(m, k, 'website', 'copy')} pages)", 'check: page build', files('website', 'copy'))
@@ -204,7 +230,8 @@ def main():
         print(plan(m, key))
     if a.list or not (a.plan or a.html or a.json):
         for k in sorted(m['c'], key=lambda k: -places(m, k)):
-            print(f"{k:10} {m['c'][k]['name']:20} {places(m, k)} places")
+            gap = m['c'][k]['missing']
+            print(f"{k:10} {m['c'][k]['name']:20} {places(m, k)} places" + (f"  MISSING on {', '.join(gap)}" if gap else ''))
     slim = {'c': {k: {**v, 'cells': {ck: {'n': cv['n'], 'f': cv['f']} for ck, cv in v['cells'].items()}} for k, v in m['c'].items()}, 'col': m['col']}
     if a.json: json.dump(slim, open(a.json, 'w'), indent=1)
     if a.html:

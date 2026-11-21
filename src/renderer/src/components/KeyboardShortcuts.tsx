@@ -41,7 +41,7 @@ export function KeyboardShortcuts(): React.ReactElement {
   return (
     <div className="space-y-3">
       {/* Rows sit inside a SettingsCard: quiet list rows, no nested borders. */}
-      <AnimatedGroup as="ul" asChild="li" preset="blur-slide" className="-mx-1 space-y-0.5">
+      <AnimatedGroup as="ul" asChild="li" preset="slide" className="-mx-1 space-y-0.5">
         {rows.map((s) => (
           <ListRow
             key={s.action}

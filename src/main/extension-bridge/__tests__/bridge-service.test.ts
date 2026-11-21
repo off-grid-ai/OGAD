@@ -293,10 +293,16 @@ describe('pairing', () => {
     expect(MAX_BROWSERS).toBe(10)
   })
 
-  it('serves only its public key unauthenticated', async () => {
+  it('serves only its public key and whether Pro is on, unauthenticated', async () => {
     const s = await setup()
     const info = await s.bridge.info()
-    expect(info.body).toEqual({ v: 1, publicKey: await exportPublicKey(s.desk.publicKey) })
+    expect(info.body).toEqual({
+      v: 1,
+      publicKey: await exportPublicKey(s.desk.publicKey),
+      pro: true
+    })
+    const free = await setup({ features: FREE })
+    expect((await free.bridge.info()).body).toMatchObject({ pro: false })
   })
 })
 

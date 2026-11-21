@@ -5,12 +5,13 @@
 # and remux or transcode meeting recordings (Opus in WebM, AAC in MP4, VideoToolbox H.264).
 #   scripts/build-ffmpeg-macos.sh [work-dir]
 set -euo pipefail
-FFMPEG_REF="${FFMPEG_REF:-n9.0.2}"
-OPUS_REF="${OPUS_REF:-v1.6.1}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Pinned in resources/engine-pins.json (`ffmpeg`); the engine nightly reports a newer release.
+FFMPEG_REF="${FFMPEG_REF:-$(node -p "require('$ROOT/resources/engine-pins.json').ffmpeg.ref")}"
+OPUS_REF="${OPUS_REF:-$(node -p "require('$ROOT/resources/engine-pins.json').ffmpeg.opusRef")}"
 TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"
 # A dedicated folder under the given work dir: only it is wiped, never the caller's other files.
 WORK="${1:-${TMPDIR:-/tmp}}/offgrid-ffmpeg-build"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${OFFGRID_FFMPEG_OUT:-$ROOT/resources/bin}"
 JOBS="$(sysctl -n hw.ncpu)"
 

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { skipGpuSetup } from './helpers/launch'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -51,20 +52,22 @@ test('AI activity uses the window, filters records, and keeps the main window op
     JSON.stringify({ image: IMAGE_MODEL })
   )
   const gatewayPort = await freePort()
-  const app = await playwright._electron.launch({
-    args: [process.env.OFFGRID_AI_ACTIVITY_APP ?? '.'],
-    env: {
-      ...process.env,
-      OFFGRID_USER_DATA: profile,
-      OFFGRID_BIN_DIR: bin,
-      OFFGRID_GATEWAY_PORT: String(gatewayPort),
-      OFFGRID_E2E_ISOLATED_INSTANCE: '1',
-      OFFGRID_E2E_HEADLESS: '1',
-      OFFGRID_PRO: '0',
-      OFFGRID_SEED: '',
-      NO_PROXY: '127.0.0.1,localhost'
-    }
-  })
+  const app = skipGpuSetup(
+    await playwright._electron.launch({
+      args: [process.env.OFFGRID_AI_ACTIVITY_APP ?? '.'],
+      env: {
+        ...process.env,
+        OFFGRID_USER_DATA: profile,
+        OFFGRID_BIN_DIR: bin,
+        OFFGRID_GATEWAY_PORT: String(gatewayPort),
+        OFFGRID_E2E_ISOLATED_INSTANCE: '1',
+        OFFGRID_E2E_HEADLESS: '1',
+        OFFGRID_PRO: '0',
+        OFFGRID_SEED: '',
+        NO_PROXY: '127.0.0.1,localhost'
+      }
+    })
+  )
   const post = async (route: string, body: unknown): Promise<void> => {
     const response = await fetch(`http://127.0.0.1:${gatewayPort}${route}`, {
       method: 'POST',

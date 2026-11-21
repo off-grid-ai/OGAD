@@ -7,6 +7,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import http from 'http'
+import crypto from 'crypto'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -39,6 +40,7 @@ let directChatReply: string | null = null
 let startModelServer: typeof import('../model-server').startModelServer
 let stopModelServer: typeof import('../model-server').stopModelServer
 const previousDataDir = process.env.OFFGRID_DATA_DIR
+const previousCatalogUrl = process.env.OFFGRID_MODEL_CATALOG_URL
 
 function installLlamaBoundary(source: string): string {
   const binRoot = path.join(TMP_DIR, 'test-bin')
@@ -53,10 +55,51 @@ function installLlamaBoundary(source: string): string {
   return binRoot
 }
 
-function fixtureDownload(url: string): Response {
+function fixtureBytes(fileName: string): Buffer {
   const bytes = Buffer.alloc(2048, 7)
-  if (/\.gguf(?:\?|$)/i.test(url)) bytes.write('GGUF')
-  return new Response(bytes, {
+  if (/\.gguf(?:\?|$)/i.test(fileName)) bytes.write('GGUF')
+  return bytes
+}
+
+// The catalog this rig publishes: the bundled one, with each file's checksum set to the
+// bytes the fixture download serves, so the real checksum gate passes for the right bytes.
+const FIXTURE_CATALOG_URL = 'https://catalog.fixture.invalid/models.json'
+let fixtureCatalog: string | undefined
+
+async function publishFixtureCatalog(): Promise<void> {
+  const remote = await import('../models/remote-catalog')
+  const models = remote.baseCatalogModels().map((model) => ({
+    ...model,
+    files: model.files.map((file) =>
+      file.sha256
+        ? {
+            ...file,
+            sha256: crypto.createHash('sha256').update(fixtureBytes(file.name)).digest('hex')
+          }
+        : file
+    )
+  }))
+  fixtureCatalog = JSON.stringify({
+    schemaVersion: 1,
+    updatedAt: '2099-01-01',
+    sections: { models }
+  })
+  process.env.OFFGRID_MODEL_CATALOG_URL = FIXTURE_CATALOG_URL
+  await remote.initRemoteModelCatalog(TMP_DIR, () => {})
+  // Later tests publish the same catalog again, which the check reports as unchanged.
+  expect((await remote.checkForNewModels()).status).not.toBe('failed')
+  expect(remote.remoteCatalogModels().length).toBe(models.length)
+}
+
+function fixtureDownload(url: string): Response {
+  if (url === FIXTURE_CATALOG_URL && fixtureCatalog) {
+    return new Response(fixtureCatalog, {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  }
+  const bytes = fixtureBytes(new URL(url).pathname)
+  return new Response(new Uint8Array(bytes), {
     status: 200,
     headers: { 'content-length': String(bytes.length) }
   })
@@ -156,6 +199,8 @@ afterAll(async () => {
   fs.rmSync(TMP_DIR, { recursive: true, force: true })
   if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = previousDataDir
+  if (previousCatalogUrl === undefined) delete process.env.OFFGRID_MODEL_CATALOG_URL
+  else process.env.OFFGRID_MODEL_CATALOG_URL = previousCatalogUrl
 })
 
 describe('model gateway chat streaming', () => {
@@ -499,6 +544,7 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)))`
         ? hostFetch(input, init)
         : Promise.resolve(fixtureDownload(url))
     })
+    await publishFixtureCatalog()
     directChatReply = 'manual model ready'
 
     const [{ llm }, setup, manager] = await Promise.all([
@@ -552,6 +598,7 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)))`
         ? hostFetch(input, init)
         : Promise.resolve(fixtureDownload(url))
     })
+    await publishFixtureCatalog()
 
     const [{ llm }, setup, manager] = await Promise.all([
       import('../llm'),
@@ -621,6 +668,7 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)))`
         ? hostFetch(input, init)
         : Promise.resolve(fixtureDownload(url))
     })
+    await publishFixtureCatalog()
 
     const [{ llm }, setup] = await Promise.all([import('../llm'), import('../setup')])
     try {

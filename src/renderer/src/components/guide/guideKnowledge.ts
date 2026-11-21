@@ -11,11 +11,13 @@ import {
   SpeakerHighIcon
 } from '@phosphor-icons/react'
 import type { ComponentType } from 'react'
+import type { OtherProduct } from '@offgrid/features'
 import {
   DESKTOP_BEYOND_GROUP,
-  GUIDE_LINKS,
   guideAnswerParts,
   guideFlowAnswer,
+  guideFlowAnswerById,
+  guideLastFlowId,
   guideGrounding as sharedGuideGrounding,
   guideStarterAnswer as sharedGuideStarterAnswer,
   guideTopicsFor,
@@ -24,6 +26,7 @@ import {
   type GuideWhere
 } from '@offgrid/models'
 import { FEATURE_GROUPS, PRO_FEATURES, featureSupportsPlatform } from '../pro/proCatalog'
+import { FEATURE_PARTS, tierOf } from '@offgrid/features'
 import type { DevicePlatform } from '@offgrid/core/shared/device'
 import type { ViewMode } from '@renderer/lib/view-modes'
 import { GUIDE_MEDIA, type GuideMedia } from './guideMedia'
@@ -49,9 +52,11 @@ export interface GuideTopic {
   pro: boolean
   /** The screen in this app that opens it. */
   route?: ViewMode
-  /** The page to get it, for things that live outside this app. */
-  url?: string
+  /** The other Off Grid AI app it lives in: its action is the shared Get / Open <app> rule. */
+  get?: OtherProduct
   media?: GuideMedia
+  /** Not on this computer's platform yet (shown only where a pick asks for it). */
+  notHere?: boolean
 }
 
 export const GUIDE_GROUPS = [...FEATURE_GROUPS, DESKTOP_BEYOND_GROUP] as const
@@ -78,8 +83,14 @@ const ROUTES: Record<string, ViewMode> = {
   connectors: 'connectors'
 }
 
-/** Every topic this computer can show, in page order within each group. */
-export function guideTopics(platform: DevicePlatform): GuideTopic[] {
+/**
+ * Every topic this computer can show, in page order within each group. With `unsupported`, Pro
+ * features this platform does not have yet come too, marked `notHere`, so a pick never vanishes.
+ */
+export function guideTopics(
+  platform: DevicePlatform,
+  opts: { unsupported?: boolean } = {}
+): GuideTopic[] {
   const shared: GuideTopic[] = guideTopicsFor('desktop').map((t) => ({
     id: t.id,
     label: t.label,
@@ -92,23 +103,33 @@ export function guideTopics(platform: DevicePlatform): GuideTopic[] {
     where: t.where,
     pro: t.pro,
     route: ROUTES[t.id],
-    url: t.get ? GUIDE_LINKS[t.get] : undefined
+    get: t.get
   }))
-  const pro: GuideTopic[] = PRO_FEATURES.filter((f) => featureSupportsPlatform(f, platform)).map(
-    (f) => ({
-      id: f.route,
-      label: f.label,
-      icon: f.icon,
-      tagline: f.tagline,
-      description: f.description,
-      highlights: f.highlights,
-      group: f.group,
-      where: 'computer',
-      pro: true,
-      route: f.route as ViewMode
-    })
-  )
+  const pro: GuideTopic[] = PRO_FEATURES.filter(
+    (f) => opts.unsupported || featureSupportsPlatform(f, platform)
+  ).map((f) => ({
+    id: f.route,
+    label: f.label,
+    icon: f.icon,
+    tagline: f.tagline,
+    description: f.description,
+    highlights: f.highlights,
+    group: f.group,
+    where: 'computer',
+    pro: needsPro(f.route),
+    route: f.route as ViewMode,
+    notHere: !featureSupportsPlatform(f, platform) || undefined
+  }))
   return [...shared, ...pro].map((t) => ({ ...t, media: GUIDE_MEDIA[t.id] }))
+}
+
+/**
+ * Whether a screen in the Pro catalog needs Pro, read from the shared feature parts that show it.
+ * Web Use and Computer Use live in the catalog but are free; a screen no part names stays Pro.
+ */
+export function needsPro(route: string): boolean {
+  const parts = FEATURE_PARTS.filter((p) => p.guide.desktop === route)
+  return parts.length === 0 || parts.some((p) => tierOf(p, 'desktop') === 'pro')
 }
 
 type Turn = { role: 'user' | 'assistant'; content: string }
@@ -129,7 +150,10 @@ export function guideGrounding(
   platform: DevicePlatform,
   vector?: number[]
 ): string {
-  return sharedGuideGrounding('desktop', topics, history, { platform: flowPlatform(platform), vector })
+  return sharedGuideGrounding('desktop', topics, history, {
+    platform: flowPlatform(platform),
+    vector
+  })
 }
 
 /** A starter question's answer, built by code with no model. Null for anything else. */
@@ -146,9 +170,25 @@ export function guideStepsAnswer(
   question: string,
   topics: GuideTopic[],
   platform: DevicePlatform,
-  vector?: number[]
+  vector?: number[],
+  history: Turn[] = []
 ): string | null {
-  return guideFlowAnswer('desktop', question, topics, { platform: flowPlatform(platform), vector })
+  // A follow-up ("what if we're not on the same Wi-Fi?") is read against the flow just shown.
+  const after = guideLastFlowId(history.filter((t) => t.role === 'assistant').map((t) => t.content))
+  return guideFlowAnswer('desktop', question, topics, {
+    platform: flowPlatform(platform),
+    vector,
+    after
+  })
+}
+
+/** A flow's answer by its id (a pick or a follow-up), with the follow-ups this computer can do. */
+export function guideFlowStepsById(
+  id: string,
+  topics: GuideTopic[],
+  platform: DevicePlatform
+): string | null {
+  return guideFlowAnswerById('desktop', id, topics, flowPlatform(platform))
 }
 
 export type AnswerPart = GuideAnswerPart<GuideTopic>

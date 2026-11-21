@@ -111,9 +111,9 @@ function AttachmentPreviewComponent({
     <AnimatePresence mode="popLayout" initial={false}>
       <motion.div
         key={`${content.renderer ?? 'text'}:${content.path ?? content.title}`}
-        initial={{ opacity: 0, y: 8, filter: 'blur(6px)' }}
-        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-        exit={{ opacity: 0, y: -4, filter: 'blur(6px)' }}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -4 }}
         transition={{ duration: 0.4, ease }}
         // A PDF fills the panel's height; the viewer fits each page to it.
         className={
