@@ -1197,6 +1197,12 @@ export function setupIPC(): void {
   ipcMain.handle('setup:cancel-download', (_e, modelId: string) =>
     import('./setup').then((setup) => setup.cancelSetupDownload(modelId))
   )
+  ipcMain.handle('setup:quick-start', async () => {
+    const { quickStart } = await import('./setup')
+    return quickStart((p) =>
+      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('setup:progress', p))
+    )
+  })
   ipcMain.handle('setup:auto-configure', async (_e, selectedModelIds?: string[], mode?: string) => {
     const { autoConfigure } = await import('./setup')
     return autoConfigure(

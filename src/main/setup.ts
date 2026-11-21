@@ -488,6 +488,103 @@ async function downloadSetupEmbedding(item: SetupItem, emit: SetupProgressCb): P
 }
 
 /** "Configure for me": pick → download (if needed) → activate → start → verify. */
+/** Downloads one setup item with progress. Returns the error, or null when it is on disk. */
+async function downloadItem(
+  item: Pick<SetupItem, 'id' | 'name'>,
+  emit: SetupProgressCb
+): Promise<string | null> {
+  const report = (p: Partial<SetupProgress>): void =>
+    emit({
+      ...p,
+      phase: 'download',
+      message: `Downloading ${item.name}...`,
+      modelId: item.id,
+      modelName: item.name
+    })
+  report({ percent: 0 })
+  const result = await downloadModel(item.id, (p) =>
+    report({
+      percent: p.percent,
+      downloadedMB: p.downloadedMB,
+      totalMB: p.totalMB,
+      downloadedBytes: p.downloadedBytes,
+      totalBytes: p.totalBytes,
+      bytesPerSecond: p.bytesPerSecond
+    })
+  )
+  return result.success ? null : (result.error ?? 'Download failed.')
+}
+
+/** Makes a downloaded chat model the active one and starts it. Returns the error, or null. */
+async function activateChat(
+  item: Pick<SetupItem, 'id' | 'name'>,
+  emit: SetupProgressCb
+): Promise<string | null> {
+  emit({ phase: 'activate', message: `Activating ${item.name}...`, modelId: item.id })
+  const result = await setActiveModel(item.id)
+  if (!result.success) return result.error ?? 'Activation failed.'
+  // A fresh install picks the fastest settings for this hardware before its first launch.
+  await import('./best-settings')
+    .then((m) => m.ensureBestSettings())
+    .catch((error: unknown) => console.warn('[best-settings] setup check failed', error))
+  emit({ phase: 'start', message: 'Starting the local model server...', modelId: item.id })
+  await llm.restart()
+  emit({ phase: 'verify', message: 'Verifying...', modelId: item.id })
+  if (!(await pingJson(llm.getPort(), '/health', 3000))) {
+    return `${item.name} is installed, but the local server is not ready.`
+  }
+  return null
+}
+
+/** The first chat model a new person gets on "Set up my models": LFM3 1.7B. A 1.1 GB download, so
+ *  chat works in minutes, and still smart (reasoning and tool use). The model sized to this computer
+ *  stays one click away in Set up your local AI. Mobile starts on the same model. */
+export const STARTER_CHAT_MODEL_ID = 'LiquidAI/LFM3-1.7B-GGUF'
+
+/** Quick start: download the starter chat model and make it active. Does nothing when a chat model is
+ *  already active (local or remote), so it never replaces a choice someone made. */
+export async function quickStart(
+  onProgress?: SetupProgressCb
+): Promise<{ success: boolean; error?: string; modelId?: string; modelName?: string }> {
+  const emit = (p: SetupProgress): void => {
+    try {
+      onProgress?.(p)
+    } catch {
+      /* ignore */
+    }
+  }
+  if (getActiveModalities().text) return { success: true }
+  // The e2e suite walks onboarding many times a run: it never downloads 1.1 GB unless a spec asks.
+  if (process.env.OFFGRID_E2E_HEADLESS === '1' && process.env.OFFGRID_E2E_QUICK_START !== '1') {
+    return { success: true }
+  }
+  const entry = (await desktopCatalog()).find((m) => m.id === STARTER_CHAT_MODEL_ID)
+  if (!entry) return { success: false, error: 'The starter model is not in the catalog.' }
+  const item = { id: entry.id, name: entry.name }
+  try {
+    if (!(await listInstalled()).includes(item.id)) {
+      const error = await downloadItem(item, emit)
+      if (error) {
+        emit({ phase: 'error', message: error, modelId: item.id })
+        return { success: false, error, modelId: item.id }
+      }
+    }
+    // Someone may have picked a model while the starter downloaded: keep theirs.
+    if (getActiveModalities().text) return { success: true }
+    const error = await activateChat(item, emit)
+    if (error) {
+      emit({ phase: 'error', message: error, modelId: item.id })
+      return { success: false, error, modelId: item.id }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Setup failed.'
+    emit({ phase: 'error', message, modelId: item.id })
+    return { success: false, error: message, modelId: item.id }
+  }
+  emit({ phase: 'done', message: `${item.name} is ready.`, modelId: item.id, modelName: item.name })
+  return { success: true, modelId: item.id, modelName: item.name }
+}
+
 export async function autoConfigure(
   onProgress?: SetupProgressCb,
   selectedModelIds?: string[],
@@ -542,45 +639,16 @@ export async function autoConfigure(
         continue
       }
       if (!(await listInstalled()).includes(item.id)) {
-        const report = (p: Partial<SetupProgress>): void =>
-          emit({
-            ...p,
-            phase: 'download',
-            message: `Downloading ${item.name}...`,
-            modelId: item.id,
-            modelName: item.name
-          })
-        report({ percent: 0 })
-        const result = await downloadModel(item.id, (p) =>
-          report({
-            percent: p.percent,
-            downloadedMB: p.downloadedMB,
-            totalMB: p.totalMB,
-            downloadedBytes: p.downloadedBytes,
-            totalBytes: p.totalBytes,
-            bytesPerSecond: p.bytesPerSecond
-          })
-        )
+        const error = await downloadItem(item, emit)
         // Stop on cancellation or failure. Never continue into another large pack.
-        if (!result.success) return fail(result.error ?? 'Download failed.', item.id)
+        if (error) return fail(error, item.id)
       }
 
       if (item.kind === 'chat') {
         // Preserve local and remote choices, including choices made during download.
         if (getActiveModalities().text) continue
-        emit({ phase: 'activate', message: `Activating ${item.name}...`, modelId: item.id })
-        const result = await setActiveModel(item.id)
-        if (!result.success) return fail(result.error ?? 'Activation failed.', item.id)
-        // A fresh install picks the fastest settings for this hardware before its first launch.
-        await import('./best-settings')
-          .then((m) => m.ensureBestSettings())
-          .catch((error: unknown) => console.warn('[best-settings] setup check failed', error))
-        emit({ phase: 'start', message: 'Starting the local model server...', modelId: item.id })
-        await llm.restart()
-        emit({ phase: 'verify', message: 'Verifying...', modelId: item.id })
-        if (!(await pingJson(llm.getPort(), '/health', 3000))) {
-          return fail(`${item.name} is installed, but the local server is not ready.`, item.id)
-        }
+        const error = await activateChat(item, emit)
+        if (error) return fail(error, item.id)
         activatedChat = item
       } else {
         const modality = modalityForKind(item.kind)
