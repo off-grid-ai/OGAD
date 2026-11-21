@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { app } from 'electron'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { floatPcmWav } from '@offgrid/speech'
 import type { TranscriptionService } from '../transcription/types'
 
 vi.mock('electron', () => ({ app: { getPath: vi.fn() }, ipcMain: { handle: vi.fn() } }))
@@ -131,5 +132,34 @@ describe('voice transcription IPC request lifecycle', () => {
       )
     ).resolves.toBe('hello from the native runtime')
     expect(fs.existsSync(inputPath)).toBe(false)
+  })
+
+  it('sends live-transcription WAVs to the engine without a decode, and decodes anything else', async () => {
+    const seen: Array<{ ext: string; alreadyWav16k: boolean | undefined }> = []
+    const service: TranscriptionService = {
+      isAvailable: () => true,
+      async transcribe(input, options) {
+        seen.push({ ext: path.extname(input.path), alreadyWav16k: options?.alreadyWav16k })
+        return { text: 'heard' }
+      }
+    }
+    setupVoiceTranscriptionIpc(host, async () => service)
+    const sender = new Sender(31)
+    const live = floatPcmWav(new Float32Array(1600), 16_000)
+    const other = floatPcmWav(new Float32Array(4800), 48_000)
+    await host.invoke('voice:transcribe', event(sender), live, 'wav', 'live-1')
+    await host.invoke('voice:transcribe', event(sender), other, 'wav', 'live-2')
+    await host.invoke(
+      'voice:transcribe',
+      event(sender),
+      new Uint8Array([1, 2, 3]),
+      'webm',
+      'clip-1'
+    )
+    expect(seen).toEqual([
+      { ext: '.wav', alreadyWav16k: true },
+      { ext: '.wav', alreadyWav16k: false },
+      { ext: '.webm', alreadyWav16k: false }
+    ])
   })
 })
