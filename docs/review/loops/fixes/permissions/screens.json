@@ -143,5 +143,19 @@
     "what": "Replay keeps its capture control; a failed read now says why with Try again (not shown: the read worked).",
     "file": "desktop-replay-capture.png",
     "step": "load-failure"
+  },
+  {
+    "id": "ext-fill-shortcut-answers",
+    "name": "Fill login and Generate password shortcuts",
+    "group": "Extension · Vault",
+    "what": "The shortcut and the right-click item always answer. One login fills. Anything else (vault locked, not paired, Desktop closed, no saved login, a refused fill) opens the in-field menu with its line and button; a page that cannot be filled opens the panel vault, which says why and offers Allow on all sites (was nothing at all).",
+    "file": null,
+    "step": "fill-shortcut",
+    "shot": null,
+    "steps": [
+      "Lock the vault in Desktop.",
+      "On a login page, click the username field and press Ctrl+Shift+L (Cmd+Shift+L on a Mac).",
+      "The menu under the field says \"Your Off Grid AI vault is locked.\" with Unlock in Off Grid AI Desktop."
+    ]
   }
 ]

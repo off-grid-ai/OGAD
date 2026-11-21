@@ -153,5 +153,99 @@
     "steps": [
       "Sync > a paired phone > Send model; send one the phone already has."
     ]
+  },
+  {
+    "id": "ext-chat-no-model",
+    "name": "Chat: no model",
+    "group": "Extension · Chat",
+    "what": "With no model the header pill \"No model\" opens Models, and a line above the composer says \"No model is active. Choose one in Models, then try again.\" with Choose model (was a grey pill, a dead Send and no step; a Desktop with no model also read as \"Offline\").",
+    "file": "ext-chat-no-model.png",
+    "step": "chat-no-model",
+    "shot": "ext-chat-no-model.png",
+    "steps": [
+      "Pair the browser with a Desktop that has no active text model.",
+      "Open the Off Grid AI panel.",
+      "Press Choose model, or the No model pill: Models opens on Text."
+    ]
+  },
+  {
+    "id": "ext-composer-needs",
+    "name": "Composer: a mode the models cannot run",
+    "group": "Extension · Chat",
+    "what": "Create image, Agent, Attach screenshot and the mic stay in place and say what they need (\"Needs an image model.\", \"Needs a model that can use tools.\", \"Needs a model that can see pictures.\", \"Voice input. Needs a speech model.\"). A press opens Models on the right tab (Agent was greyed and dead; screenshot and mic were missing).",
+    "file": "ext-composer-needs.png",
+    "step": "composer-needs",
+    "shot": "ext-composer-needs.png",
+    "steps": [
+      "Use a Desktop with only a text model.",
+      "Open the panel and press + in the composer.",
+      "Press \"Create image\": Models opens on Image. The mic with a slash opens Models on Transcription."
+    ]
+  },
+  {
+    "id": "ext-settings-desktop-away",
+    "name": "Settings tabs: Desktop closed",
+    "group": "Extension · Settings",
+    "what": "A settings tab that gets no answer says the real reason: not paired shows the pairing card in place; a closed Desktop says \"Off Grid AI Desktop is not running. Open it and its text settings show here.\" with Open and Get, and fills in by itself (was \"Pair with Off Grid AI Desktop in Settings > Desktop\" to a paired browser).",
+    "file": null,
+    "step": "settings-no-answer",
+    "shot": null,
+    "steps": [
+      "Pair the browser, then quit Off Grid AI Desktop.",
+      "Open the panel, Settings, any tab from Text to Connectors.",
+      "Start Desktop again: the rows appear without a reload."
+    ]
+  },
+  {
+    "id": "ext-models-retry",
+    "name": "Models: error and empty",
+    "group": "Extension · Models",
+    "what": "A failed read shows its line with a Try again button and the list re-reads when the panel gets focus. An empty kind keeps \"Download one in its Models screen\" and adds Open Off Grid AI Desktop.",
+    "file": null,
+    "step": "models-error",
+    "shot": null,
+    "steps": [
+      "Open Models with Desktop closed: the line has Try again.",
+      "Open a kind with no models: the note has the Open link."
+    ]
+  },
+  {
+    "id": "ext-writing-failure-step",
+    "name": "Writing: a check or rewrite that fails",
+    "group": "Extension · Writing",
+    "what": "The failure notice has its step: no model has Choose model (opens Models), not paired has Pair with desktop, a closed Desktop has Open Off Grid AI, anything else has Try again (was the line alone).",
+    "file": null,
+    "step": "writing-failure",
+    "shot": null,
+    "steps": [
+      "Open Writing with no text model active and press Rewrite.",
+      "The notice says rewrites need a model, with Choose model."
+    ]
+  },
+  {
+    "id": "ext-desktop-pointers",
+    "name": "Notes that say \"do it in Desktop\"",
+    "group": "Extension · Settings",
+    "what": "Each note has an Open Off Grid AI Desktop link: no remote servers, no image model, add accounts, edit the system prompt, export the vault, download a model.",
+    "file": null,
+    "step": "desktop-pointers",
+    "shot": null,
+    "steps": [
+      "Open Settings > Remote with no servers saved, or Vault > Import and export.",
+      "Press Open Off Grid AI Desktop."
+    ]
+  },
+  {
+    "id": "ext-vault-update-desktop",
+    "name": "Vault: Desktop too old",
+    "group": "Extension · Vault",
+    "what": "\"Update Off Grid AI Desktop to use your vault here.\" has Open and Get Off Grid AI Desktop (the download page is the update).",
+    "file": null,
+    "step": "update-desktop",
+    "shot": null,
+    "steps": [
+      "Pair with a Desktop too old for the browser vault.",
+      "Open Vault in the panel."
+    ]
   }
 ]
