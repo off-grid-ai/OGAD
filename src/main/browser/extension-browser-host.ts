@@ -305,7 +305,20 @@ async function runInBrowser(
         await rm(taskScreenshotPath(taskId, `frame-${frames - 2}`, 'jpg'), { force: true })
       }
     }
-    await showFrame().catch(() => undefined)
+    // A frame never holds the task up: Chrome answers a screenshot of a hidden or background tab
+    // only once it paints, which can be never. Found in the native test: the task stopped after
+    // its first read. One capture at a time; a step that lands while one is out skips its frame.
+    let framing = false
+    const requestFrame = (): void => {
+      if (framing) return
+      framing = true
+      void showFrame()
+        .catch(() => undefined)
+        .finally(() => {
+          framing = false
+        })
+    }
+    requestFrame()
     // Planning can take half a minute on a local model; say so instead of looking idle.
     if (!checkpoint?.plan) {
       reportTaskProgress({
@@ -342,7 +355,7 @@ async function runInBrowser(
       takeGuidance: () => guidance.splice(0),
       onStep: recordStep,
       onPhase: (phaseId) => recordStep(encodeTaskPhase(phaseId)),
-      onObservation: () => showFrame().catch(() => undefined),
+      onObservation: async () => requestFrame(),
       onProgress: (currentStep, phase, action) =>
         reportTaskProgress({
           taskId,
