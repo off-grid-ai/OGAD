@@ -97,7 +97,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
     if (open) localStorage.setItem(ONBOARDING_OPEN_KEY, open)
     // The first chat model starts downloading now, so the first reply is minutes away, not an hour.
     sessionStorage.setItem(FIRST_RUN_SESSION_KEY, 'true')
-    void Promise.resolve(window.api.setupQuickStart?.()).catch((error: unknown) =>
+    void Promise.resolve(window.api.setupQuickStart()).catch((error: unknown) =>
       console.warn('[quick-start] could not start', error)
     )
     // Either answer counts as asked, so no prompt asks again soon.

@@ -63,7 +63,7 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
   } | null>(null)
   useEffect(
     () =>
-      window.api.onSetupProgress?.((data) => {
+      window.api.onSetupProgress((data) => {
         const p = data as {
           phase?: string
           message?: string
