@@ -163,6 +163,19 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     docsUrl: 'https://github.com/lharries/whatsapp-mcp',
     ready: false
   },
+  {
+    id: 'chime-scheduler',
+    name: 'Chime Scheduler',
+    blurb: 'Schedule and publish LinkedIn posts',
+    category: 'Communication',
+    color: '#0A66C2',
+    letter: 'C',
+    transport: 'http',
+    url: 'https://schedule.getchime.co/mcp',
+    auth: 'oauth',
+    docsUrl: 'https://schedule.getchime.co/help',
+    ready: true
+  },
 
   // ---------- Docs & Knowledge ----------
   {
