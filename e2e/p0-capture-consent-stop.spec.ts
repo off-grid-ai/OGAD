@@ -19,11 +19,7 @@ import { completeOnboarding } from './helpers/onboarding'
 
 interface BoundaryEvent {
   event:
-    | 'fixture-ready'
-    | 'permission-read'
-    | 'source-enumeration'
-    | 'active-window'
-    | 'frame-capture'
+    'fixture-ready' | 'permission-read' | 'source-enumeration' | 'active-window' | 'frame-capture'
 }
 
 let app: ElectronApplication
@@ -75,16 +71,18 @@ test.beforeAll(async () => {
   screenshotPath = path.join(os.tmpdir(), 'offgrid-p0-capture-paused-render.png')
   const boundaryFixture = path.resolve('e2e/fixtures/p0-capture-native-boundary.cjs')
 
-  app = await electron.launch({
-    args: [boundaryFixture],
-    env: {
-      ...process.env,
-      OFFGRID_USER_DATA: userDataDir,
-      OFFGRID_P0_CAPTURE_NATIVE_LEDGER: ledgerPath,
-      OFFGRID_PRO: '1',
-      NODE_ENV: 'production'
-    }
-  })
+  app = skipGpuSetup(
+    await electron.launch({
+      args: [boundaryFixture],
+      env: {
+        ...process.env,
+        OFFGRID_USER_DATA: userDataDir,
+        OFFGRID_P0_CAPTURE_NATIVE_LEDGER: ledgerPath,
+        OFFGRID_PRO: '1',
+        NODE_ENV: 'production'
+      }
+    })
+  )
   page = await app.firstWindow()
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.waitForLoadState('domcontentloaded')

@@ -136,6 +136,29 @@ export interface LaunchOptions {
 export const tidyUpDialog = (page: Page): Locator =>
   page.getByRole('dialog', { name: 'Tidy up your timeline, people and to-dos' })
 
+/** The GPU setup step: on a machine with an NVIDIA GPU the app offers its GPU download before the
+ *  shell (PerformancePackGate). A Mac never shows it, so specs written there never met it. */
+export const gpuSetupStep = (page: Page): Locator =>
+  page.getByText('Optional setup', { exact: true })
+
+// Skip for now, as a person who wants the app first would; the GPU download is not the journey.
+const skipGpuSetupOn = (page: Page): void => {
+  void page
+    .addLocatorHandler(gpuSetupStep(page), async () => {
+      await page.getByRole('button', { name: 'Skip for now', exact: true }).click()
+    })
+    .catch(() => {
+      /* the window closed first */
+    })
+}
+
+/** For specs that launch Electron themselves: skip the GPU setup step in every window. */
+export const skipGpuSetup = (app: ElectronApplication): ElectronApplication => {
+  for (const page of app.windows()) skipGpuSetupOn(page)
+  app.on('window', skipGpuSetupOn)
+  return app
+}
+
 /** Answer launch-time offers the way a person would ("Not now"), whenever one covers the window,
  *  so a spec about something else is not blocked by a modal it never asked about. */
 const answerLaunchOffers = (app: ElectronApplication): ElectronApplication => {
@@ -147,6 +170,7 @@ const answerLaunchOffers = (app: ElectronApplication): ElectronApplication => {
       .catch(() => {
         /* the window closed first */
       })
+    skipGpuSetupOn(page)
   }
   for (const page of app.windows()) register(page)
   app.on('window', register)

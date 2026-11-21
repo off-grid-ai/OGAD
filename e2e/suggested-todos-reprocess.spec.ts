@@ -17,7 +17,7 @@ import {
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { targetIsPackaged } from './helpers/launch'
+import { targetIsPackaged, skipGpuSetup } from './helpers/launch'
 import { completeOnboarding } from './helpers/onboarding'
 import { assertEnginePortsFree } from './helpers/ports'
 import { closeAndWait } from './helpers/windows'
@@ -110,20 +110,22 @@ test.describe('Suggested to-dos', () => {
     controlPath = path.join(userDataDir, 'native-control.json')
     installModel()
     chatInFront(DECK)
-    app = await electron.launch({
-      args: [path.resolve('e2e/fixtures/app120-app122-capture-privacy-native-boundary.cjs')],
-      env: {
-        ...process.env,
-        OFFGRID_USER_DATA: userDataDir,
-        OFFGRID_BIN_DIR: path.join(userDataDir, 'bin'),
-        OFFGRID_TODO_MODEL_LOG: path.join(userDataDir, 'model-requests.jsonl'),
-        OFFGRID_APP120_APP122_NATIVE_LEDGER: path.join(userDataDir, 'native-ledger.jsonl'),
-        OFFGRID_APP120_APP122_NATIVE_CONTROL: controlPath,
-        OFFGRID_PRO: '1',
-        NODE_ENV: 'production',
-        NO_PROXY: '127.0.0.1,localhost'
-      }
-    })
+    app = skipGpuSetup(
+      await electron.launch({
+        args: [path.resolve('e2e/fixtures/app120-app122-capture-privacy-native-boundary.cjs')],
+        env: {
+          ...process.env,
+          OFFGRID_USER_DATA: userDataDir,
+          OFFGRID_BIN_DIR: path.join(userDataDir, 'bin'),
+          OFFGRID_TODO_MODEL_LOG: path.join(userDataDir, 'model-requests.jsonl'),
+          OFFGRID_APP120_APP122_NATIVE_LEDGER: path.join(userDataDir, 'native-ledger.jsonl'),
+          OFFGRID_APP120_APP122_NATIVE_CONTROL: controlPath,
+          OFFGRID_PRO: '1',
+          NODE_ENV: 'production',
+          NO_PROXY: '127.0.0.1,localhost'
+        }
+      })
+    )
     page = await app.firstWindow()
     await completeOnboarding(page)
   })

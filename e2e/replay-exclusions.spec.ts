@@ -16,7 +16,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { completeOnboarding } from './helpers/onboarding'
-import { targetIsPackaged } from './helpers/launch'
+import { targetIsPackaged, skipGpuSetup } from './helpers/launch'
 import { closeAndWait } from './helpers/windows'
 
 const EXCLUDED = 'Secret Ledger'
@@ -65,17 +65,19 @@ const capturedPngs = (): number => {
 }
 
 const launch = async (): Promise<void> => {
-  app = await electron.launch({
-    args: [path.resolve('e2e/fixtures/app120-app122-capture-privacy-native-boundary.cjs')],
-    env: {
-      ...process.env,
-      OFFGRID_USER_DATA: userDataDir,
-      OFFGRID_APP120_APP122_NATIVE_LEDGER: path.join(userDataDir, 'native-ledger.jsonl'),
-      OFFGRID_APP120_APP122_NATIVE_CONTROL: controlPath,
-      OFFGRID_PRO: '1',
-      NODE_ENV: 'production'
-    }
-  })
+  app = skipGpuSetup(
+    await electron.launch({
+      args: [path.resolve('e2e/fixtures/app120-app122-capture-privacy-native-boundary.cjs')],
+      env: {
+        ...process.env,
+        OFFGRID_USER_DATA: userDataDir,
+        OFFGRID_APP120_APP122_NATIVE_LEDGER: path.join(userDataDir, 'native-ledger.jsonl'),
+        OFFGRID_APP120_APP122_NATIVE_CONTROL: controlPath,
+        OFFGRID_PRO: '1',
+        NODE_ENV: 'production'
+      }
+    })
+  )
   page = await app.firstWindow()
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await completeOnboarding(page)

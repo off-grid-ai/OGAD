@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { skipGpuSetup } from './helpers/launch'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
@@ -36,20 +37,22 @@ test('AI activity names the API key that sent a request', async ({ playwright })
   )
   fs.chmodSync(path.join(llamaDir, 'llama-server'), 0o755)
   const gatewayPort = await freePort()
-  const app = await playwright._electron.launch({
-    args: [process.env.OFFGRID_AI_ACTIVITY_APP ?? '.'],
-    env: {
-      ...process.env,
-      OFFGRID_USER_DATA: profile,
-      OFFGRID_BIN_DIR: path.join(profile, 'bin'),
-      OFFGRID_GATEWAY_PORT: String(gatewayPort),
-      OFFGRID_E2E_ISOLATED_INSTANCE: '1',
-      OFFGRID_E2E_HEADLESS: '1',
-      OFFGRID_PRO: '0',
-      OFFGRID_SEED: '',
-      NO_PROXY: '127.0.0.1,localhost'
-    }
-  })
+  const app = skipGpuSetup(
+    await playwright._electron.launch({
+      args: [process.env.OFFGRID_AI_ACTIVITY_APP ?? '.'],
+      env: {
+        ...process.env,
+        OFFGRID_USER_DATA: profile,
+        OFFGRID_BIN_DIR: path.join(profile, 'bin'),
+        OFFGRID_GATEWAY_PORT: String(gatewayPort),
+        OFFGRID_E2E_ISOLATED_INSTANCE: '1',
+        OFFGRID_E2E_HEADLESS: '1',
+        OFFGRID_PRO: '0',
+        OFFGRID_SEED: '',
+        NO_PROXY: '127.0.0.1,localhost'
+      }
+    })
+  )
   try {
     const main = await app.firstWindow()
     await main.waitForFunction(() => !!window.api?.aiLogsOpenWindow)
