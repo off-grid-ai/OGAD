@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "llama": {
     "repo": "ggml-org/llama.cpp",
-    "ref": "b12415",
+    "ref": "b12602",
     "sha256": {
-      "linux-cuda": "718a1d32aac5a6e9a08d6602ee22b76e9ea49e6f1f6af88e9b4b4a90500409df",
-      "linux-cudart": "a72f54ab11b66de6d0fd0378ddb0ff11717801f174ca2c438de0be1a3e500b1e",
-      "linux-vulkan": "be4413d83d54e062009f162c2a40056175ab291f67e1963402277215b86a0749",
-      "linux-cpu": "02ceef24a039ca8ae7b623d8cebd06e3bce2b5786b7447a2bd1952320a7838d8",
-      "win-cuda": "9a39e335f8068b130364491034f66e11d911b958e3d92db354002404c9c76c9b",
+      "linux-cuda": "8228a1df09044467cfa3e800974925fc1f84c55b8fcd277ea0fb1e8f7833b647",
+      "linux-cudart": "2d2eb524e375ae68ed9c17b9c0a3523acca3067a64cc4617c7b90476314070e7",
+      "linux-vulkan": "670cc86ce5fff46d524eb929c9881fb3a9dbdd829be334b42888411b2d59f386",
+      "linux-cpu": "77cc5709872be27eaf94705219aaf24f53c954c59060467e0c5e1ef20b8677ba",
+      "win-cuda": "f1553212611a59795854d2bda7a1ce021881b0d6c69448d33a1866c66e0fc014",
       "win-cudart": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
-      "win-vulkan": "35a5d47cb1e4aca82b119b2f8630fc8927b2f57a59c588bd9a4cfc7eaa648104",
-      "win-cpu": "83d65aca06314b8fa38378a49c4fb16e08d5547460f7bc916b737204ba6a39c1"
+      "win-vulkan": "723c13b3bc0759c1d86c09316a06cb549c78702cf3a441de5bff64c27f26fded",
+      "win-cpu": "9957dab2f52e2599b85921ef3e2661287c1f3ad302bc0be07992e915cc6f7392"
     }
   },
   "prism": {
@@ -28,12 +28,12 @@
   },
   "sd": {
     "repo": "leejet/stable-diffusion.cpp",
-    "ref": "master-1104-5dcfa79",
-    "commit": "5dcfa79801213f23e27b3e83617350ebb8ea93aa",
+    "ref": "master-1106-532d2c1",
+    "commit": "532d2c15c430a785a712b2d94281f04e733008a4",
     "sha256": {
-      "win-cuda": "c7132d6f7e36dee6c39d3d51e8970470c615e5c9c8db498d6f73d5c14b4b1f5d",
-      "win-vulkan": "7cec077a90a97ccb4b8988b6e590a470bfe84d839f4c6eccf4d8d08fd2a10771",
-      "win-cpu": "b5297bea319d6247e95e9a6834c190047ab0a493a29539b41f217e9cc440025a"
+      "win-cuda": "b087219145a382cc1b1e826318289e1f672b9bb6965977734ef0deb85fe2d03a",
+      "win-vulkan": "3e66222c87ca27074e1fd8ce79706eef17a8aaf39949906aa1bee7e060f22ecc",
+      "win-cpu": "abef332cfca7861cc567910e79bedb70bfb2920bb4eedac97fcbb6db477f1596"
     }
   },
   "whisper": {
@@ -48,17 +48,17 @@
   },
   "sherpa": {
     "repo": "k2-fsa/sherpa-onnx",
-    "ref": "v2.0.1",
+    "ref": "v2.0.2",
     "sha256": {
-      "mac-universal": "bf6718f708e15390f1da133dd888661a68df270791b178aaf765d4e3f0baa9fe",
-      "linux-x64": "2e823376987c3b6960d50726b6560155e2ad92da0b8b3886325773225ec6bdec",
-      "win-x64": "dc703575a68594435f53dec93df775ff4913af851a196c0537163f21d8d2364e"
+      "mac-universal": "a740c6fa303e5a650055183f5b4826ff5eeb5214236c3bc07a370bc01f3876ec",
+      "linux-x64": "e7f65778bfb891ec98db56c2cfc37b968d7f56e57271986a8dd2cd0c21d002c9",
+      "win-x64": "55ada3f155344355c4b07445a10f4d96708a96bc483d69641fafc4966b6578ef"
     }
   },
   "nvidia": {
     "linux": {
       "nvidia-cuda-runtime": "13.5.37",
-      "nvidia-cublas": "13.10.0.20",
+      "nvidia-cublas": "13.10.1.6",
       "nvidia-curand": "10.4.5.25",
       "nvidia-cudnn-cu13": "9.28.1.4",
       "nvidia-cufft": "12.5.0.14",
