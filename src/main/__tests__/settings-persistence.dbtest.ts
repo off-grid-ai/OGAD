@@ -101,7 +101,9 @@ describe('software-update settings survive a full process relaunch', () => {
       currentVersion: '0.0.0-test',
       auto: false,
       channel: 'beta',
-      skippedVersion: '0.0.39'
+      skippedVersion: '0.0.39',
+      // Not installed from an app store, so the app updates itself.
+      store: null
     })
     relaunchedDatabase.getDB().close()
   })
