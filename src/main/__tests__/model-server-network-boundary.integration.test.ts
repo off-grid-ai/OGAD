@@ -1,8 +1,13 @@
+import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
+import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startModelServer, stopModelServer } from '../model-server'
+
+// Its own profile, so the gateway reads its own (empty) key store, not one another test left behind.
+const previousDataDir = process.env.OFFGRID_DATA_DIR
 
 let gatewayPort = 0
 
@@ -55,12 +60,15 @@ function acceptsTcpConnection(host: string): Promise<boolean> {
 }
 
 beforeAll(async () => {
+  process.env.OFFGRID_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-boundary-'))
   gatewayPort = await freeLoopbackPort()
   startModelServer(gatewayPort)
 })
 
 afterAll(() => {
   stopModelServer()
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
 })
 
 describe('model gateway network boundary', () => {
