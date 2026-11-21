@@ -445,7 +445,9 @@ export function registerExtraTranscriptionLanes(lanes: ExtraTranscriptionLanes |
 
 /** The Transcription settings tab's view: active model, language, and choices. Shared by the
  *  desktop's own Settings (IPC transcription:active-info) and a paired browser's. */
-export async function readTranscriptionInfo(): Promise<ReturnType<typeof transcriptionActiveInfo>> {
+export async function readTranscriptionInfo(): Promise<
+  ReturnType<typeof transcriptionActiveInfo> & { modelReady: boolean }
+> {
   const { getCatalog } = await import('../models-manager')
   const { getSetting } = await import('../database')
   const catalog = await getCatalog()
@@ -463,7 +465,7 @@ export async function readTranscriptionInfo(): Promise<ReturnType<typeof transcr
       model.kind === 'transcription' &&
       (model.downloaded === true || model.files?.every((file) => file.downloaded === true))
   )
-  return transcriptionActiveInfo(
+  const info = transcriptionActiveInfo(
     getActiveTranscriptionInfo(),
     installed.map((model) => ({
       id: model.id,
@@ -473,4 +475,9 @@ export async function readTranscriptionInfo(): Promise<ReturnType<typeof transcr
     })),
     getSetting('sttLanguage', 'auto')
   )
+  // The built-in Whisper entry is always listed; whether speech can become text depends on a model
+  // file being there (or a remote server doing it).
+  const { whisperModel } = await import('./whisper-cli')
+  const modelReady = info.engine === 'remote' || installed.length > 0 || whisperModel() != null
+  return { ...info, modelReady }
 }

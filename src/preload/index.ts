@@ -943,6 +943,8 @@ const offGridApi = {
     languages: { code: string; label: string }[]
     options: { id: string | null; name: string; active: boolean }[]
     selectedId: string | null
+    /** A speech model is there (or a remote server transcribes). */
+    modelReady?: boolean
   }> => ipcRenderer.invoke('transcription:active-info'),
 
   // --- Voice output (text-to-speech via Kokoro) ---
