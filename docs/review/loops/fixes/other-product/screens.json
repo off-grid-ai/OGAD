@@ -1,0 +1,10 @@
+[
+  {
+    "id": "desktop-scribe",
+    "name": "Scribe",
+    "group": "Desktop · Scribe",
+    "what": "Scribe with the Browser row and Get the extension link.",
+    "file": "desktop-scribe.png",
+    "step": "scribe"
+  }
+]

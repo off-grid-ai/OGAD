@@ -69,7 +69,7 @@
     "name": "Chat: no model",
     "group": "Desktop · Chat",
     "what": "With no chat model the composer shows a Get a model chip (opens Models, Text); the sidebar dot says No model and opens Models; a send that fails says \"No chat model yet.\" with Get a model (was a dead bubble asking to finish onboarding).",
-    "file": null,
+    "file": "desktop-chat-no-model.png",
     "step": "chat-no-model",
     "shot": null,
     "steps": [
@@ -109,7 +109,7 @@
     "name": "Guide: Open Images",
     "group": "Desktop · Guide",
     "what": "Open Images starts chat in image mode, or opens Models on Image when no image model is there (was a plain chat).",
-    "file": null,
+    "file": "desktop-guide-images.png",
     "step": "guide-images",
     "shot": null,
     "steps": [
@@ -121,7 +121,7 @@
     "name": "Meetings: no speech model",
     "group": "Desktop · Meetings",
     "what": "Beside Record: Needs a speech model. Get a model. A failed transcription keeps that reason with its step; a failed summary says why with Try again, never a cut of the transcript.",
-    "file": null,
+    "file": "desktop-meetings-record.png",
     "step": "meeting-no-model",
     "shot": null,
     "steps": [
@@ -133,8 +133,8 @@
     "id": "desktop-dictation-readiness",
     "name": "Dictation: what is missing",
     "group": "Desktop · Dictation",
-    "what": "One line per missing piece: speech model (Get a model), microphone (Allow / Open Settings), shortcut in use (Change shortcut), Accessibility for hold (Open Settings); the header says Tap when hold cannot work.",
-    "file": null,
+    "what": "With no speech model, Dictation says Needs a speech model. Get a model under the search (microphone, shortcut and Accessibility lines show the same way when they are missing).",
+    "file": "desktop-dictation-readiness.png",
     "step": "dictation-no-model",
     "shot": null,
     "steps": [

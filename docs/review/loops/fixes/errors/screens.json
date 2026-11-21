@@ -1,0 +1,34 @@
+[
+  {
+    "id": "desktop-actions",
+    "name": "Actions",
+    "group": "Desktop · Actions",
+    "what": "A failed suggestion shows its reason and Try again (not a green note). Shown here: the empty list.",
+    "file": "desktop-actions.png",
+    "step": "actions"
+  },
+  {
+    "id": "desktop-setup",
+    "name": "Setup & health",
+    "group": "Desktop · Settings",
+    "what": "Setup shows why the plan did not load, with Try again. Shown here: the plan loaded.",
+    "file": "desktop-setup.png",
+    "step": "setup"
+  },
+  {
+    "id": "desktop-vault",
+    "name": "Vault",
+    "group": "Desktop · Vault",
+    "what": "Vault on a fresh profile: create the vault.",
+    "file": "desktop-vault.png",
+    "step": "vault"
+  },
+  {
+    "id": "desktop-connectors",
+    "name": "Connectors",
+    "group": "Desktop · Connectors",
+    "what": "Connectors by their one name, nothing connected yet.",
+    "file": "desktop-connectors.png",
+    "step": "connectors"
+  }
+]

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "desktop-gateway",
+    "name": "Gateway",
+    "group": "Desktop · Gateway",
+    "what": "Gateway running, with keys and endpoints.",
+    "file": "desktop-gateway.png",
+    "step": "gateway"
+  },
+  {
+    "id": "desktop-tasks",
+    "name": "Tasks",
+    "group": "Desktop · Tasks",
+    "what": "Tasks with no history: New browser task.",
+    "file": "desktop-tasks.png",
+    "step": "tasks"
+  }
+]

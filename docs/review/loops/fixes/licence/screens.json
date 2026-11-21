@@ -1,0 +1,10 @@
+[
+  {
+    "id": "desktop-pro-plan",
+    "name": "Your Pro plan",
+    "group": "Desktop · Settings",
+    "what": "Pro plan on this computer: Pro active, devices list, Reset Pro.",
+    "file": "desktop-pro-plan.png",
+    "step": "pro-plan"
+  }
+]

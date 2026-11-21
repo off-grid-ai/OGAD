@@ -56,7 +56,7 @@
     "name": "Day, Reflect, Entities, Search: capture state",
     "group": "Desktop · Memory",
     "what": "Each header shows capture state with its control (Paused / Permission required / Stopped with Resume / Review permissions / Restart), so capture off never reads as a quiet day.",
-    "file": null,
+    "file": "desktop-day-capture.png",
     "step": "capture-state",
     "shot": null,
     "steps": [
@@ -80,8 +80,8 @@
     "id": "desktop-clipboard-capture-off",
     "name": "Clipboard: capture off",
     "group": "Desktop · Clipboard",
-    "what": "With capture off the empty state says Clipboard capture is off. with Turn on (was Nothing copied yet).",
-    "file": null,
+    "what": "Capture is on in this profile, so the empty state reads Nothing copied yet. With capture off it says Clipboard capture is off. with Turn on.",
+    "file": "desktop-clipboard.png",
     "step": "clipboard-capture",
     "shot": null,
     "steps": [
@@ -111,5 +111,37 @@
     "steps": [
       "Revoke Accessibility, set mode to Hold, open Dictation."
     ]
+  },
+  {
+    "id": "desktop-reflect-capture",
+    "name": "Reflect: capture state",
+    "group": "Desktop · Memory",
+    "what": "Capture state and its control in the Reflect header.",
+    "file": "desktop-reflect-capture.png",
+    "step": "capture-state"
+  },
+  {
+    "id": "desktop-entities-capture",
+    "name": "Entities: capture state",
+    "group": "Desktop · Memory",
+    "what": "Capture state and its control in the Entities header.",
+    "file": "desktop-entities-capture.png",
+    "step": "capture-state"
+  },
+  {
+    "id": "desktop-search-capture",
+    "name": "Search: capture state",
+    "group": "Desktop · Memory",
+    "what": "Capture state and its control in the Search header; the empty line is just Nothing captured yet.",
+    "file": "desktop-search-capture.png",
+    "step": "capture-state"
+  },
+  {
+    "id": "desktop-replay-capture",
+    "name": "Replay: capture state",
+    "group": "Desktop · Memory",
+    "what": "Replay keeps its capture control; a failed read now says why with Try again (not shown: the read worked).",
+    "file": "desktop-replay-capture.png",
+    "step": "load-failure"
   }
 ]
