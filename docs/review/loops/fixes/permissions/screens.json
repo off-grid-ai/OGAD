@@ -55,14 +55,22 @@
     "id": "desktop-memory-capture-state",
     "name": "Day, Reflect, Entities, Search: capture state",
     "group": "Desktop · Memory",
-    "what": "Each header shows capture state with its control (Paused / Permission required / Stopped with Resume / Review permissions / Restart), so capture off never reads as a quiet day.",
-    "file": "desktop-day-capture.png",
+    "what": "Capture paused: the header says Paused with Resume, so capture off never reads as a quiet day. Same header on Day, Reflect, Entities and Search.",
+    "file": "desktop-capture-paused.png",
     "step": "capture-state",
-    "shot": null,
+    "shot": "desktop-capture-paused.png",
     "steps": [
       "Pause capture.",
       "Open Day, Reflect, Entities and Search."
     ]
+  },
+  {
+    "id": "desktop-capture-permission",
+    "name": "Day, Reflect, Entities, Search: permission required",
+    "group": "Desktop · Memory",
+    "what": "Screen access refused: the header says Permission required with Review permissions.",
+    "file": "desktop-capture-permission.png",
+    "step": "capture-state"
   },
   {
     "id": "desktop-load-failure",
@@ -80,10 +88,10 @@
     "id": "desktop-clipboard-capture-off",
     "name": "Clipboard: capture off",
     "group": "Desktop · Clipboard",
-    "what": "Capture is on in this profile, so the empty state reads Nothing copied yet. With capture off it says Clipboard capture is off. with Turn on.",
+    "what": "With capture off the empty list says \"Clipboard capture is off.\" with Turn on (was Nothing copied yet).",
     "file": "desktop-clipboard.png",
     "step": "clipboard-capture",
-    "shot": null,
+    "shot": "desktop-clipboard.png",
     "steps": [
       "Clipboard > Settings > turn capture off, go back."
     ]
@@ -111,38 +119,6 @@
     "steps": [
       "Revoke Accessibility, set mode to Hold, open Dictation."
     ]
-  },
-  {
-    "id": "desktop-reflect-capture",
-    "name": "Reflect: capture state",
-    "group": "Desktop · Memory",
-    "what": "Capture state and its control in the Reflect header.",
-    "file": "desktop-reflect-capture.png",
-    "step": "capture-state"
-  },
-  {
-    "id": "desktop-entities-capture",
-    "name": "Entities: capture state",
-    "group": "Desktop · Memory",
-    "what": "Capture state and its control in the Entities header.",
-    "file": "desktop-entities-capture.png",
-    "step": "capture-state"
-  },
-  {
-    "id": "desktop-search-capture",
-    "name": "Search: capture state",
-    "group": "Desktop · Memory",
-    "what": "Capture state and its control in the Search header; the empty line is just Nothing captured yet.",
-    "file": "desktop-search-capture.png",
-    "step": "capture-state"
-  },
-  {
-    "id": "desktop-replay-capture",
-    "name": "Replay: capture state",
-    "group": "Desktop · Memory",
-    "what": "Replay keeps its capture control; a failed read now says why with Try again (not shown: the read worked).",
-    "file": "desktop-replay-capture.png",
-    "step": "load-failure"
   },
   {
     "id": "ext-fill-shortcut-answers",

@@ -1,17 +1,17 @@
 [
   {
     "id": "desktop-actions",
-    "name": "Actions",
+    "name": "Actions: suggestion failed",
     "group": "Desktop · Actions",
-    "what": "A failed suggestion shows its reason and Try again (not a green note). Shown here: the empty list.",
+    "what": "A failed Suggest actions shows the reason (\"Could not reach the network…\") with Try again (was a green note).",
     "file": "desktop-actions.png",
     "step": "actions"
   },
   {
     "id": "desktop-setup",
-    "name": "Setup & health",
+    "name": "Setup: plan did not load",
     "group": "Desktop · Settings",
-    "what": "Setup shows why the plan did not load, with Try again. Shown here: the plan loaded.",
+    "what": "Setup says why the plan did not load, with Try again.",
     "file": "desktop-setup.png",
     "step": "setup"
   },
@@ -25,9 +25,9 @@
   },
   {
     "id": "desktop-connectors",
-    "name": "Connectors",
+    "name": "Connectors: signed out",
     "group": "Desktop · Connectors",
-    "what": "Connectors by their one name, nothing connected yet.",
+    "what": "A connector refused with 401 says \"Signed out. Sign in again to reconnect.\" with Sign in. A token connector says the token was refused, with Change token beside it (was always \"click Test to authorize\").",
     "file": "desktop-connectors.png",
     "step": "connectors"
   },

@@ -1,18 +1,23 @@
 [
   {
     "id": "desktop-gateway",
-    "name": "Gateway",
+    "name": "Gateway: not responding",
     "group": "Desktop · Gateway",
-    "what": "Gateway running, with keys and endpoints.",
+    "what": "The Gateway header says Not responding with Restart one click away (was only in Settings > Setup & health).",
     "file": "desktop-gateway.png",
     "step": "gateway"
   },
   {
     "id": "desktop-tasks",
-    "name": "Tasks",
+    "name": "Web Use: browser not connected",
     "group": "Desktop · Tasks",
-    "what": "Tasks with no history: New browser task.",
-    "file": "desktop-tasks.png",
-    "step": "tasks"
+    "what": "A Web Use run that fell back to the Off Grid AI browser names the switch: \"In the extension, turn on Settings > Tasks > Let Off Grid AI tasks use this browser.\" Not shot: it shows only on a live run.",
+    "file": null,
+    "step": "tasks",
+    "shot": null,
+    "steps": [
+      "Tasks > Web Use: choose your own browser, with no paired browser.",
+      "Run a Web Use task."
+    ]
   }
 ]

@@ -1,10 +1,34 @@
 [
   {
-    "id": "desktop-pro-plan",
-    "name": "Your Pro plan",
-    "group": "Desktop · Settings",
-    "what": "Pro plan on this computer: Pro active, devices list, Reset Pro.",
-    "file": "desktop-pro-plan.png",
-    "step": "pro-plan"
+    "id": "desktop-licence-ended",
+    "name": "Pro page: licence ended",
+    "group": "Desktop · Pro",
+    "what": "An ended licence says when it ended, with Renew and Enter key (was the plain buy page).",
+    "file": "desktop-licence-ended.png",
+    "step": "licence-ended"
+  },
+  {
+    "id": "desktop-licence-removed",
+    "name": "Pro page: removed by another device",
+    "group": "Desktop · Pro",
+    "what": "\"Pixel 9 removed this device from your license.\" with Pair again and Enter key.",
+    "file": "desktop-licence-removed.png",
+    "step": "licence-removed"
+  },
+  {
+    "id": "desktop-licence-key-retry",
+    "name": "Licence key refused: can retry",
+    "group": "Desktop · Pro",
+    "what": "A key that could not be checked says why, with Try again and Contact support.",
+    "file": "desktop-licence-key-retry.png",
+    "step": "licence-key-refused"
+  },
+  {
+    "id": "desktop-licence-key-renew",
+    "name": "Licence key refused: ended",
+    "group": "Desktop · Pro",
+    "what": "An ended key says \"This license has expired.\" with Renew.",
+    "file": "desktop-licence-key-renew.png",
+    "step": "licence-key-refused"
   }
 ]

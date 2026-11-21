@@ -6,5 +6,29 @@
     "what": "Scribe with the Browser row and Get the extension link.",
     "file": "desktop-scribe.png",
     "step": "scribe"
+  },
+  {
+    "id": "desktop-pairing-free",
+    "name": "Pair a browser on a free desktop",
+    "group": "Desktop · Extension",
+    "what": "The pairing dialog says the extension is part of Pro first: \"Once Pro is on here, the browser can use your chats, tools and vault.\" After Pair, the Pro page opens.",
+    "file": "desktop-pairing-free.png",
+    "step": "pairing-free"
+  },
+  {
+    "id": "desktop-vault-get-extension",
+    "name": "Vault: Get the extension",
+    "group": "Desktop · Vault",
+    "what": "With no browser paired, Vault offers Get the extension (fill and save passwords in your browser).",
+    "file": "desktop-vault-get-extension.png",
+    "step": "get-extension"
+  },
+  {
+    "id": "desktop-webuse-get-extension",
+    "name": "Web Use: Get the extension",
+    "group": "Desktop · Settings",
+    "what": "Web Use says tasks run in the Off Grid AI browser and offers Get the extension to use your own.",
+    "file": "desktop-webuse-get-extension.png",
+    "step": "get-extension"
   }
 ]
