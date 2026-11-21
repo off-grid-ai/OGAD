@@ -1,15 +1,15 @@
 {
   "unit": "median time ÷ calibration median time (lower is faster)",
-  "machine": "AMD Ryzen 9 9950X 16-Core Processor · node v26.13.1",
+  "machine": "GitHub Actions ubuntu-26.04 runner (the slower of CI runs 44900969311 and 44906264123) · node 26",
   "recorded": "2026-11-21",
   "benchmarks": {
-    "documents > fuse 200 keyword + 200 vector hits": 0.0705,
-    "documents > rank 5k passages by vector": 3.3451,
-    "documents > split a 100-page document into passages": 5.8523,
-    "records > int8 vector search, 20k records": 14.673,
-    "records > jaccard on two passages": 0.016,
-    "records > MMR diversify 120 candidates to 12": 2.3651,
-    "records > normalise + FTS query for 200 texts": 1.3428,
-    "records > parse time phrases in 6 questions": 0.0095
+    "documents > fuse 200 keyword + 200 vector hits": 0.0582,
+    "documents > rank 5k passages by vector": 3.7557,
+    "documents > split a 100-page document into passages": 8.9868,
+    "records > MMR diversify 120 candidates to 12": 4.6913,
+    "records > int8 vector search, 20k records": 18.3248,
+    "records > jaccard on two passages": 0.0254,
+    "records > normalise + FTS query for 200 texts": 1.7282,
+    "records > parse time phrases in 6 questions": 0.0103
   }
 }
