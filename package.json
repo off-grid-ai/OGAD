@@ -53,7 +53,11 @@
     "test:db": "bash scripts/test-db.sh",
     "depcruise": "depcruise --config .dependency-cruiser.cjs \"src/**/*.ts\" \"src/**/*.tsx\"",
     "knip": "knip --no-gitignore",
-    "coverage:all": "bash scripts/coverage-all.sh"
+    "coverage:all": "bash scripts/coverage-all.sh",
+    "perf:bench": "node perf/bench-gate.mjs",
+    "perf:size": "size-limit",
+    "perf:e2e": "electron-vite build && OFFGRID_E2E_PERF=1 playwright test --config perf/playwright.perf.config.ts",
+    "perf:leaks": "node perf/memlab/run.mjs"
   },
   "//overrides": "ONE sharp for the whole tree. sharp ships libvips as `libvips-42.dll`, and Windows resolves a DLL by NAME across the process: whichever copy loads first wins for every later binding. The embedding runtime can load sharp before our own sharp 0.35; two libvips versions in one Windows process then fail with ERR_DLOPEN_FAILED. Every file attachment failed on Windows and only there because macOS binds by path. Proven by load order: sharp alone loads; transformers-then-sharp does not. Deduping to one version is the fix, not load-order juggling.",
   "overrides": {
@@ -144,6 +148,7 @@
     "@phosphor-icons/react": "^2.1.10",
     "@playwright/test": "^1.61.1",
     "@scure/bip39": "^2.2.0",
+    "@size-limit/file": "^14.3.0",
     "@tabler/icons-react": "^3.36.1",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-virtual": "3.14.13",
@@ -175,6 +180,7 @@
     "jsdom": "^29.1.1",
     "knip": "^6.25.0",
     "mdast-util-to-string": "^4.0.0",
+    "memlab": "^2.0.6",
     "motion": "^12.27.1",
     "playwright": "1.64.0",
     "postcss": "^8.5.6",
@@ -188,6 +194,7 @@
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.0",
     "remark-parse": "^11.0.0",
+    "size-limit": "^14.3.0",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.18",
     "three": "^0.186.0",
