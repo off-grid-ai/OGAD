@@ -1,4 +1,4 @@
-import { openModelsTab } from '@/components/ReadinessNotice'
+import { openModelsTab } from '@/lib/readiness-actions'
 
 /** Asks chat to start in image mode. Chat may not be mounted yet, so the ask waits until it reads it. */
 export const CHAT_IMAGE_MODE_EVENT = 'og:chat-image-mode'
@@ -19,7 +19,7 @@ Use 'man xdg-open' or 'xdg-open --manual' for additional info., so a caller that
 export async function openImageChat(open: (view: 'memory-chat' | 'models') => void): Promise<void> {
   let available = false
   try {
-    available = Boolean((await window.api.imageGenStatus?.())?.available)
+    available = Boolean((await window.api.imageGenStatus())?.available)
   } catch {
     available = false
   }

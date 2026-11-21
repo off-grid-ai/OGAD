@@ -1,7 +1,7 @@
 import { track } from '@renderer/lib/analytics'
-import { openModelsTab } from '../ReadinessNotice'
+import { openModelsTab } from '@/lib/readiness-actions'
 import { CHAT_IMAGE_MODE_EVENT, takeImageModeRequest } from '@/lib/chat-image-mode'
-import { openFailureStep } from '../FailureNotice'
+import { openFailureStep } from '@/lib/failure-step'
 import { explainFailure } from '@offgrid/failures'
 import { FEATURE_NAMES } from '@offgrid/features'
 import { reportChatInput } from '@renderer/lib/usage-tracker'
@@ -2032,7 +2032,7 @@ export function MemoryChat({
         unmarked = unmarked.slice(unmarked.indexOf('-->') + 3).trimStart()
       }
       const named = unmarked.trim() || trimmed
-      const title = named.length > 50 ? named.slice(0, 47) + '...' : named
+      const title = named.length > 50 ? `${named.slice(0, 47)}...` : named
       try {
         await window.api.createRagConversation(convId, title, projectId, surface)
         const now = new Date().toISOString()
@@ -3907,7 +3907,7 @@ export function MemoryChat({
       setMessages((prev) =>
         prev.map((m) =>
           m.imagePath === path
-            ? { ...m, image: undefined, imagePath: undefined, content: m.content + '  (deleted)' }
+            ? { ...m, image: undefined, imagePath: undefined, content: `${m.content}  (deleted)` }
             : m
         )
       )

@@ -1,5 +1,5 @@
 import { appLocationPath, replaceAppLocation } from './lib/app-location'
-import { openModelsTab } from './components/ReadinessNotice'
+import { openModelsTab } from './lib/readiness-actions'
 import { FEATURE_NAMES } from '@offgrid/features'
 import { TextMorph } from '@offgrid/operator-ui/operator/motion/text-morph'
 import { ChatDetail } from './components/ChatDetail'
@@ -23,7 +23,11 @@ import { ProjectsScreen } from './components/ProjectsScreen'
 import { ConnectorsScreen } from './components/ConnectorsScreen'
 import { GatewayScreen } from './components/GatewayScreen'
 import { Onboarding } from './components/Onboarding'
-import { ONBOARDING_OPEN_KEY, PICKS_CHANGED_EVENT, pickedViews } from './components/onboarding/picks'
+import {
+  ONBOARDING_OPEN_KEY,
+  PICKS_CHANGED_EVENT,
+  pickedViews
+} from './components/onboarding/picks'
 import { guideTopics, needsPro } from './components/guide/guideKnowledge'
 import { PermissionGate } from './components/PermissionGate'
 import { PerformancePackGate } from './components/setup/PerformancePackGate'
@@ -430,7 +434,6 @@ function AppContent(): React.JSX.Element {
     window.addEventListener(PICKS_CHANGED_EVENT, update)
     return () => window.removeEventListener(PICKS_CHANGED_EVENT, update)
     // readPicked reads storage only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [viewMode, commitViewMode] = useState<ViewMode>(
     () =>
