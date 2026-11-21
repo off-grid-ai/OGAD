@@ -1185,6 +1185,9 @@ function AppContent(): React.JSX.Element {
   // One way in to a screen, used by the sidebar and by the command palette: switching screens also
   // drops whatever row was selected in the old one, so a stale detail pane never rides along.
   const goToView = (view: ViewMode, subroute: string | null = null): void => {
+    // A hover-opened rail lies over the screen: once a place is picked it folds away, so the
+    // screen it opened is free to use without first moving the pointer off the rail.
+    setSidebarHovered(false)
     navigateTo(view, () => {
       setNavigationSubroute(isInternalTabView(view) ? subroute : null)
       setSettingsSection(view === 'settings' ? subroute : null)
