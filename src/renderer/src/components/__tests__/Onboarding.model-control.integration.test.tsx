@@ -34,6 +34,7 @@ class TestStorage implements Storage {
 
 const optIn = vi.fn()
 const dismissPrompt = vi.fn()
+const quickStart = vi.fn()
 
 beforeEach(() => {
   const storage = new TestStorage()
@@ -41,13 +42,17 @@ beforeEach(() => {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage })
   optIn.mockReset()
   dismissPrompt.mockReset()
+  quickStart.mockReset()
+  quickStart.mockResolvedValue({ success: true })
   Object.assign(window, {
     api: {
       // A Mac, so the guide has its Pro features.
       platform: 'darwin',
       embedGuideQuestion: () => Promise.resolve(null),
       askGuide: () => Promise.resolve({ error: 'no-model' }),
-      analytics: { optIn, dismissPrompt }
+      analytics: { optIn, dismissPrompt },
+      // The main-process quick start (the IPC boundary): it downloads the starter chat model.
+      setupQuickStart: quickStart
     },
     matchMedia: (query: string) => ({
       matches: true,
@@ -149,6 +154,9 @@ describe('desktop onboarding: what you want → which ones → how it works', ()
     )
     await user.click(button('Set up my models'))
     expect(onComplete).toHaveBeenCalledOnce()
+    // Set up my models starts the starter chat model at once, so the first reply is minutes away.
+    expect(quickStart).toHaveBeenCalledOnce()
+    expect(sessionStorage.getItem('first_run_session')).toBe('true')
     expect(optIn).toHaveBeenCalledWith('setup')
     expect(localStorage.getItem('onboarding_completed')).toBe('true')
     expect(localStorage.getItem('onboarding_step')).toBeNull()
