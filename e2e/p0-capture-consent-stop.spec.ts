@@ -54,7 +54,7 @@ const expandSidebar = async (): Promise<void> => {
 const gotoCaptureSettings = async (): Promise<void> => {
   await expandSidebar()
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
   const header = page.getByRole('button', { name: /^(All settings\s*)?Capture & processing/ })
   await expect(header).toBeVisible()
   if ((await header.getAttribute('aria-expanded')) !== 'true') await header.click()

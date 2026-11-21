@@ -401,7 +401,7 @@ for (const action of ['finish', 'send-now', 'stop']) {
       page.getByTestId('chat-composer').getByText('1 queued', { exact: true })
     ).toBeVisible()
     await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
-    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
     await enterChat()
     await expect(page.getByRole('button', { name: 'Stop generating', exact: true })).toBeVisible()
     await expect(

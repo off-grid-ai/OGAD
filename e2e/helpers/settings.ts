@@ -31,7 +31,7 @@ export const gotoSettings = async (page: Page): Promise<void> => {
   const expandSidebar = page.getByRole('button', { name: 'Expand sidebar' })
   if (await expandSidebar.isVisible().catch(() => false)) await expandSidebar.click()
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
 }
 
 /** The accordion header button for a section (its accessible name starts with the title). */
