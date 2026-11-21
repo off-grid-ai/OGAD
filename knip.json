@@ -8,6 +8,7 @@
     "pro/renderer/index.tsx",
     "pro/renderer/screens.ts",
     "e2e/**/*.spec.ts",
+    "perf/**/*.{ts,mjs}",
     "scripts/**/*.{ts,mjs,cjs,js}",
     "src/**/*.{test,dbtest}.{ts,tsx}",
     "pro/**/*.{test,dbtest}.{ts,tsx}",
