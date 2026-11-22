@@ -130,6 +130,16 @@ test('history, bookmarks, find, pop-ups, downloads, developer tools, and a resta
     .toContain('Alpha harbour page')
   const alpha = await activeId()
 
+  // The right-click menu library is attached to the page (it loads on first use).
+  await expect
+    .poll(() =>
+      app!.evaluate(({ webContents }, url) => {
+        const target = webContents.getAllWebContents().find((c) => c.getURL() === url)
+        return target ? target.listenerCount('context-menu') : 0
+      }, `${origin}/alpha`)
+    )
+    .toBeGreaterThan(0)
+
   // History: found by words in the title.
   await expect
     .poll(async () =>

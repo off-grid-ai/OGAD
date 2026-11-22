@@ -1,5 +1,4 @@
 import type { WebContents } from 'electron'
-import contextMenu from 'electron-context-menu'
 
 export interface PageMenuActions {
   openInNewTab(url: string): void
@@ -9,10 +8,21 @@ export interface PageMenuActions {
 /**
  * The page's right-click menu, from electron-context-menu (MIT): copy, paste, look up, search,
  * copy link and image, inspect. Opening and saving go through the browser's own tabs and
- * download list.
+ * download list. Loaded on first use: the library reads Electron's window classes when it loads,
+ * which only a running app has. The menu goes away with the page.
  */
-export function attachPageMenu(contents: WebContents, actions: PageMenuActions): () => void {
-  return contextMenu({
+export function attachPageMenu(contents: WebContents, actions: PageMenuActions): void {
+  void import('electron-context-menu').then(({ default: contextMenu }) => {
+    if (!contents.isDestroyed()) attach(contextMenu, contents, actions)
+  })
+}
+
+function attach(
+  contextMenu: typeof import('electron-context-menu').default,
+  contents: WebContents,
+  actions: PageMenuActions
+): void {
+  contextMenu({
     window: contents,
     showInspectElement: true,
     showSaveImage: false,
