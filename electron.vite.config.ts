@@ -156,7 +156,7 @@ export default defineConfig({
     // vault recovery-phrase feature (pro/main/vault/vault-recovery.ts).
     plugins: [
       externalizeDepsPlugin({
-        exclude: ['@scure/bip39', '@noble/hashes', '@offgrid/executorch-speech']
+        exclude: ['@scure/bip39', '@noble/hashes', '@offgrid/executorch-speech', 'electron-context-menu']
       })
     ],
     resolve: {
