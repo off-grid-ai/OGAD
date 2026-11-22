@@ -223,7 +223,10 @@ class WhisperCliTranscription implements TranscriptionService {
         if (!opts.alreadyWav16k) {
           const ff = ffmpegBin()
           if (!ff) throw new Error('ffmpeg is required to decode audio and was not found.')
-          tmp = path.join(os.tmpdir(), `offgrid-stt-${Date.now()}-${process.pid}-${randomUUID()}.wav`)
+          tmp = path.join(
+            os.tmpdir(),
+            `offgrid-stt-${Date.now()}-${process.pid}-${randomUUID()}.wav`
+          )
           // 16 kHz mono PCM WAV; -vn drops any video track so A/V files work too.
           // Cap the decode so a malformed/streaming input can't hang the process forever.
           try {
@@ -242,7 +245,9 @@ class WhisperCliTranscription implements TranscriptionService {
           // Silence goes no further: Whisper would write a word for it (silence-gate.ts).
           if (suppress && !(await wavHasSpeech(wav))) {
             const lang = language === 'auto' ? undefined : language
-            return opts.timestamps ? { text: '', segments: [], language: lang } : { text: '', language: lang }
+            return opts.timestamps
+              ? { text: '', segments: [], language: lang }
+              : { text: '', language: lang }
           }
           // -nt strips timestamps (plain text). Keep them when the caller wants
           // per-utterance segments (meetings interleave two speakers by time).
