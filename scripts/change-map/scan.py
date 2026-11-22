@@ -35,6 +35,7 @@ CONCEPTS = {
   'memory':    ('Day memory', 'feature', r'(capture|screen-memory|replay|journal|clipboard|(^|[/-])focus|timeline|day-view|work-block)'),
   'meetings':  ('Meetings', 'feature', r'(meeting)'),
   'todos':     ('To-dos and people', 'feature', r'(todo|(^|[/-])crm|people|entity|briefing|identity|dossier)'),
+  'browser':   ('Built-in browser', 'feature', r'((^|[/-])browser-(host|library|session|partition|downloads|shortcuts|visits-store|bookmarks-store|open-tabs-store|page-input|user-agent|secret-scrub|commit-gate|vault-fill|chrome|library-panel|everyday)|sandbox-profiles|agent-browser)'),
   'agents':    ('Agents', 'feature', r'(computer-use|web-use|automation|operator|(^|[/-])agent|(^|[/-])use([/-]|$)|action-pipeline)'),
   'sync':      ('Devices and sync', 'feature', r'((^|[/-])sync|pair|mesh|transfer|discovery|companion)'),
   'models':    ('Model library', 'infra', r'(model-(download|manager|browser|catalog|residency|picks)|download|catalog|hugging-?face|huggingface|active-model|engine-pack|device-picks|best-settings|fastest-settings|recommend|boost-promo|bundled-model|asset-pack|ai-pack|arriving-chat-model)'),
@@ -54,7 +55,8 @@ CONCEPTS = {
 PRODUCTS = ['desktop', 'mobile', 'extension']
 NARROW = {'share': (['mobile'], 'the mark says "on my phone"; desktop and the extension have no share loop'),
           'rating': (['mobile'], 'store review prompts exist only in the phone stores'),
-          'models': (['desktop', 'mobile'], 'the extension runs on the computer app\'s models')}
+          'models': (['desktop', 'mobile'], 'the extension runs on the computer app\'s models'),
+          'browser': (['desktop'], 'the built-in browser is the computer app\'s own Chromium; phones and the extension use the system browser')}
 
 def expected(k, kind, feats):
     if kind == 'feature' and k in feats:
