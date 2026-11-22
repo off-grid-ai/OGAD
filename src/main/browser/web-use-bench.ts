@@ -10,7 +10,8 @@ import { benchTrace, type BenchRecord } from './web-use-bench-trace'
  * planner_actor_evaluator strategy, and writes one file per task in the shape the benchmark
  * judge reads (scripts/action-data/e2e/judge.py: id, end, detail, steps, finalPage, seconds).
  *
- *   OFFGRID_WEBUSE_BENCH=<tasks.json>        a list of { id, goal, url } (tasks-v2-live.json)
+ *   OFFGRID_WEBUSE_BENCH=<tasks.json>        a list of { id, goal, url, profile? } (tasks-v2-live.json;
+ *                                            profile: a sandbox test account, sandbox-profiles.ts)
  *   OFFGRID_WEBUSE_BENCH_OUT=<dir>           where the task files go
  *   OFFGRID_WEBUSE_BENCH_MODELS=<json>       the four endpoints (WebUseAgentModels), for this run only
  *   OFFGRID_WEBUSE_BENCH_ONLY=<id,id>        optional: only these tasks
@@ -23,6 +24,8 @@ interface BenchTask {
   id: string
   goal: string
   url?: string
+  /** A sandbox test profile for a signed-in task (sandbox-profiles.ts). */
+  profile?: string
 }
 
 /** The browser the runner drives: run one Web Use task, and close a finished task's pages. */
@@ -32,6 +35,7 @@ export interface BenchBrowser {
     url?: string
     taskId: string
     journeyId: string
+    profileId?: string
   }) => Promise<{ ok: boolean; summary: string }>
   closeJourney: (journeyId: string) => void
 }
@@ -83,6 +87,7 @@ export async function startWebUseBench(browser?: BenchBrowser): Promise<void> {
         pane.runTask({
           goal: task.goal,
           url: task.url,
+          ...(task.profile ? { profileId: task.profile } : {}),
           taskId: `bench-${task.id}-${started}`,
           journeyId: `bench-${task.id}-${started}`
         }),

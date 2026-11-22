@@ -14,6 +14,8 @@ export interface BenchRecord {
   end?: string
   detail?: string
   seconds?: number
+  /** The pages the task opened, in order: where the agent went, for loop analysis. */
+  visits?: { url: string; title: string; at: number }[]
 }
 
 /** The task the runner is on; browser-agent-task.ts records into it while it is set. */
