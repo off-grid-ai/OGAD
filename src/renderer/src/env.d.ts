@@ -170,12 +170,17 @@ interface RendererAPIOverrides {
         canGoBack: boolean
         canGoForward: boolean
         isLoading: boolean
+        faviconUrl?: string
+        audible?: boolean
+        muted?: boolean
+        bookmarked?: boolean
+        profileId?: string
       }>
     }>
     activateSession: (sessionId: string) => Promise<boolean>
     closeSession: (sessionId: string) => Promise<boolean>
     control: (
-      action: 'back' | 'forward' | 'reload' | 'stop',
+      action: import('../../shared/browser-session').BrowserControl,
       sessionId?: string
     ) => Promise<boolean>
     navigate: (address: string, sessionId?: string) => Promise<{ ok: boolean; detail?: string }>
@@ -184,6 +189,48 @@ interface RendererAPIOverrides {
       Array<{ historyId: string; title: string; url: string; updatedAt: number }>
     >
     reopenManual: (historyId: string) => Promise<{ sessionId: string } | null>
+    reopenClosedTab: () => Promise<{ sessionId: string } | null>
+    searchHistory: (
+      query: string,
+      before?: number
+    ) => Promise<import('../../shared/browser-library').BrowserVisit[]>
+    removeHistory: (visitId: number) => Promise<void>
+    clearHistory: (since?: number) => Promise<void>
+    listBookmarks: () => Promise<import('../../shared/browser-library').BrowserBookmark[]>
+    toggleBookmark: (sessionId?: string) => Promise<boolean>
+    removeBookmark: (bookmarkId: string) => Promise<void>
+    renameBookmark: (bookmarkId: string, title: string) => Promise<void>
+    listDownloads: () => Promise<import('../../shared/browser-library').BrowserDownload[]>
+    downloadAction: (
+      downloadId: string,
+      action: 'cancel' | 'pause' | 'resume' | 'open' | 'show' | 'clear'
+    ) => Promise<boolean>
+    find: (sessionId: string, query: string, forward?: boolean, findNext?: boolean) => Promise<void>
+    stopFind: (sessionId: string) => Promise<void>
+    vaultState: (
+      sessionId?: string
+    ) => Promise<import('../../shared/browser-library').BrowserVaultState>
+    fillLogin: (
+      sessionId: string,
+      uuid: string
+    ) => Promise<import('../../shared/browser-library').BrowserFillOutcome>
+    sandboxProfiles: () => Promise<{ id: string; label: string; category: string }[]>
+    openSandboxProfile: (profileId: string) => Promise<{ sessionId: string } | null>
+    onDownloadsState: (
+      cb: (downloads: import('../../shared/browser-library').BrowserDownload[]) => void
+    ) => () => void
+    onBookmarksChanged: (
+      cb: (bookmarks: import('../../shared/browser-library').BrowserBookmark[]) => void
+    ) => () => void
+    onFindResult: (
+      cb: (result: import('../../shared/browser-library').BrowserFindResult) => void
+    ) => () => void
+    onCommand: (
+      cb: (event: {
+        sessionId: string
+        command: import('../../shared/browser-library').BrowserChromeCommand
+      }) => void
+    ) => () => void
     onSessionsState: (cb: (state: unknown) => void) => () => void
     onNavigationState: (cb: (state: unknown) => void) => () => void
     onStep: (cb: (step: unknown) => void) => () => void
