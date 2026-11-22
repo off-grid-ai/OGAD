@@ -213,7 +213,7 @@ class BrowserHost implements BrowserRailHost {
   private readonly autofillTried = new Map<string, Set<string>>()
   private readonly userMuted = new WeakSet<WebContentsView>()
   private restoringTabs = false
-  /** Quitting closes every page; that must not erase the tabs to reopen next launch. */
+  /** Disposing closes every page; that must not erase the tabs to reopen next launch. */
   private quitting = false
   private readonly runOwners = new BrowserJourneyRunOwners()
   private readonly taskPointers = new Map<string, BrowserPointerEvent>()
@@ -236,10 +236,6 @@ class BrowserHost implements BrowserRailHost {
     this.bookmarks.migrate()
     this.openTabs.migrate()
     const saved = this.openTabs.list()
-    app.once('before-quit', () => {
-      this.saveOpenTabs()
-      this.quitting = true
-    })
     // After construction: restoring creates sessions through this host.
     if (saved.length) queueMicrotask(() => this.restoreOpenTabs(saved))
   }
@@ -486,6 +482,9 @@ class BrowserHost implements BrowserRailHost {
   }
 
   dispose(): void {
+    // Closing every page on the way out is not the person closing their tabs: keep the list.
+    this.saveOpenTabs()
+    this.quitting = true
     this.region = null
     this.runOwners.haltAll('browser host closed')
     this.taskPointers.clear()

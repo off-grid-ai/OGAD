@@ -78,7 +78,8 @@ export function prepareBrowserPartition(
   const session = electronSession.fromPartition(partition)
   if (prepared.has(partition)) return session
   prepared.add(partition)
-  session.setUserAgent(chromeUserAgent(app.userAgentFallback))
+  const userAgent = app.userAgentFallback
+  if (userAgent) session.setUserAgent(chromeUserAgent(userAgent))
   const local = localCaHosts.filter((host) => host.endsWith('.test'))
   if (local.length) {
     session.setCertificateVerifyProc((request, callback) => {
