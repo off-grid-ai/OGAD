@@ -12,9 +12,12 @@ export interface PageMenuActions {
  * which only a running app has. The menu goes away with the page.
  */
 export function attachPageMenu(contents: WebContents, actions: PageMenuActions): void {
-  void import('electron-context-menu').then(({ default: contextMenu }) => {
-    if (!contents.isDestroyed()) attach(contextMenu, contents, actions)
-  })
+  import('electron-context-menu')
+    .then(({ default: contextMenu }) => {
+      if (!contents.isDestroyed()) attach(contextMenu, contents, actions)
+    })
+    // The page still works without its menu; say why it is missing.
+    .catch((error: unknown) => console.warn('[browser] right-click menu unavailable:', error))
 }
 
 function attach(
