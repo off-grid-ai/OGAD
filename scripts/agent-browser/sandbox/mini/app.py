@@ -723,7 +723,7 @@ def forms_routes():
 {% for name, kind in fields %}{% set fid = 'f' ~ loop.index %}
 {% if kind is string and kind == 'checkbox' %}<label><input type="checkbox" id="{{ fid }}" name="{{ name }}" value="yes"> {{ name }}</label>
 {% else %}<label for="{{ fid }}">{{ name }}</label>
-{% if kind is not string %}<select id="{{ fid }}" name="{{ name }}"><option value="">Choose…</option>{% for o in kind %}<option>{{ o }}</option>{% endfor %}</select>
+{% if kind is not string %}<select id="{{ fid }}" name="{{ name }}">{% if kind|length > 1 %}<option value="">Choose…</option>{% endif %}{% for o in kind %}<option {% if request.form.get(name) == o %}selected{% endif %}>{{ o }}</option>{% endfor %}</select>
 {% elif kind == 'textarea' %}<textarea id="{{ fid }}" name="{{ name }}" rows="4"></textarea>
 {% else %}<input id="{{ fid }}" name="{{ name }}" type="{{ kind }}" value="{{ request.form.get(name, '') }}">{% endif %}{% endif %}{% endfor %}
 <p><button>{% if slug in ('parking-fine', 'vehicle-registration') %}Pay now{% else %}Submit{% endif %}</button></p></form>""",

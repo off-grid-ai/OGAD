@@ -124,6 +124,16 @@ def seed_mail(password):
 BASE = "http://nextcloud"
 
 
+def dav_list(path, user, password):
+    req = urllib.request.Request(BASE + path, method="PROPFIND")
+    req.add_header("Authorization", "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode())
+    req.add_header("Host", "offgrid-cloud.test")
+    req.add_header("X-Forwarded-Proto", "https")
+    req.add_header("Depth", "1")
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return re.findall(r"<d:href>([^<]+)</d:href>", r.read().decode())
+
+
 def dav(method, path, user, password, body=None, ctype=None, ok=(200, 201, 204, 207, 404, 405)):
     req = urllib.request.Request(BASE + path, data=body, method=method)
     req.add_header("Authorization", "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode())
@@ -261,10 +271,13 @@ def seed_cloud(user, password):
             dav("MKCOL", f"/remote.php/dav/files/{user}/{urllib.request.quote(name.split('/')[0])}", user, password)
         dav("PUT", f"/remote.php/dav/files/{user}/{urllib.request.quote(name)}", user, password, make())
     cal = f"/remote.php/dav/calendars/{user}/personal/"
-    dav("DELETE", cal, user, password)
+    # Empty the calendar in place: deleting and re-creating it moves the events to Nextcloud's trash.
     mk = (b'<?xml version="1.0"?><c:mkcalendar xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:set><d:prop>'
           b'<d:displayname>Personal</d:displayname></d:prop></d:set></c:mkcalendar>')
     dav("MKCALENDAR", cal, user, password, mk, "application/xml")
+    for href in dav_list(cal, user, password):
+        if href.endswith(".ics"):
+            dav("DELETE", href, user, password)
     ev = events()
     for body in ev:
         dav("PUT", f"{cal}{uuid.uuid4()}.ics", user, password, body, "text/calendar")

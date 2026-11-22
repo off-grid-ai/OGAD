@@ -45,7 +45,7 @@ for (const profile of profiles) {
     await wait(3000)
     row.afterSignIn = page.url()
     row.stillOnLogin = (await page.locator('input[type=password]').count()) > 0
-    await page.screenshot({ path: `${SHOTS}/${profile.id}-signed-in.png` }).catch(() => {})
+    await page.screenshot({ path: `${SHOTS}/${profile.id}-signed-in.png`, timeout: 5000 }).catch(() => {})
   }
   report.push(row)
   console.log(JSON.stringify(row))

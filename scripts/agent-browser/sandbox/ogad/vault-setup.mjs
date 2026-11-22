@@ -23,10 +23,15 @@ const LOGINS = [
 ]
 
 const browser = await chromium.connectOverCDP(`http://127.0.0.1:${process.argv[2] ?? 9333}`)
-const page = browser
-  .contexts()
-  .flatMap((c) => c.pages())
-  .find((p) => !p.url().startsWith('devtools') && /index\.html|localhost:\d+\/?$|\/#/.test(p.url()))
+// The app window: its renderer has loaded window.api (it may still be retrying the dev server).
+let page
+for (let i = 0; i < 120 && !page; i++) {
+  for (const p of browser.contexts().flatMap((c) => c.pages())) {
+    if (!/localhost:\d+\/?$|index\.html/.test(p.url())) continue
+    if (await p.evaluate(() => typeof window.api?.proInvoke === 'function').catch(() => false)) page = p
+  }
+  if (!page) await new Promise((r) => setTimeout(r, 500))
+}
 if (!page) throw new Error('main window not found')
 
 const result = await page.evaluate(
