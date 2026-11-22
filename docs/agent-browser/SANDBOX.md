@@ -26,9 +26,9 @@ run on test accounts only, never on a person's real accounts or data.
   Passwords are also masked in every snapshot and tool result (`browser-secret-scrub.ts`).
 - **Send / pay / delete.** On real sites the harness stops and asks the person first. Inside a
   sandbox profile it goes ahead, so training runs unattended.
-- **Visits.** Each bench record has `visits` (the task's page trail). `OFFGRID_AGENT_VISIT_HINT=1`
-  adds one line to the prompt when a page was opened 3+ times. Off by default: the shipped models
-  were not trained on it. Turning it on is a model-contract change.
+- **Visits.** Each bench record has `visits` (the task's page trail). When a page was opened 3+
+  times, the prompt gets one line saying so. On by default (Mac, 22 Nov);
+  `OFFGRID_AGENT_VISIT_HINT=0` turns it off for the with/without A/B.
 - **Uploads.** `upload` actions read files from `<userData>/agent-uploads/` only (put `cv.pdf` there).
 - **New actions now work:** `forward`, `reload`, `new_tab`, `switch_tab`, `close_tab`, `upload`.
 

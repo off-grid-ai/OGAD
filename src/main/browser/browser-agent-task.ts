@@ -63,12 +63,12 @@ export interface BrowserAgentTaskInput extends BrowserPlaywrightTaskInput {
 }
 
 /**
- * Experimental (OFFGRID_AGENT_VISIT_HINT=1): tell the models when the task is back on a page it
- * already opened twice, the loop the round-12+ traces get stuck in. Off by default because the
- * shipped models were not trained on the extra line; the training pipeline turns it on to A/B it.
+ * Tell the models when the task is back on a page it already opened twice, the loop the round-12+
+ * traces get stuck in. On by default (Mac, 22 Nov); OFFGRID_AGENT_VISIT_HINT=0 turns it off, for
+ * the with/without A/B against models trained before the line existed.
  */
 function withVisitHint(snapshot: string, count: number): string {
-  if (process.env.OFFGRID_AGENT_VISIT_HINT !== '1' || count < 3) return snapshot
+  if (process.env.OFFGRID_AGENT_VISIT_HINT === '0' || count < 3) return snapshot
   return snapshot.replace(
     /^(- Page URL: \S+)$/m,
     `$1\n- You have opened this page ${count} times in this task`
