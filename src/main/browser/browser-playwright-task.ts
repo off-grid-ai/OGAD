@@ -13,6 +13,7 @@ import {
   isPrivateSemanticTarget,
   projectPlaywrightPointer
 } from './browser-playwright-actions'
+import { commitClick } from './browser-commit-gate'
 import type {
   BrowserPlaywrightTaskInput,
   BrowserPlaywrightTaskResult,
@@ -284,6 +285,17 @@ async function runSemanticStep(
           state.handoffs
         )
       : undefined
+  }
+  if (decision.action === 'click' && !input.sandboxProfile && decision.ref) {
+    const line = state.observation.text
+      .split('\n')
+      .find((candidate) => candidate.includes(`[ref=${decision.ref}]`))
+    const what = commitClick(line?.replace(/^(\s*- )'(.*)'(:.*)?$/, '$1$2$3'))
+    if (what) {
+      input.onStep(`asking before "${what}"`)
+      await input.waitForUser(`Approve "${what}"? Press Continue to let it, or Stop.`, input.signal)
+      input.signal?.throwIfAborted()
+    }
   }
   return performSemanticAction(context, decision, step)
 }

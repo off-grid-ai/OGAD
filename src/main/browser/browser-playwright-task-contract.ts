@@ -34,5 +34,7 @@ export interface BrowserPlaywrightTaskInput {
   /** Capture a model frame within the same lease as the semantic snapshot. */
   captureObservationImage?: () => Promise<Awaited<ReturnType<VisionScreen['capture']>> | undefined>
   onObservation?: (observation: BrowserSemanticObservation) => Promise<void>
+  /** A sandbox test profile: send, pay and delete go ahead without asking (browser-commit-gate.ts). */
+  sandboxProfile?: boolean
   signal?: AbortSignal
 }
