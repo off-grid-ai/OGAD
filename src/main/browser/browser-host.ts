@@ -636,7 +636,11 @@ class BrowserHost implements BrowserRailHost {
     }
     view.webContents.on('did-start-loading', refresh)
     view.webContents.on('did-stop-loading', refresh)
-    view.webContents.on('did-navigate', refreshPointer)
+    view.webContents.on('did-navigate', () => {
+      // A reload is one more visit for a task, so the loop hint counts it; history keeps one row.
+      if (this.sessions.get(record.sessionId)?.task) this.lastVisit.delete(record.sessionId)
+      refreshPointer()
+    })
     view.webContents.on('did-navigate-in-page', refresh)
     view.webContents.on('dom-ready', () => void this.restoreTaskPointer(record))
     view.webContents.on('did-finish-load', () => void this.restoreTaskPointer(record))
