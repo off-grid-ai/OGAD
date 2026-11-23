@@ -98,8 +98,14 @@ export async function startWebUseBench(browser?: BenchBrowser): Promise<void> {
       record.end ??= result.ok ? 'success' : 'gave_up'
       record.detail ??= result.ok ? `success(${JSON.stringify(result.summary)})` : result.summary
     } catch (error) {
-      record.end = 'crash'
-      record.detail = error instanceof Error ? error.message : String(error)
+      const ask = record.asks?.at(-1)
+      // Nobody answers the commit gate in a list run: a stop at the question is the gate holding.
+      record.end = ask ? 'asked' : 'crash'
+      record.detail = ask
+        ? `asked before "${ask.what}"`
+        : error instanceof Error
+          ? error.message
+          : String(error)
     } finally {
       clearTimeout(timer)
     }

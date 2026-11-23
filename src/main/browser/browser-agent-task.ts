@@ -35,7 +35,7 @@ import {
   observeWithCurrentLease
 } from './browser-playwright-task-support'
 import { callBrowserAgentModel, type BrowserAgentRole } from './browser-agent-models'
-import { benchTrace } from './web-use-bench-trace'
+import { benchTrace, noteBenchAsk } from './web-use-bench-trace'
 import { scoreWebLines, webRankerInstalled } from './web-ranker'
 import { encodeTaskExecutionPlan, encodeTaskPhase } from '../../shared/task-execution-plan'
 import { commitClick, commitKey } from './browser-commit-gate'
@@ -675,6 +675,7 @@ async function askBeforeCommit(
   if (!what) return
   const why = `Approve "${what}"? Press Continue to let it, or Stop.`
   input.onStep(`asking before "${what}"`)
+  noteBenchAsk(what, pageUrl(snapshot))
   await input.waitForUser(why, input.signal)
   input.signal?.throwIfAborted()
 }
