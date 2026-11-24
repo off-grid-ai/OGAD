@@ -58,6 +58,7 @@ export function savePicks(picks: Picks): void {
 /** No saved picks: the model gate does what it did before onboarding asked. */
 export function clearPicks(): void {
   localStorage.removeItem(PICKS_KEY)
+  window.dispatchEvent(new Event(PICKS_CHANGED_EVENT))
 }
 
 /** Picks or unpicks one part from Settings: a group counts as picked while any of its parts is. */

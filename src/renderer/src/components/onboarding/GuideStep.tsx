@@ -18,6 +18,7 @@ import { WhatWeShareDialog } from '../analytics/WhatWeShareDialog'
 import { Button } from '../ui/button'
 import type { GuideTopic } from '../guide/guideKnowledge'
 import type { Picks } from './picks'
+import { useProActive } from './useProActive'
 
 /** The guide topic that holds the connections. */
 const CONNECTIONS_TOPIC = 'connectors'
@@ -33,7 +34,11 @@ function ProOffer(): JSX.Element {
         Pro: $119 once or $7.99 a month. One license covers up to 5 devices.
       </p>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" onClick={() => openExternal(withUtm(OFF_GRID_WEBSITE_URL, 'onboarding-guide'))}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => openExternal(withUtm(OFF_GRID_WEBSITE_URL, 'onboarding-guide'))}
+        >
           Get Pro
         </Button>
         <Button
@@ -65,6 +70,7 @@ export function GuideStep({
   onOpen: (view: ViewMode) => void
 }>): JSX.Element {
   const [sharingOpen, setSharingOpen] = useState(false)
+  const hasPro = useProActive()
   const ids = guideTopicsFor(picks.parts.length ? picks.parts : ['chat'], 'desktop')
   const footer = (topic: GuideTopic): JSX.Element | null => {
     if (topic.id === CONNECTIONS_TOPIC) {
@@ -77,8 +83,8 @@ export function GuideStep({
         </div>
       )
     }
-    // Onboarding runs before Pro starts, so a Pro feature always shows how to get it.
-    const offer = topic.pro ? <ProOffer /> : null
+    // A Pro feature shows how to get Pro until a license is active.
+    const offer = topic.pro && !hasPro ? <ProOffer /> : null
     if (!topic.notHere) return offer
     return (
       <div className="grid gap-3">
@@ -132,7 +138,7 @@ export function GuideStep({
   )
   return (
     <div className="flex h-full w-full flex-col">
-      <FeatureGuide isPro={false} onOpen={onOpen} picks={{ ids, footer, navFooter }} />
+      <FeatureGuide isPro={hasPro} onOpen={onOpen} picks={{ ids, footer, navFooter }} />
       <WhatWeShareDialog open={sharingOpen} onOpenChange={setSharingOpen} />
     </div>
   )

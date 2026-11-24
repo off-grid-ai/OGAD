@@ -44,7 +44,7 @@ import { PageHeader } from '@offgrid/operator-ui/operator/experience'
 import { cn } from '@renderer/lib/utils'
 import { BoostPromoLine } from '../BoostPromo'
 import { LicenseActivation } from '../pro/UpgradeScreen'
-import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
+import { useProActive } from './useProActive'
 import type { Picks } from './picks'
 
 const PLATFORM = 'desktop' as const
@@ -180,7 +180,7 @@ export function FeaturesStep({
   const groups = onboardingGroups(PLATFORM).filter((g) => picks.groups.includes(g.id))
   const offered = partsFor(picks.groups, PLATFORM)
   // With Pro already active the picks just work, so the licence entry is only for people without it.
-  const { isPro: hasPro } = useRendererEntitlement()
+  const hasPro = useProActive()
   const proPicked = !hasPro && offered.some((p) => picks.parts.includes(p.id) && isPro(p))
   return (
     <div className="my-auto grid w-full gap-8">

@@ -65,6 +65,8 @@ export function QuickConnections({
   useEffect(() => {
     onBusyChange?.(pending)
   }, [pending, onBusyChange])
+  // Leaving while a connection is pending must not keep the caller's buttons disabled.
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange])
 
   return (
     <section aria-label="Quick connections" className="space-y-6">
