@@ -203,6 +203,8 @@ export class AIRequestHandle {
   private runtime?: RuntimeBackend
   private readonly parent = context.getStore()
   private readonly extraMetrics?: Record<string, unknown>
+  /** The metrics scope this handle runs in, so nested handles at any depth skip it once captured. */
+  private readonly metricsScope?: Record<string, unknown>
   private readonly observed: boolean
   private readonly origin: AIRequestOrigin = currentOrigin()
   private readonly hasImage: boolean
@@ -211,7 +213,8 @@ export class AIRequestHandle {
   constructor(meta: Metadata) {
     const parent = context.getStore()
     const extra = extraMetrics.getStore()
-    if (extra && parent?.extraMetrics !== extra) this.extraMetrics = extra
+    this.metricsScope = extra
+    if (extra && parent?.metricsScope !== extra) this.extraMetrics = extra
     this.observed =
       !!observer && !parent && unrecorded.getStore() !== true && meta.countAsGeneration !== false
     this.hasImage = this.observed && meta.modality === 'text' && carriesImage(meta.request)
