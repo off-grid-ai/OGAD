@@ -461,7 +461,7 @@ async function applyHeadlessSpeedSettings(): Promise<void> {
   if (process.argv.includes('--fastest-settings') || process.env.OFFGRID_FASTEST_SETTINGS === '1') {
     const { plan } = await best.applyBestSettings()
     writeDiagnosticLog('gateway', 'server-only.fastest_settings', {
-      speculativeDecoding: plan.chat.speculativeDecoding ?? 'unchanged'
+      speculativeDecoding: plan.chat.speculativeDecoding
     })
   } else {
     await best.prepareBestSettingsOnStartup()
