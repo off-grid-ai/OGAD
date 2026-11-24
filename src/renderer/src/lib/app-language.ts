@@ -13,12 +13,15 @@ const CATALOGS = import.meta.glob<Strings>(
   }
 )
 
+// A pick storage could not keep: it holds until the window closes.
+let pickInWindow: string | null = null
+
 /** The language picked, or null for the computer's language. */
 export function pickedLanguage(): string | null {
   try {
     return localStorage.getItem(KEY)
   } catch {
-    return null
+    return pickInWindow
   }
 }
 
@@ -32,15 +35,23 @@ export function currentLanguage(): Locale {
   return resolveLocale(systemLanguages(), pickedLanguage())
 }
 
+// The newest load: a slower load for an earlier pick never replaces it.
+let latestApply: Promise<Locale> | null = null
+
 /** Loads and turns on the catalog for the current language. Resolves to the locale now in use. */
-export async function applyAppLanguage(): Promise<Locale> {
+export function applyAppLanguage(): Promise<Locale> {
   const locale = currentLanguage()
   // Every shipped locale, English included, has a catalog file (the i18n check keeps it so).
   const load =
     CATALOGS[`../../../../node_modules/@offgrid/i18n/catalogs/${locale.code}/desktop.json`]!
-  setCatalog(locale.code, await load())
-  document.documentElement.lang = locale.tag
-  return locale
+  const run: Promise<Locale> = load().then((strings) => {
+    if (latestApply !== run && latestApply) return latestApply
+    setCatalog(locale.code, strings)
+    document.documentElement.lang = locale.tag
+    return locale
+  })
+  latestApply = run
+  return run
 }
 
 /** Saves the pick (null: the computer's language) and tells the app to redraw in it. */
@@ -49,7 +60,7 @@ export function setPickedLanguage(code: string | null): void {
     if (code) localStorage.setItem(KEY, code)
     else localStorage.removeItem(KEY)
   } catch {
-    // No storage: the pick lasts until the window closes.
+    pickInWindow = code
   }
   window.dispatchEvent(new Event(LANGUAGE_CHANGED))
 }

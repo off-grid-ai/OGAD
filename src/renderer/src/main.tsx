@@ -82,42 +82,45 @@ if (!isClipPopup && !isDictation && !isCuSupervisor && !isGodTwin) {
 }
 // The app language's catalog is on before the first frame, so no screen draws in English first.
 // A promise, not a top-level await: the entry also compiles to CommonJS for the native test runs.
-void applyAppLanguage().then(() => {
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      {/* popLayout exits pin themselves with a <style>; the CSP admits it only with the nonce. */}
-      <MotionConfig nonce={cspNonce()}>
-        {/* Base UI's popups (selects, menus) render <style> tags; same nonce. */}
-        <CSPProvider nonce={cspNonce()}>
-          {/* Starts the operator-ui alive conductor (pointer light, pulses) for every surface. */}
-          <AliveProvider>
-            {hash === '#ai-activity' ? (
-              <TooltipProvider delayDuration={300}>
-                <AIRequestLogs standalone />
-              </TooltipProvider>
-            ) : isClipPopup ? (
-              <ClipboardPopup />
-            ) : isDictation ? (
-              <DictationOverlay />
-            ) : isCuSupervisor ? (
-              <ComputerUseSupervisor />
-            ) : isGodTwin ? (
-              <GodTwinCompanion />
-            ) : (
-              <>
-                {/* The breathing background lives in the main window only; the floating
-                overlays above stay transparent. */}
-                <LivingField />
+// A catalog that fails to load still opens the app, in English.
+void applyAppLanguage()
+  .catch((error: unknown) => console.warn('[i18n] language catalog failed to load', error))
+  .then(() => {
+    createRoot(document.getElementById('root')!).render(
+      <StrictMode>
+        {/* popLayout exits pin themselves with a <style>; the CSP admits it only with the nonce. */}
+        <MotionConfig nonce={cspNonce()}>
+          {/* Base UI's popups (selects, menus) render <style> tags; same nonce. */}
+          <CSPProvider nonce={cspNonce()}>
+            {/* Starts the operator-ui alive conductor (pointer light, pulses) for every surface. */}
+            <AliveProvider>
+              {hash === '#ai-activity' ? (
                 <TooltipProvider delayDuration={300}>
-                  <AppLanguageRoot>
-                    <App />
-                  </AppLanguageRoot>
+                  <AIRequestLogs standalone />
                 </TooltipProvider>
-              </>
-            )}
-          </AliveProvider>
-        </CSPProvider>
-      </MotionConfig>
-    </StrictMode>
-  )
-})
+              ) : isClipPopup ? (
+                <ClipboardPopup />
+              ) : isDictation ? (
+                <DictationOverlay />
+              ) : isCuSupervisor ? (
+                <ComputerUseSupervisor />
+              ) : isGodTwin ? (
+                <GodTwinCompanion />
+              ) : (
+                <>
+                  {/* The breathing background lives in the main window only; the floating
+                overlays above stay transparent. */}
+                  <LivingField />
+                  <TooltipProvider delayDuration={300}>
+                    <AppLanguageRoot>
+                      <App />
+                    </AppLanguageRoot>
+                  </TooltipProvider>
+                </>
+              )}
+            </AliveProvider>
+          </CSPProvider>
+        </MotionConfig>
+      </StrictMode>
+    )
+  })
