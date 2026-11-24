@@ -25,6 +25,10 @@ on:
         description: Branch to build from and commit the new archive pins to
         type: string
         required: true
+      base:
+        description: Branch the update started from; empty uses ENGINE_UPDATE_BASE
+        type: string
+        default: ''
     secrets:
       PUSH_TOKEN:
         required: false
@@ -74,7 +78,7 @@ jobs:
       - id: base
         name: Record the base branch's commit
         env:
-          BASE: ${{ vars.ENGINE_UPDATE_BASE || github.event.repository.default_branch || 'main' }}
+          BASE: ${{ inputs.base || vars.ENGINE_UPDATE_BASE || github.event.repository.default_branch || 'main' }}
         run: |
           echo "base=$BASE" >> "$GITHUB_OUTPUT"
           echo "sha=$(git ls-remote origin "refs/heads/$BASE" | cut -f1)" >> "$GITHUB_OUTPUT"
