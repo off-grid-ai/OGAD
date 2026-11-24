@@ -5,6 +5,7 @@
 #   ./sandbox.sh reset   restart the four small apps (clean state) and re-seed mail + cloud
 #   ./sandbox.sh seed    re-seed mail + cloud only
 #   ./sandbox.sh status  containers and a https check of the six hosts
+#   ./sandbox.sh otp on|off   bank + airline sign-in asks for a code emailed to alex (kept in .env)
 # Passwords live in .env (chmod 600). They are generated once and never printed.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -68,6 +69,16 @@ seed() {
     -e MAIL_PASSWORD -e CLOUD_PASSWORD -v "$PWD/seed:/seed:ro" offgrid-sandbox-mini:1 python /seed/seed.py "$@"
 }
 
+otp() {
+  local value
+  case "${1:-}" in on) value=1 ;; off) value=0 ;; *) echo "usage: $0 otp on|off"; exit 1 ;; esac
+  grep -v '^OTP_LOGIN=' .env > .env.tmp || true
+  echo "OTP_LOGIN=$value" >> .env.tmp
+  mv .env.tmp .env; chmod 600 .env
+  load_env; $DC up -d air bank >/dev/null
+  echo "emailed sign-in codes: $1 (bank, airline)"
+}
+
 status() {
   $DC ps --format "table {{.Service}}\t{{.Status}}\t{{.Ports}}"
   for h in $HOSTS; do
@@ -82,5 +93,6 @@ case "${1:-status}" in
   reset) load_env; $DC restart shop air bank forms; seed ;;
   seed) load_env; shift; seed "$@" ;;
   status) status ;;
-  *) echo "usage: $0 up|down|reset|seed|status"; exit 1 ;;
+  otp) shift; otp "$@" ;;
+  *) echo "usage: $0 up|down|reset|seed|status|otp on|off"; exit 1 ;;
 esac

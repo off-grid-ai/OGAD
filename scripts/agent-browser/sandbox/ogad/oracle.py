@@ -48,6 +48,10 @@ SCRIPTS = {
         ("textbox", r"^Fine reference$", "type", "PF-55821", None),
         ("button", r"^Pay now$", "click", None, None),
     ], r"Your reference is SPR-\d+\. Paid \$[\d.]+"),
+    "balance of my everyday account": ([], r"Balance \$[\d,]+\.\d\d"),
+    "upcoming trips": ([
+        ("link", r"^My trips$", "click", None, None),
+    ], r"\d{1,2}:\d\d"),
     "pizza": ([
         ("textbox", r"Customer name", "type", "Alex Rivera", None),
         ("textbox", r"Telephone", "type", "555-0101", None),
@@ -58,6 +62,9 @@ SCRIPTS = {
     ], r'"custname": "Alex Rivera"'),
 }
 SIGN_IN = re.compile(r'^\s*- button "(Sign in|Log in|Login|Log In)" .*\[ref=([^\]]+)\]', re.M)
+# The harness filled the emailed code (masked like a password): submit it.
+CODE_FILLED = re.compile(r'textbox "[^"]*(?:[Cc]ode|OTP)[^"]*".*: "?••••••••')
+VERIFY = re.compile(r'^\s*- button "(Verify|Continue|Submit)" .*\[ref=([^\]]+)\]', re.M)
 cursor: dict[str, int] = {}
 
 
@@ -110,6 +117,9 @@ def reply(role, text):
     m = SIGN_IN.search(ax)
     if m and re.search(r'textbox "[^"]*[Pp]assword', ax):
         return f"click({m.group(2)})"
+    v = VERIFY.search(ax)
+    if v and CODE_FILLED.search(ax):
+        return f"click({v.group(2)})"
     i = cursor.get(key, 0)
     for j in range(i, len(steps)):
         r, name, action, value, after = steps[j]

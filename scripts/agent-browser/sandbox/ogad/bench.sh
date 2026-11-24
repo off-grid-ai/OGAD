@@ -22,11 +22,14 @@ start_app() {
   ./run-ogad.sh > "$1" 2>&1 &
   until curl -s "127.0.0.1:$CDP/json/list" | grep -q localhost:5173; do sleep 1; done
   "$NODE" vault-setup.mjs "$CDP" | grep -E '"status"|"opened"'   # unlock before the bench starts
+  "$NODE" connect-mail.mjs "$CDP"   # the email connection reads the emailed sign-in codes
 }
 
 mkdir -p "$OUT"
 stop_app
 rm -rf profile/Partitions/sandbox-*          # signed out
+# OTP=1 / OTP=0: bank + airline sign-in asks for an emailed code (or not). Unset keeps the current setting.
+if [ -n "${OTP:-}" ]; then ../sandbox.sh otp "$([ "$OTP" = 1 ] && echo on || echo off)"; fi
 ../sandbox.sh reset >/dev/null                # clean shop/airline/bank/forms, fresh mail + cloud seed
 if [ "${SIGNED_IN:-0}" = 1 ]; then
   start_app "$OUT/signin.log"

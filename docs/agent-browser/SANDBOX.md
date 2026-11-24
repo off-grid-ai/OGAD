@@ -29,6 +29,13 @@ run on test accounts only, never on a person's real accounts or data.
 - **Visits.** Each bench record has `visits` (the task's page trail). When a page was opened 3+
   times, the prompt gets one line saying so. On by default (Mac, 22 Nov);
   `OFFGRID_AGENT_VISIT_HINT=0` turns it off for the with/without A/B.
+- **Emailed sign-in codes.** When a page asks for a one-time code, the harness reads fresh mail
+  from that site (same registrable domain, received after the page opened, minus 30 s) in the
+  person's connected mailboxes: IMAP accounts (core) and Gmail / Outlook (Pro). It waits up to
+  150 s (`OFFGRID_EMAILED_CODE_WAIT_MS`) and fills the code like a Vault password. The model never
+  sees it: the field reaches the model as `textbox "Verification code" … : ••••••••`, so the next
+  step is to click Verify. No code, or two different codes, and the field stays empty: ask the
+  person, as before. Detection and extraction: `src/main/browser/one-time-code.ts`.
 - **Uploads.** `upload` actions read files from `<userData>/agent-uploads/` only (put `cv.pdf` there).
 - **New actions now work:** `forward`, `reload`, `new_tab`, `switch_tab`, `close_tab`, `upload`.
 
@@ -150,6 +157,21 @@ Commands (on the workstation):
 endpoints go in `BENCH_MODELS` (the `OFFGRID_WEBUSE_BENCH_MODELS` JSON). `ogad/vault-setup.mjs`
 creates or unlocks the dev profile's Vault and adds the six logins. `ogad/prove-profiles.mjs`
 opens each profile, fills its login from the Vault and checks the sign-in.
+
+### Emailed one-time codes (OTP)
+
+- `~/agent-sandbox/sandbox.sh otp on` (or `off`): the bank and airline sign-in ask for a 6-digit
+  code after the password. The site emails it from `no-reply@offgrid-bank.test` /
+  `no-reply@offgrid-air.test` to `alex@offgrid-mail.test`. Kept in `.env` as `OTP_LOGIN`; off by
+  default, so the other tasks are unchanged.
+- The mailserver's IMAP is on `127.0.0.1:1143` (this computer only). `ogad/connect-mail.mjs <cdp>`
+  adds OGAD's email connection "Sandbox mail (IMAP)" for alex; `bench.sh` runs it after the Vault.
+  In the app it is Connections → Email (IMAP), server `imap://127.0.0.1:1143`.
+- `OTP=1 ./bench.sh ogad/bench-otp.json` turns the codes on and runs the OTP tasks:
+  `otp-bank-balance`, `otp-bank-dispute`, `otp-airline-next-trip`, `otp-airline-bag`,
+  `otp-airline-cancel` (format of `bench-train.json`: `{id, goal, profile}`).
+- Every task on `bank` or `airline` meets the code page while OTP is on, so with `OTP=1` the
+  existing bank and airline tasks also train the step.
 
 Not yet set up: office editing in Nextcloud (Collabora). Four `calendar` tasks edit `.docx` or
 `.xlsx` files or make charts (`paid-summarise_docs-02`, `paid-work_reports-02/03/04`), and they

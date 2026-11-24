@@ -30,6 +30,8 @@ services:
     hostname: mail.offgrid-mail.test
     cpus: 1
     mem_limit: 768m
+    # IMAP for OGAD's email connection (emailed sign-in codes). This computer only.
+    ports: ["127.0.0.1:1143:143"]
     environment:
       PERMIT_DOCKER: network
       SSL_TYPE: ""
@@ -94,12 +96,12 @@ services:
     <<: *mini
     depends_on: [shop]
     ports: ["127.0.0.1:8084:8000"]
-    environment: {SITE: air, SANDBOX_USER: alex, SANDBOX_PASSWORD: "${AIR_PASSWORD}"}
+    environment: {SITE: air, SANDBOX_USER: alex, SANDBOX_PASSWORD: "${AIR_PASSWORD}", OTP_LOGIN: "${OTP_LOGIN:-0}"}
   bank:
     <<: *mini
     depends_on: [shop]
     ports: ["127.0.0.1:8085:8000"]
-    environment: {SITE: bank, SANDBOX_USER: alex, SANDBOX_PASSWORD: "${BANK_PASSWORD}"}
+    environment: {SITE: bank, SANDBOX_USER: alex, SANDBOX_PASSWORD: "${BANK_PASSWORD}", OTP_LOGIN: "${OTP_LOGIN:-0}"}
   forms:
     <<: *mini
     depends_on: [shop]

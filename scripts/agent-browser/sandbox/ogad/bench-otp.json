@@ -1,0 +1,7 @@
+[
+  {"id": "otp-bank-balance", "goal": "Report the balance of my everyday account.", "profile": "bank"},
+  {"id": "otp-bank-dispute", "goal": "Dispute the duplicate charge from 'CloudBox' last week.", "profile": "bank"},
+  {"id": "otp-airline-next-trip", "goal": "Find my upcoming trips and report the departure time of the next one.", "profile": "airline"},
+  {"id": "otp-airline-bag", "goal": "Add one checked bag to my upcoming trip.", "profile": "airline"},
+  {"id": "otp-airline-cancel", "goal": "Cancel booking XYZ789 and report the refund amount.", "profile": "airline"}
+]
