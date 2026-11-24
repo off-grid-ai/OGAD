@@ -1,39 +1,20 @@
-# Nested planning: training plan (proposal)
+# Nested planning: training
 
-The loop and contract for nested planning are in `@offgrid/use` and `docs/MODEL_CONTRACT.md`
-(section "Nested planning"). They are off by default. This is how LFM3 learns them. Nothing here
-changes the running r18 pipeline; the pipeline owner decides when to take it.
+Nested planning is done by the harness alone (`docs/MODEL_CONTRACT.md`, "Nested planning"): every
+request stays v0, and a step's own GOAL is plain text. So no model needs new vocabulary, and any trained
+model can run nested today.
 
-## What the planner must learn
+## Data
 
-- On a whole job (many units, several sites): write `goal: <sub-goal>` steps when `SUBGOALS: allowed`.
-- With `WITHIN`: plan only this sub-goal, in units of about 5 actions with a visible check.
-- With `NOTES`: use the facts; do not look them up again.
-- Without `SUBGOALS`: plan flat, as today.
+- The teacher harvest of whole end-to-end jobs runs with nesting on (`~/agent-sandbox/jobs/harvest-jobs.sh`;
+  `NESTED=1` → `agentModels.nestedPlanning`). Its calls are ordinary v0 rows, so `teach_rows.py` needs no
+  change.
+- A run becomes rows only if the job is DONE by end state (`check_state.py`: site state, sent mail,
+  mail folders, calendar), never by the evaluator's word.
+- Short tasks stay flat; most rows are flat, so the flat skill does not drift.
 
-The actor needs no new skill: it reads `WITHIN`/`NOTES` as context. The evaluator learns one new
-habit: inside a sub-goal, `success("...")` carries the facts the next parts need.
+## Measuring
 
-## Teacher data
-
-1. Bring the two `feature/nested-planner` commits (shared, desktop) into the bench app
-   (`~/agent-sandbox/ogad-src` and `~/agent-sandbox/shared`) by merge, not cherry-pick.
-2. Harvest the end-to-end jobs (the composed jobs on the `life` profile) with the teacher and
-   `"nestedPlanning": true` in the agentModels JSON that `bench.sh` passes. The teacher runs with
-   `instructions: true`, so it gets the new planner and evaluator lines.
-3. `teach_rows.py` needs no change: each call's request is kept as-is, and
-   `N goal: ... | check: ...` already matches its plan pattern. Sub-goal planner calls become rows
-   with `WITHIN`/`NOTES`; top-level calls become rows with `SUBGOALS: allowed`.
-4. Keep the short tasks flat (no `nestedPlanning`): most rows stay v0, so the flat skill does not drift.
-5. Grade by end state (site `/_state`, IMAP, CalDAV), not by the evaluator's word.
-
-## Public benchmarks
-
-`scripts/e2e/run-benchmark.mjs` (WebVoyager, Mind2Web) has its own loop. WebVoyager and Mind2Web
-tasks are short, so they stay flat. Port nested planning there only if a public task needs it.
-
-## Done when
-
-- LFM3 planner, on held-out whole jobs, writes sub-goals and finishes more jobs end to end than with
-  nesting off. Effective = the job gets done.
-- Flat scores (OGAD-111, WebVoyager, Mind2Web) do not drop beyond pass noise.
+- Whole jobs held out (`jobs-e2e.json`, split holdout, 18): `run-jobs.sh <out> holdout` with and without
+  `NESTED=1`, for each model and for the bar. Effective = jobs done by end state.
+- The public benchmarks (WebVoyager, Mind2Web) and OGAD-111 stay flat: their tasks are short.
