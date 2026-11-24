@@ -175,6 +175,7 @@ export function SoftwareUpdateSection(): React.ReactElement {
   const [historyError, setHistoryError] = useState('')
   const [selectedVersion, setSelectedVersion] = useState<PreviousVersion | null>(null)
   const [downloadProgress, setDownloadProgress] = useState<UpdateProgress | null>(null)
+  const [store, setStore] = useState<string | null>(null)
 
   useEffect(() => {
     api
@@ -185,7 +186,9 @@ export function SoftwareUpdateSection(): React.ReactElement {
           auto?: boolean
           channel?: string
           skippedVersion?: string | null
+          store?: string | null
         }) => {
+          setStore(prefs.store ?? null)
           setVersion(prefs.currentVersion ?? '')
           setAuto(prefs.auto !== false)
           setBeta(prefs.channel === 'beta')
@@ -328,6 +331,14 @@ export function SoftwareUpdateSection(): React.ReactElement {
         status: downloadProgress.status
       })
     : null
+
+  if (store) {
+    return (
+      <p className="text-xs text-neutral-500">
+        Updates come from {store}.{version ? ` Current: v${version}` : ''}
+      </p>
+    )
+  }
 
   return (
     <div>

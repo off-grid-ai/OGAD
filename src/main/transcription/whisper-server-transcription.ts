@@ -5,6 +5,7 @@ import { recordAIRequest } from '../ai-request-log'
 import os from 'os'
 import path from 'path'
 import { decodeToWavArgs, DECODE_TIMEOUT_MS } from './ffmpeg-decode'
+import { wavHasSpeech } from './silence-gate'
 import { runNativeTranscriptionProcess } from './native-process'
 import type { TranscriptionService, Transcript, TranscribeOptions } from './types'
 import { ffmpegBin, whisperModel } from './whisper-cli'
@@ -43,7 +44,10 @@ export class WhisperServerTranscription implements TranscriptionService {
         if (!opts.alreadyWav16k) {
           const ff = ffmpegBin()
           if (!ff) throw new Error('ffmpeg is required to decode audio and was not found.')
-          tmp = path.join(os.tmpdir(), `offgrid-stt-srv-${Date.now()}-${process.pid}-${randomUUID()}.wav`)
+          tmp = path.join(
+            os.tmpdir(),
+            `offgrid-stt-srv-${Date.now()}-${process.pid}-${randomUUID()}.wav`
+          )
           try {
             await runNativeTranscriptionProcess(ff, decodeToWavArgs(input.path, tmp), {
               timeout: DECODE_TIMEOUT_MS,
@@ -57,6 +61,11 @@ export class WhisperServerTranscription implements TranscriptionService {
         }
 
         try {
+          // Silence goes no further: Whisper would write a word for it (silence-gate.ts).
+          if (opts.suppressNonSpeech !== false && !(await wavHasSpeech(wav))) {
+            const lang = opts.language && opts.language !== 'auto' ? opts.language : undefined
+            return { text: '', language: lang }
+          }
           return await this.svc.transcribe(
             { modelPath: model },
             {

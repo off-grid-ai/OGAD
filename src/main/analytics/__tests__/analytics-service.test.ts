@@ -207,6 +207,23 @@ describe('after the user opts in', () => {
       expect(all).not.toContain(leaked)
   })
 
+  it('onboarding picks carry only the group and feature ids the app ships', async () => {
+    const service = build()
+    service.optIn('setup')
+    service.captureFromRenderer('onboarding_picks', {
+      groups: 'chat,create,../etc',
+      features: 'chat,images,my secret note',
+      extra: 'secret'
+    })
+    await service.shutdown()
+    const picks = fake!.events.filter((event) => event.event === 'onboarding_picks')
+    expect(picks.map((event) => event.properties)).toEqual([
+      expect.objectContaining({ groups: 'chat,create', features: 'chat,images' })
+    ])
+    const all = fake!.bodies.join('')
+    for (const leaked of ['my secret note', '../etc', 'secret']) expect(all).not.toContain(leaked)
+  })
+
   it('counts each feature at most once in ten minutes, whichever process reports it', async () => {
     let now = 1_000_000
     const service = build({ now: () => now })

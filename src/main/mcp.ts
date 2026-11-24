@@ -325,7 +325,7 @@ async function connect(
       await client.connect(transport)
     } catch (e) {
       if (e instanceof UnauthorizedError)
-        throw new Error('Authorization required — open Integrations and click Test to sign in.')
+        throw new Error('Authorization required — open Connectors and click Test to sign in.')
       throw e
     }
   } else {

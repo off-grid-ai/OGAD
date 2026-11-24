@@ -148,3 +148,53 @@ export function persistTaskResultInChat(db: Database.Database, task: TaskRunSnap
   addRagMessage(conversationId, 'assistant', content, resultContext(task))
   return true
 }
+
+/**
+ * A task can end before the Chat turn that started it has saved its own reply (found live: a Web
+ * Use task stopped 47 ms after it started). Its result was then saved first, the turn's "Web Use
+ * started" reply after it, and the Chat showed "started" for a task that had already stopped.
+ * Called after an assistant reply is saved: a task result that the reply now follows moves back to
+ * the end, so the Chat's last word on the task is its outcome.
+ */
+export function keepTaskResultsLast(db: Database.Database, conversationId: string): boolean {
+  const rows = db
+    .prepare(
+      `SELECT id, uuid, content, context
+       FROM rag_messages
+       WHERE conversation_id = ? AND role = 'assistant'
+       ORDER BY id`
+    )
+    .all(conversationId) as Array<StoredMessageContext & { id: number }>
+  let moved = false
+  for (const [index, row] of rows.entries()) {
+    const taskId = row.context ? taskResultId(row.context) : undefined
+    if (!taskId || !row.context) continue
+    // Only behind the reply that launched this same task: other later turns keep their order.
+    const launchedAfter = rows
+      .slice(index + 1)
+      .some(
+        (later) =>
+          !taskResultId(later.context ?? '') &&
+          `${later.content}${later.context ?? ''}`.includes(taskId)
+      )
+    if (!launchedAfter) continue
+    db.prepare('DELETE FROM rag_messages WHERE uuid = ?').run(row.uuid)
+    emitSyncMutation({ entity: CORE_SYNC_ENTITIES.message, entityId: row.uuid, kind: 'delete' })
+    addRagMessage(conversationId, 'assistant', row.content, JSON.parse(row.context))
+    moved = true
+  }
+  return moved
+}
+
+function taskResultId(context: string): string | undefined {
+  try {
+    const result = (JSON.parse(context) as Record<string, unknown>)[TASK_RESULT_CONTEXT_KEY]
+    const taskId =
+      typeof result === 'object' && result !== null
+        ? (result as Record<string, unknown>).taskId
+        : undefined
+    return typeof taskId === 'string' ? taskId : undefined
+  } catch {
+    return undefined
+  }
+}

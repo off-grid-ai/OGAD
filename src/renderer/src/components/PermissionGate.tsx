@@ -55,6 +55,43 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
   const [visionIssue, setVisionIssue] = useState<VisionIssue | null>(null)
   const [visionDownloadProgress, setVisionDownloadProgress] = useState<ProgressLike | null>(null)
   const [visionDownloadFailure, setVisionDownloadFailure] = useState<string | null>(null)
+  // A chat model on its way (the starter from onboarding, or Configure): its progress shows in the nudge.
+  const [chatSetup, setChatSetup] = useState<{
+    modelName: string | null
+    progress: ProgressLike | null
+    failure: string | null
+  } | null>(null)
+  useEffect(
+    () =>
+      window.api.onSetupProgress((data) => {
+        const p = data as {
+          phase?: string
+          message?: string
+          modelName?: string
+          downloadedBytes?: number
+          totalBytes?: number
+          bytesPerSecond?: number
+        }
+        if (p.phase === 'download')
+          setChatSetup({
+            modelName: p.modelName ?? null,
+            progress: {
+              downloadedBytes: p.downloadedBytes,
+              totalBytes: p.totalBytes,
+              bytesPerSecond: p.bytesPerSecond
+            },
+            failure: null
+          })
+        else if (p.phase === 'error')
+          setChatSetup((s) => ({
+            modelName: s?.modelName ?? null,
+            progress: null,
+            failure: p.message ?? 'Setup failed.'
+          }))
+        else if (p.phase === 'done') setChatSetup(null)
+      }),
+    []
+  )
   const permissions = usePermissionController(isPro)
   const permissionStatus = permissions.status
   const isChecking = permissions.checking
@@ -236,8 +273,8 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
     return (
       <div className="h-screen w-screen bg-neutral-950 flex items-center justify-center fixed inset-0">
         <motion.div
-          initial={{ opacity: 0, filter: 'blur(10px)' }}
-          animate={{ opacity: 1, filter: 'blur(0px)' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
           className="relative z-10 text-center"
         >
@@ -268,6 +305,9 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
             <SetupNudge
               key="setup-nudge"
               missingModel={!modelStatus?.downloaded}
+              modelName={chatSetup?.modelName}
+              progress={chatSetup?.progress}
+              failure={chatSetup?.failure}
               missingLocalNetwork={isPro && permissionStatus?.localNetwork === false}
               onOpen={() => setShowSetup(true)}
               onDismiss={() => setSetupDismissed(true)}
@@ -354,7 +394,7 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
               description="One app · every open model · all on your device"
             >
               <AnimatedGroup
-                preset="blur-slide"
+                preset="slide"
                 className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-neutral-400"
               >
                 {['Chat', 'Vision', 'Images', 'Voice', 'Speech'].map((c) => (
@@ -438,11 +478,13 @@ function SetupNudge({
         ? 'Some moments need a vision model'
         : issue === 'remote-screen-images'
           ? 'Allow screen images'
-          : missingModel
-            ? 'Set up your local AI'
-            : missingLocalNetwork
-              ? 'Allow Local Network access'
-              : 'Finish setting up capture'
+          : missingModel && progress
+            ? `Getting ${modelName ?? 'your chat model'} ready`
+            : missingModel
+              ? 'Set up your local AI'
+              : missingLocalNetwork
+                ? 'Allow Local Network access'
+                : 'Finish setting up capture'
   const detail =
     issue === 'missing-projector'
       ? `${moments} wait. ${modelName ?? 'The active model'} reads them after its vision support downloads.`
@@ -452,11 +494,13 @@ function SetupNudge({
           ? `${moments} wait. The chat model on ${modelName ?? 'your server'} reads text only.`
           : issue === 'remote-screen-images'
             ? `${moments} wait. Allow screen images for ${modelName ?? 'your server'} to analyze them there.`
-            : missingModel
-              ? `Pick a model yourself, or let Off Grid AI configure one for your ${deviceNoun()}.`
-              : missingLocalNetwork
-                ? `Allow this ${deviceNoun()} to find and sync directly with your devices.`
-                : 'Grant screen and accessibility access so Off Grid AI can see and remember.'
+            : missingModel && progress
+              ? 'Chat works the moment it finishes. Bigger models are under Configure.'
+              : missingModel
+                ? `Pick a model yourself, or let Off Grid AI configure one for your ${deviceNoun()}.`
+                : missingLocalNetwork
+                  ? `Allow this ${deviceNoun()} to find and sync directly with your devices.`
+                  : 'Grant screen and accessibility access so Off Grid AI can see and remember.'
   const presentedProgress = progress ? projectProgress(progress) : null
   const cta =
     progress != null
@@ -483,14 +527,14 @@ function SetupNudge({
 
   return (
     <motion.div
-      initial={reduceMotion ? false : { opacity: 0, y: 16, filter: 'blur(6px)' }}
-      animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16, filter: 'blur(6px)' }}
+      initial={reduceMotion ? false : { opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16 }}
       transition={{ duration: reduceMotion ? 0 : 0.4, ease }}
       className="fixed bottom-14 z-50 flex max-w-[min(560px,calc(100vw-2rem))] items-center gap-4 rounded-xl border border-green-500/30 bg-background/95 px-5 py-4 text-foreground shadow-xl backdrop-blur-xl"
       style={{ right: currentTaskLeft === null ? 16 : window.innerWidth - currentTaskLeft + 16 }}
     >
-      <Cpu className="h-4 w-4 shrink-0 text-green-500" />
+      <Cpu className="mt-px h-4 w-4 shrink-0 self-start text-green-500" />
       <div className="min-w-0 flex-1 text-xs leading-snug">
         <div className="font-medium text-foreground">{title}</div>
         <div className="mt-0.5 text-muted-foreground">{detail}</div>
@@ -500,8 +544,8 @@ function SetupNudge({
               key="failure"
               role="status"
               className="mt-1 text-red-400"
-              initial={reduceMotion ? false : { opacity: 0, y: 4, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: reduceMotion ? 0 : 0.3, ease }}
             >

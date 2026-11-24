@@ -92,6 +92,8 @@ export interface PermissionStatusContract {
   screenRecording: boolean
   localNetwork: boolean
   allGranted: boolean
+  /** 'ask' = the system prompt can still show; 'blocked' = only System Settings can change it. */
+  microphone?: 'granted' | 'ask' | 'blocked'
 }
 
 /** Status values rendered by Settings -> System health. Process state, installed

@@ -1,0 +1,164 @@
+<title>Product Loops Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one card per decision. Today (the screen with its marks) above, the real after-shots below, each with Works / Broken. */
+:root {
+  --bg: #f5f6f4; --surface: #ffffff; --fg: #141a16; --muted: #5d6862; --line: #dfe3df;
+  --accent: #0f7a4f; --accent-soft: #e3f2ea; --mark: #e0482f; --mark-fg: #ffffff; --bad: #c2412d; --bad-soft: #fbe9e5;
+  --sans: "Inter", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d110f; --surface: #151a17; --fg: #e7ece8; --muted: #94a199; --line: #26302a;
+  --accent: #4cc98f; --accent-soft: #15301f; --mark: #ff6a4d; --mark-fg: #140a07; --bad: #ff7a62; --bad-soft: #351813; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0d110f; --surface: #151a17; --fg: #e7ece8; --muted: #94a199; --line: #26302a;
+  --accent: #4cc98f; --accent-soft: #15301f; --mark: #ff6a4d; --mark-fg: #140a07; --bad: #ff7a62; --bad-soft: #351813; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 14px/1.55 var(--sans); margin: 0; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-block: 28px 80px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.lbl { font: 500 11px/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+h1 { font-weight: 300; font-size: 32px; line-height: 1.15; margin: 8px 0 10px; text-wrap: balance; }
+.how { margin: 0 0 18px; color: var(--muted); max-width: 72ch; }
+.bar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px);
+  display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 10px 0; border-bottom: 1px solid var(--line); margin-bottom: 18px; font: 500 12px var(--mono); }
+.bar .ok { color: var(--accent); } .bar .no { color: var(--bad); }
+.idx { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; margin-bottom: 26px; }
+.idx a { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  color: var(--fg); text-decoration: none; font-size: 13px; min-width: 0; }
+.idx a:hover { border-color: var(--accent); }
+.idx .n, .idx .c { font: 500 11px var(--mono); color: var(--muted); }
+.idx .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 22px; scroll-margin-top: 56px; overflow: hidden; }
+.head { padding: 16px 18px 12px; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
+.head h2 { margin: 0; font-weight: 400; font-size: 20px; line-height: 1.25; }
+.head h2 .n { font: 500 13px var(--mono); color: var(--muted); margin-right: 6px; }
+.head .build { margin: 0; background: var(--accent-soft); padding: 8px 10px; border-radius: 7px; max-width: 90ch; }
+.sect { padding: 14px 18px; }
+.sect + .sect { border-top: 1px solid var(--line); }
+.sect > .lbl { margin-bottom: 10px; display: block; }
+.today { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.today.tall { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); max-width: 560px; }
+figure { margin: 0; min-width: 0; display: grid; gap: 4px; }
+figcaption { font: 11px var(--mono); color: var(--muted); }
+.shot { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+.shot img { display: block; width: 100%; height: auto; cursor: zoom-in; }
+.mk { position: absolute; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; background: var(--mark); color: var(--mark-fg);
+  font: 600 11px/22px var(--mono); text-align: center; box-shadow: 0 0 0 3px color-mix(in srgb, var(--mark) 35%, transparent); }
+.legend { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.legend li { display: flex; gap: 8px; align-items: baseline; }
+.legend .num { flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--mark); color: var(--mark-fg); font: 600 10px/18px var(--mono); text-align: center; }
+.after { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.tile { display: grid; gap: 8px; align-content: start; border: 1px solid var(--line); border-radius: 10px; padding: 10px; transition: border-color .2s, background .2s; }
+.tile.works { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.tile.broken { border-color: var(--bad); background: var(--bad-soft); }
+.tile .name { font-weight: 500; }
+.tile .group { font: 11px var(--mono); color: var(--muted); }
+.tile .what { margin: 0; font-size: 13px; color: var(--muted); }
+.noshot { border: 1px dashed var(--line); border-radius: 8px; padding: 10px; font-size: 12px; color: var(--muted); }
+.noshot ol { margin: 6px 0 0; padding-left: 18px; }
+.verdict { display: flex; gap: 6px; }
+.vb { flex: 1; font: 500 12px var(--sans); padding: 6px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+  cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+.vb:hover { border-color: var(--accent); }
+.vb.on.w { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.vb.on.b { background: var(--bad); border-color: var(--bad); color: var(--bg); }
+.vb:disabled { opacity: .5; cursor: default; }
+.note { width: 100%; box-sizing: border-box; font: 13px var(--sans); padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--fg); resize: vertical; min-height: 34px; }
+.empty { color: var(--muted); font-size: 13px; }
+dialog { padding: 0; border: 0; background: transparent; max-width: 96vw; max-height: 94vh; }
+dialog img { max-width: 96vw; max-height: 94vh; display: block; border-radius: 8px; }
+dialog::backdrop { background: rgba(0,0,0,.8); }
+@media (max-width: 760px) { .today, .today.tall { grid-template-columns: 1fr; } h1 { font-size: 26px; } }
+</style>
+<div class="wrap">
+  <div class="lbl">Off Grid AI · product loops · change review</div>
+  <h1>What changed for each decision</h1>
+  <p class="how">Each card shows today's screen with what was wrong, then the screens after the fix. Try each one, then mark it Works or Broken and add a note. Your marks are saved here for Claude to read.</p>
+  <div class="bar" id="bar"></div>
+  <nav class="idx" id="idx"></nav>
+  <main id="cards"></main>
+</div>
+<dialog id="zoom"><img alt=""></dialog>
+<script>
+(() => {
+  const DATA = /*DATA*/null;
+  const $ = (s, el = document) => el.querySelector(s);
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const verdicts = {};
+  let db = null;
+
+  const shotFig = (s, cls = '') => s && s.img ? `<figure class="${cls}"><div class="shot"><img src="${s.img}" alt="${esc(s.label)}">${
+    (s.marks || []).map((m) => `<span class="mk" style="left:${m.x}%;top:${m.y}%">${m.n}</span>`).join('')}</div><figcaption>${esc(s.label)}</figcaption></figure>` : '';
+  const legend = (c) => [...c.before.marks, ...(c.phone ? c.phone.marks : [])]
+    .map((m) => `<li><span class="num">${m.n}</span><span>${esc(m.text)}</span></li>`).join('');
+  const tile = (s) => `<div class="tile" data-id="${esc(s.id)}">
+      <div><div class="name">${esc(s.name)}</div>${s.group ? `<div class="group">${esc(s.group)}</div>` : ''}</div>
+      ${s.img ? `<div class="shot"><img src="${s.img}" alt="${esc(s.name)}"></div>`
+        : `<div class="noshot">Not shot yet. To see it:${s.steps.length ? `<ol>${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ' open this screen in the app.'}</div>`}
+      ${s.what ? `<p class="what">${esc(s.what)}</p>` : ''}
+      <div class="verdict"><button class="vb w" data-v="works">Works</button><button class="vb b" data-v="broken">Broken</button></div>
+      <textarea class="note" rows="1" placeholder="Note (optional)"></textarea>
+    </div>`;
+
+  $('#idx').innerHTML = DATA.decisions.map((c, i) =>
+    `<a href="#${c.id}"><span class="n">${i + 1}</span><span class="t">${esc(c.title)}</span><span class="c">${c.after.length}</span></a>`).join('');
+  $('#cards').innerHTML = DATA.decisions.map((c, i) => `<section class="card" id="${c.id}">
+      <div class="head"><h2><span class="n">${i + 1}</span>${esc(c.title)}</h2><p class="build">${esc(c.build)}</p></div>
+      <div class="sect"><span class="lbl">Today · ${c.count} places</span>
+        <div class="today ${c.before.tall ? 'tall' : ''}">${shotFig(c.before)}${shotFig(c.phone, 'phone')}</div>
+        <ul class="legend">${legend(c)}</ul></div>
+      <div class="sect"><span class="lbl">With the fix</span>
+        ${c.after.length ? `<div class="after">${c.after.map(tile).join('')}</div>` : '<p class="empty">Screens for this decision are still being shot.</p>'}</div>
+    </section>`).join('');
+
+  const all = DATA.decisions.flatMap((c) => c.after);
+  const paint = () => {
+    document.querySelectorAll('.tile').forEach((t) => {
+      const v = verdicts[t.dataset.id] || {};
+      t.classList.toggle('works', v.state === 'works');
+      t.classList.toggle('broken', v.state === 'broken');
+      t.querySelectorAll('.vb').forEach((b) => b.classList.toggle('on', v.state === b.dataset.v));
+      const n = t.querySelector('.note');
+      if (document.activeElement !== n) n.value = v.note || '';
+    });
+    const works = all.filter((s) => verdicts[s.id]?.state === 'works').length;
+    const broken = all.filter((s) => verdicts[s.id]?.state === 'broken').length;
+    const shot = all.filter((s) => s.img).length;
+    $('#bar').innerHTML = `<span>${all.length} screens · ${shot} shot</span><span class="ok">${works} work</span><span class="no">${broken} broken</span><span>${all.length - works - broken} to try</span>`;
+  };
+  paint();
+
+  const save = (id, patch) => {
+    verdicts[id] = { ...(verdicts[id] || {}), ...patch };
+    paint();
+    if (db) db.doc(`verdicts/${id}`).set({ ...verdicts[id], at: Date.now() }).catch(() => {});
+  };
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.vb');
+    if (b) { const id = b.closest('.tile').dataset.id; save(id, { state: verdicts[id]?.state === b.dataset.v ? null : b.dataset.v }); return; }
+    const img = e.target.closest('.shot img');
+    if (img) { $('#zoom img').src = img.src; $('#zoom').showModal(); }
+  });
+  $('#zoom').addEventListener('click', () => $('#zoom').close());
+  let timer;
+  document.addEventListener('input', (e) => {
+    const n = e.target.closest('.note');
+    if (!n) return;
+    const id = n.closest('.tile').dataset.id;
+    verdicts[id] = { ...(verdicts[id] || {}), note: n.value };
+    clearTimeout(timer);
+    timer = setTimeout(() => save(id, { note: n.value }), 600);
+  });
+
+  (window.claude ? claude.use('db') : Promise.resolve(null)).then((d) => {
+    if (!d) { document.querySelectorAll('.vb, .note').forEach((x) => (x.disabled = true)); return; }
+    db = d;
+    db.collection('verdicts').onSnapshot((snap) => {
+      (snap.docs || []).forEach((doc) => { verdicts[doc.id] = typeof doc.data === 'function' ? doc.data() : doc.data; });
+      paint();
+    }, () => {});
+  });
+})();
+</script>

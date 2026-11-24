@@ -18,7 +18,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { completeOnboarding } from './helpers/onboarding'
-import { targetIsPackaged } from './helpers/launch'
+import { targetIsPackaged, skipGpuSetup } from './helpers/launch'
 
 const TARGET_ID = 'unsloth/Qwen3.5-2B-GGUF'
 const TARGET_NAME = 'Qwen 3.5 2B'
@@ -74,22 +74,24 @@ async function closeApp(): Promise<void> {
 
 async function launchApp(): Promise<void> {
   const fixture = path.resolve('e2e/fixtures/app025-model-download-network-boundary.cjs')
-  app = await electron.launch({
-    args: [fixture],
-    env: {
-      ...process.env,
-      OFFGRID_USER_DATA: profileDir,
-      OFFGRID_APP025_NETWORK_LEDGER: ledgerPath,
-      OFFGRID_APP025_REAL_GGUF: SOURCE_MODEL,
-      OFFGRID_APP025_REAL_MMPROJ: SOURCE_PROJECTOR,
-      OFFGRID_PRO: '0',
-      NODE_ENV: 'production',
-      OPENAI_API_KEY: '',
-      ANTHROPIC_API_KEY: '',
-      GOOGLE_API_KEY: '',
-      HF_TOKEN: ''
-    }
-  })
+  app = skipGpuSetup(
+    await electron.launch({
+      args: [fixture],
+      env: {
+        ...process.env,
+        OFFGRID_USER_DATA: profileDir,
+        OFFGRID_APP025_NETWORK_LEDGER: ledgerPath,
+        OFFGRID_APP025_REAL_GGUF: SOURCE_MODEL,
+        OFFGRID_APP025_REAL_MMPROJ: SOURCE_PROJECTOR,
+        OFFGRID_PRO: '0',
+        NODE_ENV: 'production',
+        OPENAI_API_KEY: '',
+        ANTHROPIC_API_KEY: '',
+        GOOGLE_API_KEY: '',
+        HF_TOKEN: ''
+      }
+    })
+  )
   page = await app.firstWindow()
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.waitForLoadState('domcontentloaded')

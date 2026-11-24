@@ -19,7 +19,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { completeOnboarding } from './helpers/onboarding'
-import { targetIsPackaged } from './helpers/launch'
+import { targetIsPackaged, skipGpuSetup } from './helpers/launch'
 import { closeAndWait } from './helpers/windows'
 
 interface RecorderEvent {
@@ -77,18 +77,20 @@ test.describe('Meeting auto-stop', () => {
     const recorder = path.join(recorderDir, 'meeting-recorder')
     fs.copyFileSync(path.resolve('e2e/fixtures/app142-meeting-recorder-boundary.mjs'), recorder)
     fs.chmodSync(recorder, 0o755)
-    app = await electron.launch({
-      args: [process.cwd()],
-      cwd: boundaryRoot,
-      env: {
-        ...process.env,
-        OFFGRID_USER_DATA: path.join(rootDir, 'profile'),
-        OFFGRID_PRO: '1',
-        OFFGRID_APP142_AUDIT_FILE: auditFile,
-        OFFGRID_APP142_FFMPEG: ffmpegPath(),
-        NODE_ENV: 'production'
-      }
-    })
+    app = skipGpuSetup(
+      await electron.launch({
+        args: [process.cwd()],
+        cwd: boundaryRoot,
+        env: {
+          ...process.env,
+          OFFGRID_USER_DATA: path.join(rootDir, 'profile'),
+          OFFGRID_PRO: '1',
+          OFFGRID_APP142_AUDIT_FILE: auditFile,
+          OFFGRID_APP142_FFMPEG: ffmpegPath(),
+          NODE_ENV: 'production'
+        }
+      })
+    )
     page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     await completeOnboarding(page)

@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from './ui/button'
+import { openModelSettingsPanel, type ModelSettingsPanelTab } from '@renderer/lib/model-settings-panel'
+import { FEATURE_NAMES } from '@offgrid/features'
 import { motion } from 'motion/react'
 import { ProgressiveBlur } from './ui/progressive-blur'
 import { Section } from '@offgrid/operator-ui/operator/experience'
 import { PageShell } from './PageShell'
 import { Badge } from '@offgrid/operator-ui/operator/coss/badge'
 import { SetupPanel } from './setup/SetupPanel'
+import { WhatYouUseSettings } from './onboarding/WhatYouUseSettings'
 import { PerformancePackPanel } from './setup/PerformancePackPanel'
 import { EngineUpdatesSection } from './setup/EngineUpdatesSection'
 import { StoragePanel } from './setup/StoragePanel'
@@ -19,6 +23,7 @@ import { PRO_SETTINGS_SLOTS } from './pro/proSettingsCatalog'
 import { SettingsCard, ProPlaceholder, SettingsCardsGroup } from './SettingsCard'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
 import { UiSettingsSection } from './UiSettingsSection'
+import { LanguageSettingsSection } from './LanguageSettingsSection'
 import { currentPlatform } from '@renderer/lib/device'
 import { getProFeature, proComingSoonHere, featureSupportsPlatform } from './pro/proCatalog'
 import { SoftwareUpdateSection } from './SoftwareUpdateSection'
@@ -30,25 +35,38 @@ import { AIRequestLogs } from './AIRequestLogs'
 export { ModelPipelineSection } from './ProcessingControls'
 
 const SETTINGS_SECTION_TITLES: Record<string, string> = {
+  'what-you-use': 'What you use',
   setup: 'Setup & health',
   permissions: 'Setup & health',
   performance: 'Engines',
+  'model-settings': 'Model settings',
   capture: 'Capture & processing',
   'computer-use': 'Computer use',
   remote: 'Remote model server',
   'ai-activity': 'AI activity',
-  'god-twin': 'God',
-  sync: 'Device sync',
+  'god-twin': FEATURE_NAMES.assistant,
+  sync: FEATURE_NAMES.sync,
   identity: 'You',
   secretary: 'What Off Grid AI has learned',
   'pro-plan': 'Your Pro plan',
   privacy: 'Data & privacy',
   analytics: 'Analytics',
   backup: 'Backup & restore',
+  language: 'Language',
   ui: 'UI',
   shortcuts: 'Keyboard shortcuts',
   update: 'Software update'
 }
+
+/** The model-settings drawer's tabs, opened from Settings as from Models and Chat. */
+const MODEL_SETTINGS_TABS: Array<[ModelSettingsPanelTab, string]> = [
+  ['model', 'Text'],
+  ['image', 'Image'],
+  ['video', 'Video'],
+  ['voice', 'Spoken replies'],
+  ['transcription', 'Transcription'],
+  ['tools', 'Tools']
+]
 
 const SETTINGS_TITLE_IDS = Object.fromEntries(
   Object.entries(SETTINGS_SECTION_TITLES)
@@ -182,6 +200,14 @@ export function Settings({
           >
             {/* Each section is a collapsed-by-default accordion (SettingsCard). */}
             <SettingsCard
+              title="What you use"
+              summary="Pick what you use. It leads your menu and model setup."
+              delay={0.12}
+            >
+              <WhatYouUseSettings />
+            </SettingsCard>
+
+            <SettingsCard
               title="Setup & health"
               summary="Set up your local AI, manage storage, and see live component health."
               delay={0.13}
@@ -206,6 +232,20 @@ export function Settings({
             >
               <PerformancePackPanel showUnavailable />
               <EngineUpdatesSection />
+            </SettingsCard>
+
+            <SettingsCard
+              title="Model settings"
+              summary="How each model answers: text, images, video, spoken replies, transcription and tools."
+              delay={0.137}
+            >
+              <div className="flex flex-wrap gap-2">
+                {MODEL_SETTINGS_TABS.map(([tab, label]) => (
+                  <Button key={tab} variant="outline" size="sm" onClick={() => openModelSettingsPanel(tab)}>
+                    {label}
+                  </Button>
+                ))}
+              </div>
             </SettingsCard>
 
             <SettingsCard
@@ -239,7 +279,7 @@ export function Settings({
             {/* God is Pro: its settings show only where God does. */}
             {isPro && GodSettings && (
               <SettingsCard
-                title="God"
+                title={FEATURE_NAMES.assistant}
                 summary="Your assistant's name, rules, wake word and Ares on the desktop."
                 delay={0.17}
               >
@@ -313,6 +353,14 @@ export function Settings({
               delay={0.44}
             >
               <BackupRestoreSection />
+            </SettingsCard>
+
+            <SettingsCard
+              title="Language"
+              summary="The language Off Grid AI shows. It follows your computer unless you pick one."
+              delay={0.446}
+            >
+              <LanguageSettingsSection />
             </SettingsCard>
 
             <SettingsCard

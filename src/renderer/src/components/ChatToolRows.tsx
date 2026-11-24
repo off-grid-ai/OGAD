@@ -28,7 +28,7 @@ import {
 } from '@renderer/lib/task-side-panel'
 import { ComputerUseStepDetails } from './tasks/ComputerUseStepDetails'
 import { RetryTaskButton } from './tasks/RetryTaskButton'
-import { taskReferenceFromResult, visibleToolResult } from './chat-tool-projection'
+import { taskReferenceFromResult, visibleToolText } from '@offgrid/failures'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 
@@ -372,7 +372,7 @@ function workStepLabel(tool: DisplayTool): string {
 }
 
 function workStatus(tool: DisplayTool): WorkStatus {
-  const result = visibleToolResult(tool.result)
+  const result = visibleToolText(tool.result)
   if ('error' in tool && tool.error?.trim()) return 'failed'
   if (/^\s*(error|failed)\s*:/i.test(result)) return 'failed'
   if (tool.status === 'failed') return 'failed'
@@ -404,12 +404,12 @@ function shortResult(tool: DisplayTool, status = workStatus(tool), taskSummary?:
   if (key === 'web_search' || key === 'brave_search') return 'Search results are ready.'
   if (key === 'read_url') return 'Read the selected web page.'
   if (key === 'search_meetings' || PASSAGE_SEARCH_TOOLS.has(key)) {
-    const result = visibleToolResult(tool.result).trim()
+    const result = visibleToolText(tool.result).trim()
     if (result) return result.split(/\r?\n/, 1)[0]!
   }
   if (key.startsWith('search_')) return 'Found matching items.'
   if (status === 'failed') return 'This step failed. Open it for details.'
-  const value = ('error' in tool && tool.error?.trim()) || visibleToolResult(tool.result)
+  const value = ('error' in tool && tool.error?.trim()) || visibleToolText(tool.result)
   if (!value) return 'Step finished.'
   const firstLine = value
     .split(/\r?\n/, 1)[0]!
@@ -608,7 +608,7 @@ export function ChatToolRows({
     const stepLabel = showMemorySources
       ? `Searched your memory — ${sourceCount} result${sourceCount === 1 ? '' : 's'}`
       : workStepLabel(tool)
-    const result = visibleToolResult(tool.result)
+    const result = visibleToolText(tool.result)
     const passages =
       stepStatus === 'complete' && PASSAGE_SEARCH_TOOLS.has(normalizedToolKey(tool.name))
         ? (() => {

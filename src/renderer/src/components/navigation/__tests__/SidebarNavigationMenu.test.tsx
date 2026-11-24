@@ -187,4 +187,24 @@ describe('SidebarNavigationMenu', () => {
     expect(document.activeElement).toBe(discover)
     expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
   })
+
+  it('starts with only the given sections open, and a closed one opens with a click', async () => {
+    const user = userEvent.setup()
+    render(
+      <SidebarNavigationMenu
+        activeView="chat"
+        expanded
+        groups={groups}
+        renderItem={renderItem}
+        initiallyOpen={['Work']}
+      />
+    )
+    const discover = screen.getByRole('button', { name: 'Discover' })
+    expect(screen.getByRole('button', { name: 'Work' }).getAttribute('aria-expanded')).toBe('true')
+    expect(discover.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: 'Search' })).toBeNull()
+    await user.click(discover)
+    expect(discover.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Search' })).toBeTruthy()
+  })
 })

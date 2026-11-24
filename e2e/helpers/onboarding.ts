@@ -18,7 +18,10 @@ import { expect, type Page } from '@playwright/test'
  * NOTE: the button copy is 'Start using Off Grid AI' while the product name is 'Off Grid AI
  * Desktop'. Matched as-is here rather than changing user-facing copy from a test fix.
  */
-const ONBOARDING_CTA = /^(Continue|Start using Off Grid AI)/i
+const ONBOARDING_CTA = /^(Continue|Show me how it works|Set up my models|Start using Off Grid AI)/i
+// The picks steps keep Continue disabled until something is picked. Journeys that test the shell
+// leave picks empty, which the user does with this control.
+const SKIP_PICKS = /^Skip, set it up$/i
 
 const dismissOptionalSetupNudge = async (page: Page): Promise<void> => {
   const dismiss = page.getByRole('button', { name: 'Dismiss', exact: true })
@@ -38,18 +41,28 @@ const dismissOptionalSetupNudge = async (page: Page): Promise<void> => {
 export const completeOnboarding = async (page: Page, maxSteps = 10): Promise<void> => {
   const cta = page.getByRole('button', { name: ONBOARDING_CTA }).first()
   // An existing/seeded profile may skip onboarding entirely — that is not a failure.
+  const skip = page.getByRole('button', { name: SKIP_PICKS }).first()
   const onOnboarding = await cta
+    .or(skip)
+    .first()
     .waitFor({ state: 'visible', timeout: 10_000 })
     .then(() => true)
     .catch(() => false)
   if (onOnboarding) {
     for (let step = 0; step < maxSteps; step += 1) {
-      if (!(await cta.isVisible().catch(() => false))) break
-      await cta.click().catch(() => {})
+      if (await skip.isVisible().catch(() => false)) {
+        await skip.click().catch(() => {})
+      } else if (await cta.isVisible().catch(() => false)) {
+        await cta.click().catch(() => {})
+      } else break
       await page.waitForTimeout(350)
     }
+    await expect(skip).toBeHidden()
     // Reaching the shell is the point of this helper — assert it rather than hoping.
     await expect(cta).toBeHidden()
+    // Skip leaves analytics unanswered, so the app asks after the first reply and its dialog
+    // covers the chat. Answer it the way Not now does; analytics journeys own that prompt.
+    await page.evaluate(() => window.api.analytics.dismissPrompt())
   }
 
   // Most journeys test the app shell, not first-model setup. A fresh profile has no

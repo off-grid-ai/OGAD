@@ -4,6 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import crypto from 'crypto'
+import { readWavFormat } from '@offgrid/speech'
 import type { TranscriptionService } from './transcription/types'
 
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
@@ -21,6 +22,13 @@ const TRANSCRIBE_TIMEOUT_MS = 5 * 60_000
 
 function requestKey(senderId: number, requestId: string): string {
   return `${senderId}:${requestId}`
+}
+
+/** Live transcription sends 16 kHz mono PCM, what the engines read as is: no decode step needed. */
+function isWhisperReadyWav(ext: string, audio: Buffer): boolean {
+  if (ext !== 'wav') return false
+  const format = readWavFormat(new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength))
+  return format?.sampleRate === 16_000 && format.channels === 1 && format.bitsPerSample === 16
 }
 
 function validRequestId(value: unknown): value is string {
@@ -46,7 +54,8 @@ export function setupVoiceTranscriptionIpc(
 ): void {
   host.handle('voice:save-recording', async (_event, audioValue, extValue) => {
     const ext = typeof extValue === 'string' ? extValue.toLowerCase() : ''
-    if (!['webm', 'mp4', 'm4a', 'ogg', 'wav'].includes(ext)) throw new Error('Unsupported voice recording format.')
+    if (!['webm', 'mp4', 'm4a', 'ogg', 'wav'].includes(ext))
+      throw new Error('Unsupported voice recording format.')
     if (!(audioValue instanceof ArrayBuffer || ArrayBuffer.isView(audioValue))) {
       throw new Error('Invalid voice recording.')
     }
@@ -96,9 +105,12 @@ export function setupVoiceTranscriptionIpc(
       await fs.promises.writeFile(tmp, buf, { signal: controller.signal })
       const service = await getService()
       controller.signal.throwIfAborted()
-      return (await service.transcribe({ path: tmp }, { signal: controller.signal })).text
+      const alreadyWav16k = isWhisperReadyWav(safeExt.toLowerCase(), buf)
+      return (await service.transcribe({ path: tmp }, { signal: controller.signal, alreadyWav16k }))
+        .text
     } catch (error) {
-      if (timeout.hit) throw new Error('Transcription timed out. Try again with a shorter recording.')
+      if (timeout.hit)
+        throw new Error('Transcription timed out. Try again with a shorter recording.')
       throw error
     } finally {
       clearTimeout(deadline)

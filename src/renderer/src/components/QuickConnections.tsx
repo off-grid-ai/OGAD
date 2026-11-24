@@ -65,6 +65,8 @@ export function QuickConnections({
   useEffect(() => {
     onBusyChange?.(pending)
   }, [pending, onBusyChange])
+  // Leaving while a connection is pending must not keep the caller's buttons disabled.
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange])
 
   return (
     <section aria-label="Quick connections" className="space-y-6">
@@ -79,7 +81,7 @@ export function QuickConnections({
       </div>
       {providersFailed && (
         <div role="alert" className="flex items-center gap-3 text-xs">
-          <p>Google, Microsoft and Obsidian could not load. Open Integrations later to add them.</p>
+          <p>Google, Microsoft and Obsidian could not load. Open Connectors later to add them.</p>
         </div>
       )}
       {connection.errors.load && (

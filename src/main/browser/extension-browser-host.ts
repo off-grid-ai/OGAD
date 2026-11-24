@@ -13,10 +13,16 @@
 // extensions, so there the loop's Playwright tools are always answered by the extension in the
 // page (extension-snapshot-session.ts); openTaskSession picks from what the browser reports.
 
+import { rm, writeFile } from 'node:fs/promises'
 import { automationTaskReadStatus } from '@offgrid/automation'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import type { BrowserLink } from '../extension-bridge/bridge-socket'
-import { getTaskExecutionDevice, recordTaskRun, reportTaskProgress } from '../tasks/task-history'
+import {
+  getTaskExecutionDevice,
+  recordTaskRun,
+  reportTaskProgress,
+  taskScreenshotPath
+} from '../tasks/task-history'
 import { registerTaskGuideHandler, TASK_GUIDANCE_TRACE } from '../tasks/task-guide'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { retryPlanningGoal } from '../tasks/task-retry'
@@ -54,8 +60,13 @@ export interface TaskSession {
   session: SemanticPageSession
   /** The pointer overlay; null where the page is driven from inside (no debugger). */
   driver: () => BrowserDriver | null
+  /** The task tab's screen as a JPEG, for the Tasks panel; null where there is no debugger. */
+  capture: () => Promise<Buffer | null>
   close: () => Promise<void>
 }
+
+/** Small enough to save after every step, sharp enough to read headings in the panel. */
+const FRAME_QUALITY = 60
 
 /** Said in the task's steps when control moves between the debugger and the page. */
 export const CONTROL_STEPS: Record<PageControl, string> = {
@@ -114,7 +125,12 @@ export async function openTaskSession(
   const current = (): ExtensionTabContents => pages.active() ?? tab
   const page = new ExtensionSnapshotSession(link, () => current().tabId)
   if (caps?.cdp !== true) {
-    return { session: page, driver: () => null, close: async () => undefined }
+    return {
+      session: page,
+      driver: () => null,
+      capture: async () => null,
+      close: async () => undefined
+    }
   }
   const session = new DebuggerFallbackSession({
     connect: () => connectDebugger(pages, current, front),
@@ -124,6 +140,16 @@ export async function openTaskSession(
   return {
     session,
     driver: () => (session.usesDebugger() ? new BrowserDriver(current().transport()) : null),
+    capture: async () => {
+      if (!session.usesDebugger()) return null
+      const shot = (await current()
+        .debugger.sendCommand('Page.captureScreenshot', {
+          format: 'jpeg',
+          quality: FRAME_QUALITY
+        })
+        .catch(() => null)) as { data?: unknown } | null
+      return typeof shot?.data === 'string' ? Buffer.from(shot.data, 'base64') : null
+    },
     close: () => session.close()
   }
 }
@@ -254,6 +280,45 @@ async function runInBrowser(
       recordStep(`working in your tab in ${link.browser.name}`)
     }
     const task = await openTaskSession(link, pages, tab, recordStep, startTabId === undefined)
+    // The page as the task sees it, in the Tasks panel: once now, so planning shows the page it
+    // plans from, then after every step. Found live: the panel stayed empty for the whole run.
+    let frames = 0
+    const showFrame = async (): Promise<void> => {
+      const jpeg = await task.capture().catch(() => null)
+      if (!jpeg?.length) return
+      frames += 1
+      const path = taskScreenshotPath(taskId, `frame-${frames}`, 'jpg')
+      await writeFile(path, jpeg)
+      const page = pages.active() ?? tab
+      recordTaskRun({
+        taskId,
+        journeyId,
+        kind: 'web_use',
+        title: goal,
+        screenshotPath: path,
+        screenshotDeviceId: device.id,
+        lastUrl: page.getURL(),
+        lastTitle: page.getTitle()
+      })
+      // Only the latest frame is the task's; the one before stays while the panel swaps to it.
+      if (frames > 2) {
+        await rm(taskScreenshotPath(taskId, `frame-${frames - 2}`, 'jpg'), { force: true })
+      }
+    }
+    // A frame never holds the task up: Chrome answers a screenshot of a hidden or background tab
+    // only once it paints, which can be never. Found in the native test: the task stopped after
+    // its first read. One capture at a time; a step that lands while one is out skips its frame.
+    let framing = false
+    const requestFrame = (): void => {
+      if (framing) return
+      framing = true
+      void showFrame()
+        .catch(() => undefined)
+        .finally(() => {
+          framing = false
+        })
+    }
+    requestFrame()
     // Planning can take half a minute on a local model; say so instead of looking idle.
     if (!checkpoint?.plan) {
       reportTaskProgress({
@@ -290,6 +355,7 @@ async function runInBrowser(
       takeGuidance: () => guidance.splice(0),
       onStep: recordStep,
       onPhase: (phaseId) => recordStep(encodeTaskPhase(phaseId)),
+      onObservation: async () => requestFrame(),
       onProgress: (currentStep, phase, action) =>
         reportTaskProgress({
           taskId,

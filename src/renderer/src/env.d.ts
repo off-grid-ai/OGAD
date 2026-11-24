@@ -7,6 +7,8 @@ interface ProLicenseInfo {
   tier: 'lifetime' | 'monthly' | 'annual' | 'subscription' | null
   expiry: string | null
   verifiedAt: number
+  /** Pro is off because another device removed this one: its name, or '' when not known. */
+  removedBy?: string
 }
 
 type OffGridPermissionStatus = import('../../shared/ipc-contracts').PermissionStatusContract
@@ -76,6 +78,8 @@ interface RendererAPIOverrides {
   // Open-core bridge
   isPro?: boolean
   proEntitlementBootstrapEnabled?: boolean
+  /** Opens the browser extension's store page for this computer's default browser. */
+  getExtension?: () => Promise<void>
   // Host OS (process.platform), bridged at preload time. Used by lib/device.ts
   // to name the machine ('Mac' on darwin, else 'device').
   platform?: string

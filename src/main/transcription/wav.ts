@@ -45,7 +45,7 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array
  *  chunk list for `data` rather than assuming the canonical 44-byte header: the
  *  bundled ffmpeg writes a LIST/INFO (encoder tag) chunk between `fmt ` and `data`,
  *  so PCM starts past byte 44. Returns null if it isn't a WAVE or has no data chunk. */
-function findDataChunk(view: DataView, len: number): { offset: number; size: number } | null {
+export function findDataChunk(view: DataView, len: number): { offset: number; size: number } | null {
   if (len < 12) return null
   // "RIFF"...."WAVE" then a sequence of <id(4)><size(4le)><payload> chunks.
   if (view.getUint32(0, false) !== 0x52494646 /* RIFF */) return null

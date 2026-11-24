@@ -155,6 +155,15 @@ button, textarea { font: inherit; color: inherit; }
 .pane { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 0 1 auto; }
 .pane .cap { color: var(--muted); font: 11px/1.4 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
 .shots.split .pane { flex: 1 1 0; }
+/* Compare: the same step on each product, one column each, its Before above its After. */
+.shots.compare { align-items: stretch; }
+.shots.compare .pane { flex: 1 1 0; min-width: 0; }
+.cshot { line-height: 0; }
+.cshot img { max-width: 100%; max-height: calc(100vh - var(--chrome)); border-radius: 6px; display: block; margin: 0 auto; cursor: zoom-in; }
+.shots.compare.two .cshot img { max-height: calc((100vh - var(--chrome)) / 2 - 24px); }
+.cshot .none { line-height: 1.4; border: 1px dashed var(--line); border-radius: 6px; padding: 18px 10px; color: var(--muted); font: 11px var(--mono); text-align: center; }
+.pane .cap .open { margin-left: 8px; }
+#cmp button[aria-pressed="false"] { opacity: .55; }
 .shots.split .shot img { max-height: calc(100vh - var(--chrome)); }
 .pin.later { opacity: 0; pointer-events: none; }
 .shot { position: relative; max-width: 100%; max-height: 100%; cursor: crosshair; line-height: 0; }
@@ -260,6 +269,83 @@ button, textarea { font: inherit; color: inherit; }
   .rail .rail-arrow { transform: rotate(90deg); }
 }
 @media (prefers-reduced-motion: no-preference) { .pin { transition: transform .12s ease; } }
+/* --- the graph: the change as one picture. Concepts → every place they live → the platforms the screens prove.
+   Ribbon width is file count; a moving dash is the change order; a ring is code a branch changes right now. --- */
+:root { --k1: #0f6b52; --k2: #b45309; --k3: #6d4fc2; --edge: #b9c4be; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --k1: #43c39a; --k2: #f0a94b; --k3: #a993ff; --edge: #3a4842; } }
+:root[data-theme="dark"] { --k1: #43c39a; --k2: #f0a94b; --k3: #a993ff; --edge: #3a4842; }
+.graphbtn { font: 600 12px/1 var(--font); border: 1px solid var(--gold); color: var(--gold); background: transparent; border-radius: 6px; padding: 6px 10px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.graphbtn[aria-pressed="true"] { background: var(--gold); color: var(--gold-ink); }
+.graphbtn kbd { font: 10px var(--mono); opacity: .7; }
+body.graphing > .app { display: none; }
+.graph { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 380px; background:
+  radial-gradient(1200px 600px at 20% -10%, color-mix(in srgb, var(--gold) 9%, transparent), transparent 60%), var(--bg); }
+.graph[hidden] { display: none; }
+.g-canvas { overflow: auto; position: relative; min-width: 0; }
+.g-canvas svg { display: block; width: 100%; height: auto; min-width: 0; }
+.g-lede { padding: 18px 24px 0; display: flex; gap: 10px 22px; flex-wrap: wrap; align-items: baseline; }
+.g-lede h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+.g-lede .stat { color: var(--muted); font-size: 13px; } .g-lede .stat b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.g-legend { padding: 6px 24px 0; color: var(--muted); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
+.g-legend i { display: inline-block; width: 18px; height: 4px; border-radius: 2px; vertical-align: 2px; margin-right: 5px; }
+.g-legend .ring { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--gold); background: none; vertical-align: -1px; }
+svg .rib { fill: none; stroke-opacity: .28; transition: stroke-opacity .2s, opacity .2s; }
+svg .flow { fill: none; stroke-opacity: .9; stroke-dasharray: 2 14; stroke-linecap: round; pointer-events: none; transition: opacity .2s; }
+svg .pl { fill: none; stroke: var(--edge); stroke-width: 1.5; transition: opacity .2s; }
+svg .col { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 3 4; opacity: .55; }
+svg .nd { cursor: pointer; transition: opacity .2s; }
+svg .nd rect.box { fill: var(--glass); stroke: var(--line); stroke-width: 1; }
+svg .nd:hover rect.box, svg .nd:focus-visible rect.box, svg .nd.sel rect.box { stroke: var(--gold); stroke-width: 2; }
+svg .nd:focus { outline: none; }
+svg .nd text { fill: var(--fg); font-family: var(--font); }
+svg .nd .t { font-size: 15px; font-weight: 600; } svg .nd .s { font-size: 11.5px; fill: var(--muted); font-family: var(--mono); }
+svg .nd .big { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+svg .bar { rx: 1.5; }
+svg .badge circle { stroke: var(--glass); stroke-width: 2; }
+svg .badge text { font: 600 10.5px var(--mono); fill: #fff; }
+svg .live { fill: none; stroke: var(--gold); stroke-width: 2; }
+svg .collab text { font: 11px var(--font); fill: var(--muted); }
+svg .colpill rect { fill: none; stroke: var(--line); stroke-dasharray: 3 3; }
+svg .colpill text { font: 12px var(--font); fill: var(--muted); }
+svg .hdr { font: 600 11px var(--mono); fill: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+svg.focus .rib:not(.on), svg.focus .flow:not(.on), svg.focus .pl:not(.on), svg.focus .nd:not(.on), svg.focus .col:not(.on), svg.focus .colpill:not(.on) { opacity: .12; }
+svg.focus .rib.on { stroke-opacity: .55; }
+@media (prefers-reduced-motion: no-preference) {
+  svg .flow { animation: g-flow 1.6s linear infinite; }
+  svg .live { animation: g-pulse 2.2s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+  svg .nd { animation: g-in .5s ease-out both; }
+  svg .rib { animation: g-draw 1s ease-out both; }
+}
+@keyframes g-flow { to { stroke-dashoffset: -32; } }
+@keyframes g-pulse { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(2.4); } }
+@keyframes g-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes g-draw { from { opacity: 0; } }
+.g-side { border-left: 1px solid var(--line); background: var(--glass); overflow: auto; padding: 18px 18px 28px; min-width: 0; }
+.g-side h3 { margin: 0 0 2px; font-size: 18px; font-weight: 600; }
+.g-side .sub { color: var(--muted); font: 12px var(--mono); margin-bottom: 12px; word-break: break-all; }
+.g-side .does { margin: 0 0 14px; }
+.g-side h4 { font: 600 11px/1.2 var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 18px 0 8px; }
+.g-side .lay { display: grid; grid-template-columns: 70px minmax(0,1fr) 36px; gap: 4px 8px; align-items: center; font-size: 12.5px; }
+.g-side .lay .tr { height: 6px; border-radius: 3px; background: var(--glass-2); overflow: hidden; }
+.g-side .lay .tr i { display: block; height: 100%; border-radius: 3px; }
+.g-side .lay .n { font: 12px var(--mono); text-align: right; color: var(--muted); }
+.g-side .gc { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin: 0 0 8px; display: grid; gap: 3px; background: var(--bg); }
+.g-side .gc .k { font: 600 10.5px var(--mono); color: var(--warn); text-transform: uppercase; letter-spacing: .04em; }
+.g-side .gc.done .k { color: var(--ok); }
+.g-side .gc button { justify-self: start; margin-top: 4px; }
+.g-side ul { margin: 0; padding: 0 0 0 16px; font: 11.5px/1.6 var(--mono); color: var(--muted); word-break: break-all; }
+.g-side details summary { cursor: pointer; font-size: 13px; }
+.g-side .livebox { border: 1px solid var(--gold); background: var(--glass-2); border-radius: 8px; padding: 9px 11px; font-size: 13px; }
+.g-side .hint { color: var(--muted); font-size: 13px; }
+.g-side .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.g-side .chips button { font: 12px var(--font); border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.g-side .chips button:hover { border-color: var(--gold); }
+@media (max-width: 860px) {
+  .graph { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; overflow: auto; }
+  .g-canvas { overflow: visible; }
+  .g-side { border-left: 0; border-top: 1px solid var(--line); }
+  .g-lede, .g-legend { padding-left: 16px; padding-right: 16px; }
+}
 </style>
 
 <header class="change" aria-label="The change">
@@ -269,10 +355,20 @@ button, textarea { font: inherit; color: inherit; }
     <span class="need" id="c-need"></span>
     <div class="lenses" id="c-lenses"></div>
     <button type="button" class="linkbtn" id="c-proven-btn" aria-expanded="false"></button>
+    <button type="button" class="graphbtn" id="c-graph-btn" aria-pressed="false" hidden>Graph <kbd>G</kbd></button>
   </div>
   <div class="cmap" id="c-map" aria-label="Change map: every place this change lives, in order"></div>
   <div class="proven" id="c-proven" hidden></div>
 </header>
+
+<section class="graph" id="graph" hidden aria-label="The change as a graph">
+  <div class="g-canvas">
+    <div class="g-lede" id="g-lede"></div>
+    <div class="g-legend" id="g-legend"></div>
+    <svg id="g-svg" role="img" aria-label="Concepts, the places they live, and the platforms the screens prove"></svg>
+  </div>
+  <aside class="g-side" id="g-side" aria-live="polite"></aside>
+</section>
 
 <div class="app">
   <nav class="list" aria-label="Screens">
@@ -316,6 +412,7 @@ button, textarea { font: inherit; color: inherit; }
             <button type="button" id="plat-ios" aria-pressed="true">iPhone</button>
             <button type="button" id="plat-android" aria-pressed="false">Android</button>
           </div>
+          <div class="views" id="cmp" role="group" aria-label="Show on" hidden></div>
           <div class="views" id="views" role="group" aria-label="Before or after">
             <button type="button" id="view-before" aria-pressed="false">Before</button>
             <button type="button" id="view-after" aria-pressed="true">After</button>
@@ -365,7 +462,7 @@ let notes = [];        // every note, all screens
 let current = 0;       // index into shown
 let draft = null;      // {x, y, on, v} in 0..1 of the shot
 let lit = null;        // id of the highlighted note
-let view = "after";   // "before", "after" or "both"
+let view = "both";    // "before", "after" or "both"; Side by side by default (Mac, 2026-11-19)
 // The phone a shot comes from. A version may carry an Android shot beside its main one
 // ({android, androidClip}); with none, Android shows the main shot and says so.
 let platform = "ios";
@@ -586,11 +683,87 @@ function renderList() {
   renderChange();
 }
 
+// Compare: screens that share a `step` (screens.json) are one step of the change on different products.
+// `picked` holds the platforms shown together; null means all of them.
+let picked = null;
+function platsOf(m) { return m.platform === "iPhone" && hasAndroid(m) ? ["iPhone", "Android"] : [m.platform || "iPhone"]; }
+function compareCols(s) {
+  const mates = s?.step ? shown.filter((x) => x.step === s.step) : [s];
+  return mates.flatMap((m) => platsOf(m).map((p) => ({ m, p })));
+}
+function activeCols(s) { const all = compareCols(s); const on = all.filter((c) => !picked || picked.has(c.p)); return on.length ? on : all.slice(0, 1); }
+function setPicked(next) {
+  picked = next;
+  try { localStorage.setItem("review-compare", JSON.stringify(next ? [...next] : null)); } catch (_) {}
+  draft = null; lit = null;
+  renderStage(); renderThread(); renderCompose();
+}
+function renderCompareSwitch(s) {
+  const box = $("cmp"); box.textContent = "";
+  const all = compareCols(s);
+  box.hidden = all.length < 2;
+  const names = [...new Set(all.map((c) => c.p))];
+  for (const p of names) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = p;
+    const on = !picked || picked.has(p);
+    b.setAttribute("aria-pressed", String(on));
+    b.onclick = () => {
+      // Only this step's platforms count: a platform kept from another step is not a choice here.
+      const next = new Set(picked ? names.filter((n) => picked.has(n)) : names);
+      if (on && next.size > 1) next.delete(p); else next.add(p);
+      setPicked(next.size === names.length ? null : next);
+    };
+    box.append(b);
+  }
+}
+function openCol(c) {
+  // Notes are pinned on one product at a time: open that screen with only that platform showing.
+  platform = c.p === "Android" ? "android" : "ios";
+  picked = new Set([c.p]);
+  try { localStorage.setItem("review-compare", JSON.stringify([c.p])); localStorage.setItem("review-platform", platform); } catch (_) {}
+  const i = shown.indexOf(c.m);
+  i >= 0 && i !== current ? go(i) : (renderStage(), renderThread(), renderCompose());
+}
+function renderCompare(s, cols) {
+  const stage = $("shot");
+  const two = shownView(s) === "both";
+  stage.classList.add("split", "compare"); stage.classList.toggle("two", two);
+  for (const c of cols) {
+    const pane = document.createElement("div"); pane.className = "pane";
+    const cap = document.createElement("div"); cap.className = "cap"; cap.textContent = `${c.p} · ${c.m.name}`;
+    const open = document.createElement("button"); open.type = "button"; open.className = "linkbtn open"; open.textContent = "Notes";
+    open.title = `Open ${c.m.name} on ${c.p} to read and pin notes`;
+    open.onclick = () => openCol(c);
+    cap.append(open); pane.append(cap);
+    for (const v of panes(c.m)) {
+      const sh = shotOf(c.m, v);
+      const sub = document.createElement("div"); sub.className = "cap";
+      sub.textContent = `${v === "before" ? "Before" : "After"} · v${sh?.n ?? "?"}${sh?.label ? " · " + sh.label : ""}`;
+      const box = document.createElement("div"); box.className = "cshot";
+      const file = c.p === "Android" ? sh?.android : sh?.file;
+      if (file) {
+        const img = document.createElement("img"); img.src = file; img.alt = `${c.m.name} on ${c.p} (${v})`; img.draggable = false;
+        img.onclick = () => openCol(c);
+        box.append(img);
+      } else {
+        const none = document.createElement("div"); none.className = "none"; none.textContent = `No ${c.p} shot of v${sh?.n ?? "?"}`; box.append(none);
+      }
+      pane.append(sub, box);
+    }
+    stage.append(pane);
+  }
+}
+
 function renderStage() {
   const s = shown[current];
   const stage = $("shot");
   stage.textContent = "";
+  stage.classList.remove("compare", "two");
   if (!s) { $("title").textContent = "No screens yet"; return; }
+  renderCompareSwitch(s);
+  const cols = activeCols(s);
+  if (cols.length === 1 && cols[0].m !== s && shown.includes(cols[0].m)) { openCol(cols[0]); return; }
+  if (cols.length === 1) platform = cols[0].p === "Android" ? "android" : "ios";
   $("title").textContent = s.name;
   const vs = versions(s), a = afterIdx(s);
   // On Android, a version with no Android shot says the shot is the iPhone's (judged per version:
@@ -613,9 +786,18 @@ function renderStage() {
   const sum = [];
   if (vs.length > 1) sum.push(`v${vs[a].n}${vs[a].label ? " · " + vs[a].label : ""}`);
   if (a > 0) sum.push({ before: "Before", after: "After", both: "Side by side" }[shownView(s)]);
-  if (!$("plats").hidden) sum.push(platform === "android" ? "Android" : "iPhone");
+  if (compareCols(s).length > 1) sum.push(activeCols(s)[0].p);
   $("ctl").hidden = !sum.length;
   $("ctl-sum").textContent = "View · " + sum.join(" · ");
+  if (cols.length > 1) {
+    $("ctl").hidden = false;
+    $("ctl-sum").textContent = "View · " + [...new Set(cols.map((c) => c.p))].join(" + ") + (a > 0 || cols.some((c) => afterIdx(c.m) > 0) ? " · " + { before: "Before", after: "After", both: "Side by side" }[view] : "");
+    $("views").hidden = !cols.some((c) => afterIdx(c.m) > 0);
+    for (const k of Object.keys(players)) delete players[k];
+    renderCompare(s, cols);
+    renderPins(); playLabel();
+    return;
+  }
   const list = panes(s);
   for (const k of Object.keys(players)) delete players[k];
   stage.classList.toggle("split", list.length > 1);
@@ -992,7 +1174,7 @@ $("compose").addEventListener("submit", async (e) => {
 $("cancel").onclick = () => { draft = null; renderPins(); renderCompose(); };
 function setView(v) {
   view = v; draft = null; lit = null;
-  try { localStorage.setItem("goc-review-view", v); } catch (_) {}
+  try { localStorage.setItem("goc-review-view-2", v); } catch (_) {}
   renderStage(); renderThread(); renderCompose();
 }
 $("view-before").onclick = () => setView("before");
@@ -1049,6 +1231,253 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "End") { e.preventDefault(); go(shown.length - 1); }
 });
 
+// ---------- The graph ----------
+// change.graph (from review.py): concepts, places (in change order), edges concept→place with files per layer,
+// platforms with the screens that prove each concept, collisions with concepts outside the change, and calls.
+let graphOn = false, gSel = null;
+const KC = ["var(--k1)", "var(--k2)", "var(--k3)"];
+const LAYER_NAME = { owner: "Shared rule", engine: "Native", logic: "Logic", view: "Screens", data: "Catalog", copy: "Web copy" };
+const svgEl = (tag, attrs = {}, kids = "") => `<${tag} ${Object.entries(attrs).map(([k, v]) => `${k}="${esc(v)}"`).join(" ")}>${kids}</${tag}>`;
+function gColor(k) { const i = (change.graph?.concepts || []).findIndex((c) => c.key === k); return KC[i % KC.length]; }
+function gOpen(c) { return !decided[c.id]; }
+
+function setGraph(on) {
+  graphOn = on && !!change.graph;
+  document.body.classList.toggle("graphing", graphOn);
+  $("graph").hidden = !graphOn;
+  $("c-graph-btn").setAttribute("aria-pressed", String(graphOn));
+  try { localStorage.setItem("review-graph", graphOn ? "1" : "0"); } catch (_) {}
+  if (graphOn) renderGraph();
+}
+$("c-graph-btn").onclick = () => setGraph(!graphOn);
+function jump(id) {
+  setGraph(false);
+  const i = shown.findIndex((s) => s.id === id);
+  if (i >= 0) go(i);
+}
+
+function renderGraph() {
+  const g = change.graph; if (!g || !graphOn) return;
+  const wide = $("graph").clientWidth > 860;
+  const C = g.concepts, P = g.places, L = g.platforms;
+  const maxC = Math.max(...C.map((c) => c.files), 1);
+  const K = (wide ? 120 : 90) / maxC;                     // px of ribbon per file
+  const pos = {};
+  // Layout: three columns when wide; three bands, top to bottom, on a phone.
+  let W, H;
+  if (wide) {
+    W = 1180;
+    const cx = 92, px = 500, lx = 950, cw = 220, pw = 250, lw = 200;
+    let y = 50;
+    C.forEach((c) => { const h = Math.max(110, c.files * K + 40); pos[c.key] = { x: cx, y, w: cw, h }; y += h + 28; });
+    const cEnd = y;
+    y = 50;
+    P.forEach((p) => { const h = Math.max(62, p.n * K * 0.9 + 26); pos["p:" + p.key] = { x: px, y, w: pw, h }; y += h + 16; });
+    const pEnd = y;
+    const step = Math.max(80, (pEnd - 50) / Math.max(L.length, 1) - 14);
+    L.forEach((l, i) => { pos["l:" + l.name] = { x: lx, y: 50 + i * (step + 14), w: lw, h: Math.min(step, 96) }; });
+    // Collisions sit under the concepts, dashed back to the concept they share files with.
+    y = cEnd + 10;
+    g.collides.forEach((x, i) => { pos["x:" + i] = { x: cx + 20, y, w: cw - 20, h: 30 }; y += 38; });
+    H = Math.max(y, pEnd, 50 + L.length * (step + 14)) + 20;
+  } else {
+    W = 420;
+    let y = 40;
+    const cw = (W - 24 * 2 - 10 * (C.length - 1)) / C.length;
+    C.forEach((c, i) => { pos[c.key] = { x: 24 + i * (cw + 10), y, w: cw, h: 96 }; });
+    y += 96 + 70;
+    P.forEach((p) => { const h = 58; pos["p:" + p.key] = { x: 70, y, w: W - 140, h }; y += h + 14; });
+    y += 56;
+    const lw = (W - 48 - 8 * (L.length - 1)) / L.length;
+    L.forEach((l, i) => { pos["l:" + l.name] = { x: 24 + i * (lw + 8), y, w: lw, h: 66 }; });
+    y += 66 + 24;
+    g.collides.forEach((x, i) => { pos["x:" + i] = { x: 24, y, w: W - 48, h: 28 }; y += 34; });
+    H = y + 10;
+  }
+  const out = [];
+  if (wide) {
+    out.push(svgEl("text", { class: "hdr", x: 92, y: 30 }, "What changes"), svgEl("text", { class: "hdr", x: 500, y: 30 }, "Where it lives · in change order"),
+      svgEl("text", { class: "hdr", x: 950, y: 30 }, "Where the screens prove it"));
+  }
+  // Ribbons: stacked out of each concept and into each place, like a Sankey, so width reads as file count.
+  const outOff = {}, inOff = {};
+  const ribs = [];
+  for (const e of g.edges) {
+    const a = pos[e.c], b = pos["p:" + e.s]; if (!a || !b) continue;
+    const t = Math.max(2, e.n * K * (wide ? 1 : 0.6));
+    const oa = outOff[e.c] || 0, ob = inOff[e.s] || 0;
+    outOff[e.c] = oa + t; inOff[e.s] = ob + t * (wide ? 0.9 : 1);
+    let d;
+    if (wide) {
+      const y1 = a.y + 20 + oa + t / 2, y2 = b.y + 13 + ob * 0.9 / (wide ? 0.9 : 1) + t * 0.45;
+      const x1 = a.x + a.w, x2 = b.x, mx = (x1 + x2) / 2;
+      d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+    } else {
+      const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + 12 + ob % (b.w - 24), y2 = b.y, my = (y1 + y2) / 2;
+      d = `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`;
+    }
+    const k = `${e.c} p:${e.s}`;
+    ribs.push(svgEl("path", { class: "rib", d, stroke: gColor(e.c), "stroke-width": wide ? t : Math.max(2, t * 0.5), "data-k": k }));
+    ribs.push(svgEl("path", { class: "flow", d, stroke: gColor(e.c), "stroke-width": 2, "data-k": k }));
+  }
+  for (const e of g.pedges) {
+    const a = pos["p:" + e.s], b = pos["l:" + e.p]; if (!a || !b) continue;
+    let d;
+    if (wide) { const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2, mx = (x1 + x2) / 2; d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`; }
+    else { const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y, my = (y1 + y2) / 2; d = `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`; }
+    ribs.push(svgEl("path", { class: "pl", d, "data-k": `p:${e.s} l:${e.p}` }));
+  }
+  // Two concepts in this change that share files: an arc on the concepts' outer side.
+  if (wide) for (const x of g.inside || []) {
+    const a = pos[x.a], b = pos[x.b]; if (!a || !b) continue;
+    const y1 = a.y + a.h / 2, y2 = b.y + b.h / 2, bend = a.x - 26 - Math.abs(y2 - y1) * 0.06;
+    ribs.push(svgEl("path", { class: "col", d: `M${a.x},${y1} C${bend},${y1} ${bend},${y2} ${b.x},${y2}`, "data-k": `${x.a} ${x.b}` }));
+    ribs.push(svgEl("g", { class: "collab" }, svgEl("text", { x: Math.max(4, bend - 8), y: (y1 + y2) / 2 + 4, "text-anchor": "end" }, `${x.n} shared`)));
+  }
+  out.push(...ribs);
+  // Concept nodes.
+  C.forEach((c, i) => {
+    const p = pos[c.key];
+    const open = g.calls.filter((x) => (x.screen && screenOf(x.screen) && conceptOfScreen(screenOf(x.screen)) === c.key) && gOpen(x)).length;
+    const kids = svgEl("rect", { class: "box", x: p.x, y: p.y, width: p.w, height: p.h, rx: 12 })
+      + svgEl("rect", { x: p.x, y: p.y + 12, width: 4, height: p.h - 24, rx: 2, fill: gColor(c.key) })
+      + svgEl("text", { class: "t", x: p.x + 18, y: p.y + 28 }, c.name)
+      + (wide ? svgEl("text", { class: "big", x: p.x + 18, y: p.y + 64 }, String(c.files)) + svgEl("text", { class: "s", x: p.x + 18, y: p.y + 84 }, `files · ${c.tests} tests · ${c.rows.length} hand rows`)
+        : svgEl("text", { class: "s", x: p.x + 18, y: p.y + 50 }, `${c.files} files`) + svgEl("text", { class: "s", x: p.x + 18, y: p.y + 68 }, `${c.tests} tests`))
+      + (open ? badge(p.x + p.w - 14, p.y + 14, open, "var(--warn)") : "");
+    out.push(svgEl("g", { class: "nd", tabindex: 0, role: "button", "aria-label": `${c.name}: ${c.files} files`, "data-n": c.key, style: `animation-delay:${i * 60}ms` }, kids));
+  });
+  // Place nodes: layers as a thin stacked bar, a ring when a branch changes it now, calls as badges.
+  P.forEach((pl, i) => {
+    const p = pos["p:" + pl.key];
+    const es = g.edges.filter((e) => e.s === pl.key);
+    let bx = p.x + 16; const bw = p.w - 32, tot = es.reduce((a, e) => a + e.n, 0) || 1;
+    const bars = es.map((e) => { const w = Math.max(2, (e.n / tot) * bw); const r = svgEl("rect", { class: "bar", x: bx, y: p.y + p.h - 12, width: w - 1, height: 4, fill: gColor(e.c) }); bx += w; return r; }).join("");
+    const calls = g.calls.filter((x) => x.s === pl.key), open = calls.filter(gOpen).length;
+    const kids = svgEl("rect", { class: "box", x: p.x, y: p.y, width: p.w, height: p.h, rx: 10 })
+      + svgEl("text", { class: "t", x: p.x + 16, y: p.y + 24 }, pl.name)
+      + svgEl("text", { class: "s", x: p.x + 16, y: p.y + 41 }, `${pl.n} files${pl.live ? " · live" : ""}`)
+      + bars
+      + (pl.live ? svgEl("circle", { cx: p.x + p.w - 18, cy: p.y + 20, r: 5, fill: "var(--gold)" }) + svgEl("circle", { class: "live", cx: p.x + p.w - 18, cy: p.y + 20, r: 5 }) : "")
+      + (calls.length ? badge(p.x + p.w - (pl.live ? 40 : 18), p.y + 20, open || calls.length, open ? "var(--warn)" : "var(--ok)", open ? "" : "✓") : "");
+    out.push(svgEl("g", { class: "nd", tabindex: 0, role: "button", "aria-label": `${pl.name}: ${pl.n} files${calls.length ? `, ${open} open calls` : ""}`, "data-n": "p:" + pl.key, style: `animation-delay:${120 + i * 50}ms` }, kids));
+  });
+  // Platforms: screens on the page, split by concept.
+  L.forEach((l, i) => {
+    const p = pos["l:" + l.name];
+    const parts = C.map((c) => [c.key, (l.by[c.key] || []).length]).filter(([, n]) => n);
+    let bx = p.x + 12; const bw = p.w - 24;
+    const bars = parts.map(([k, n]) => { const w = Math.max(3, (n / l.n) * bw); const r = svgEl("rect", { class: "bar", x: bx, y: p.y + p.h - 12, width: w - 1, height: 4, fill: gColor(k) }); bx += w; return r; }).join("");
+    const kids = svgEl("rect", { class: "box", x: p.x, y: p.y, width: p.w, height: p.h, rx: 10 })
+      + svgEl("text", { class: "t", x: p.x + 12, y: p.y + 24, style: wide ? "" : "font-size:12px" }, l.name)
+      + svgEl("text", { class: "s", x: p.x + 12, y: p.y + 41 }, `${l.n} shots`) + bars;
+    out.push(svgEl("g", { class: "nd", tabindex: 0, role: "button", "aria-label": `${l.name}: ${l.n} screens`, "data-n": "l:" + l.name, style: `animation-delay:${260 + i * 50}ms` }, kids));
+  });
+  g.collides.forEach((x, i) => {
+    const p = pos["x:" + i], a = pos[x.a];
+    if (wide && a) out.push(svgEl("path", { class: "col", d: `M${a.x + 10},${a.y + a.h} C${a.x + 10},${p.y + 15} ${a.x + 10},${p.y + 15} ${p.x},${p.y + 15}`, "data-k": `${x.a} x:${i}` }));
+    out.push(svgEl("g", { class: "colpill", "data-n": "x:" + i }, svgEl("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 15 })
+      + svgEl("circle", { cx: p.x + 14, cy: p.y + p.h / 2, r: 4, fill: gColor(x.a) })
+      + svgEl("text", { x: p.x + 26, y: p.y + p.h / 2 + 4 }, `Collides with ${x.name} · ${x.n} files`)));
+  });
+  const svg = $("g-svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = `<title>The change as a graph</title>` + out.join("");
+  // Focus: hovering or picking a node lights only what it touches.
+  const light = (n) => {
+    svg.classList.toggle("focus", !!n);
+    if (!n) return;
+    const near = new Set([n]);
+    svg.querySelectorAll("[data-k]").forEach((el) => { const ks = el.dataset.k.split(" "); if (ks.includes(n)) ks.forEach((k) => near.add(k)); });
+    // A concept also lights the platforms its places reach; a platform the concepts that reach it.
+    svg.querySelectorAll("[data-k]").forEach((el) => { const ks = el.dataset.k.split(" "); const on = ks.includes(n) || (ks.every((k) => near.has(k)) && !n.startsWith("p:")); el.classList.toggle("on", on); if (on) ks.forEach((k) => near.add(k)); });
+    svg.querySelectorAll("[data-n]").forEach((el) => el.classList.toggle("on", near.has(el.dataset.n)));
+  };
+  svg.querySelectorAll(".nd").forEach((el) => {
+    el.onmouseenter = () => light(el.dataset.n);
+    el.onmouseleave = () => light(gSel);
+    el.onfocus = () => light(el.dataset.n);
+    el.onclick = () => { gSel = gSel === el.dataset.n ? null : el.dataset.n; light(gSel); renderSide(); svg.querySelectorAll(".nd").forEach((x) => x.classList.toggle("sel", x.dataset.n === gSel)); };
+    el.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); el.onclick(); } };
+  });
+  if (gSel) { light(gSel); svg.querySelector(`.nd[data-n="${CSS.escape(gSel)}"]`)?.classList.add("sel"); }
+  // The lede and legend.
+  const files = C.reduce((a, c) => a + c.files, 0), live = P.filter((p) => p.live);
+  const open = g.calls.filter(gOpen).length;
+  $("g-lede").innerHTML = `<h2>${esc(C.map((c) => c.name).join(", ").replace(/, ([^,]*)$/, " and $1"))}</h2>`
+    + `<span class="stat"><b>${files}</b> files</span><span class="stat"><b>${P.length}</b> places</span>`
+    + `<span class="stat"><b>${screens.length}</b> screens on <b>${L.length}</b> platforms</span>`
+    + `<span class="stat"><b>${g.calls.length - open}</b> of ${g.calls.length} calls decided</span>`
+    + (live.length ? `<span class="stat"><b>${live.reduce((a, p) => a + p.live.files.length, 0)}</b> files changing now</span>` : "");
+  $("g-legend").innerHTML = C.map((c) => `<span><i style="background:${gColor(c.key)}"></i>${esc(c.name)}</span>`).join("")
+    + `<span>Width = files</span><span><i class="ring"></i>A branch is changing it now</span><span>Click anything to open it</span>`;
+  renderSide();
+}
+function badge(x, y, n, fill, txt) {
+  return svgEl("g", { class: "badge" }, svgEl("circle", { cx: x, cy: y, r: 9, fill }) + svgEl("text", { x, y: y + 3.6, "text-anchor": "middle" }, txt || String(n)));
+}
+function conceptOfScreen(s) {
+  // The graph names each concept's screens (by platform); a screen in none belongs to no concept.
+  for (const l of change.graph?.platforms || []) {
+    for (const [k, ids] of Object.entries(l.by || {})) if (ids.includes(s.id)) return k;
+  }
+  return null;
+}
+function callCard(c) {
+  const d = decided[c.id];
+  const k = !d ? (c.kind || "Your call") : (d.state === "done" ? "Done: " : d.state === "held" ? "Held: " : "Decided: ") + d.choice;
+  return `<div class="gc${d ? " done" : ""}"><span class="k">${esc(k)}</span><span>${esc(c.title)}</span>${d?.result ? `<span class="hint">${esc(d.result)}</span>` : ""}`
+    + (c.screen ? `<button type="button" class="btn" data-jump="${esc(c.screen)}">${d ? "See the screen" : "Decide on the screen"} →</button>` : "") + `</div>`;
+}
+function renderSide() {
+  const g = change.graph, box = $("g-side"); if (!g) return;
+  const C = g.concepts;
+  let h = "";
+  if (!gSel) {
+    const open = g.calls.filter(gOpen);
+    h = `<h3>The change, as one graph</h3><div class="sub">${C.length} concepts · ${g.places.length} places · ${g.platforms.length} platforms</div>`
+      + `<p class="does">Each ribbon is a concept reaching a place in the code; its width is how many files. Places run in the order a change is made: shared rules first, the apps after, the website last.</p>`
+      + `<h4>${open.length ? `${open.length} call${open.length === 1 ? "" : "s"} need you` : "Nothing needs you"}</h4>` + open.map(callCard).join("")
+      + `<h4>Live now</h4>` + (g.places.filter((p) => p.live).map((p) => `<div class="livebox"><b>${esc(p.name)}</b> · ${esc(p.live.branch)} · ${p.live.files.length} files</div>`).join("<br>") || `<p class="hint">No branch is changing these right now.</p>`)
+      + `<h4>Don't change at the same time</h4><div class="chips">${g.collides.map((x) => `<button type="button" disabled>${esc(x.name)} · ${x.n}</button>`).join("")}</div>`
+      + `<h4>Decided</h4>` + g.calls.filter((c) => !gOpen(c)).map(callCard).join("");
+  } else if (!gSel.includes(":")) {
+    const c = C.find((x) => x.key === gSel);
+    const es = g.edges.filter((e) => e.c === c.key), max = Math.max(...es.map((e) => e.n), 1);
+    const calls = g.calls.filter((x) => x.screen && screenOf(x.screen) && conceptOfScreen(screenOf(x.screen)) === c.key);
+    h = `<h3 style="color:${gColor(c.key)}">${esc(c.name)}</h3><div class="sub">${c.files} files · ${c.tests} tests · ${c.rows.length} hand-test rows</div><p class="does">${esc(c.does)}</p>`
+      + `<h4>Where it lives</h4><div class="lay">${es.map((e) => `<span>${esc(g.places.find((p) => p.key === e.s)?.name || e.s)}</span><span class="tr"><i style="width:${(e.n / max) * 100}%;background:${gColor(c.key)}"></i></span><span class="n">${e.n}</span>`).join("")}</div>`
+      + `<h4>Screens</h4><div class="chips">${g.platforms.filter((l) => (l.by[c.key] || []).length).map((l) => `<button type="button" data-jump="${esc(l.by[c.key][0])}">${esc(l.name)} · ${l.by[c.key].length}</button>`).join("")}</div>`
+      + (calls.length ? `<h4>Calls</h4>` + calls.map(callCard).join("") : "")
+      + `<h4>Shares files with</h4><div class="chips">${[...(g.inside || []).filter((x) => x.a === c.key || x.b === c.key).map((x) => [C.find((y) => y.key === (x.a === c.key ? x.b : x.a))?.name, x.n]), ...g.collides.filter((x) => x.a === c.key).map((x) => [x.name, x.n])].map(([n, k]) => `<button type="button" disabled>${esc(n)} · ${k}</button>`).join("") || '<span class="hint">Nothing.</span>'}</div>`
+      + (c.rows.length ? `<h4>Hand-test rows</h4><ul>${c.rows.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : "");
+  } else if (gSel.startsWith("p:")) {
+    const pl = g.places.find((p) => "p:" + p.key === gSel), es = g.edges.filter((e) => e.s === pl.key);
+    const calls = g.calls.filter((x) => x.s === pl.key);
+    const layers = {}; es.forEach((e) => Object.entries(e.layers).forEach(([l, n]) => { layers[l] = (layers[l] || 0) + n; }));
+    const max = Math.max(...Object.values(layers), 1);
+    h = `<h3>${esc(pl.name)}</h3><div class="sub">${esc(pl.path)} · ${pl.n} files</div>`
+      + (pl.live ? `<div class="livebox"><b>Changing now</b> on ${esc(pl.live.branch)}<ul>${pl.live.files.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></div>` : "")
+      + `<h4>By concept</h4><div class="lay">${es.map((e) => `<span>${esc(C.find((c) => c.key === e.c)?.name)}</span><span class="tr"><i style="width:${(e.n / pl.n) * 100}%;background:${gColor(e.c)}"></i></span><span class="n">${e.n}</span>`).join("")}</div>`
+      + `<h4>By layer</h4><div class="lay">${Object.entries(layers).map(([l, n]) => `<span>${esc(LAYER_NAME[l] || l)}</span><span class="tr"><i style="width:${(n / max) * 100}%;background:var(--muted)"></i></span><span class="n">${n}</span>`).join("")}</div>`
+      + `<h4>Tests</h4><p class="hint">${es.map((e) => `${esc(C.find((c) => c.key === e.c)?.name)}: ${e.tests}`).join(" · ")}${es.every((e) => !e.tests) ? " · No automated tests here yet." : ""}</p>`
+      + (calls.length ? `<h4>Calls here</h4>` + calls.map(callCard).join("") : "")
+      + `<h4>Files</h4>` + es.map((e) => `<details><summary>${esc(C.find((c) => c.key === e.c)?.name)} · ${e.n}</summary><ul>${e.files.map((f) => `<li>${esc(f)}</li>`).join("")}${e.more ? `<li>… ${e.more} more</li>` : ""}</ul></details>`).join("");
+  } else if (gSel.startsWith("l:")) {
+    const l = g.platforms.find((x) => "l:" + x.name === gSel);
+    h = `<h3>${esc(l.name)}</h3><div class="sub">${l.n} screens on this page</div>`
+      + C.filter((c) => (l.by[c.key] || []).length).map((c) => `<h4 style="color:${gColor(c.key)}">${esc(c.name)} · ${l.by[c.key].length}</h4><div class="chips">${l.by[c.key].map((id) => `<button type="button" data-jump="${esc(id)}">${esc(screenOf(id)?.name || id)}</button>`).join("")}</div>`).join("");
+  }
+  box.innerHTML = h;
+  box.querySelectorAll("[data-jump]").forEach((b) => { b.onclick = () => jump(b.dataset.jump); });
+}
+let gResize = 0;
+window.addEventListener("resize", () => { clearTimeout(gResize); gResize = setTimeout(() => graphOn && renderGraph(), 150); });
+document.addEventListener("keydown", (e) => {
+  if ((e.key === "g" || e.key === "G") && !e.metaKey && !e.ctrlKey && !e.altKey && !/^(TEXTAREA|INPUT|SELECT)$/.test(e.target.tagName)) { e.preventDefault(); setGraph(!graphOn); }
+  else if (e.key === "Escape" && graphOn && gSel) { gSel = null; renderGraph(); }
+});
+
 async function boot() {
   try {
     const r = await fetch("screens.json");
@@ -1057,23 +1486,29 @@ async function boot() {
   try { change = await (await fetch("change.json")).json(); } catch (_) { change = {}; }
   if (change.title) document.title = change.title;
   // The phone switch shows only when some screen has an Android shot.
-  if (screens.some(hasAndroid)) {
+  if (false) {
     $("plats").hidden = false;
     $("plat-ios").setAttribute("aria-pressed", String(platform === "ios"));
     $("plat-android").setAttribute("aria-pressed", String(platform === "android"));
   } else platform = "ios";
-  try { const v = localStorage.getItem("goc-review-view"); view = v === "before" || v === "both" ? v : "after"; } catch (_) {}
+  try { const v = localStorage.getItem("goc-review-view-2"); view = v === "before" || v === "after" ? v : "both"; } catch (_) {}
   try { const v = localStorage.getItem("review-sort"); if (["needs", "newest", "journey", "open"].includes(v)) sortBy = v; } catch (_) {}
   try { if (localStorage.getItem("review-platform") === "android") platform = "android"; } catch (_) {}
+  try { const c = JSON.parse(localStorage.getItem("review-compare") || "null"); picked = Array.isArray(c) && c.length ? new Set(c) : null; } catch (_) {}
   $("sort").value = sortBy;
   // New since last time: remember this visit for the next one.
   try { lastVisit = +localStorage.getItem("review-last-visit") || 0; localStorage.setItem("review-last-visit", String(Date.now())); } catch (_) {}
   sortScreens();
+  const askedHash = location.hash.slice(1);
   let start = 0;
   const want = location.hash.slice(1) || (() => { try { return localStorage.getItem("goc-review-screen"); } catch (_) { return null; } })();
   const k = shown.findIndex((s) => s.id === want);
   if (k >= 0) start = k;
   go(start);
+  // The graph opens first on a first visit (no screen asked for), then as the viewer left it.
+  $("c-graph-btn").hidden = !change.graph;
+  let g0 = null; try { g0 = localStorage.getItem("review-graph"); } catch (_) {}
+  if (change.graph && (g0 === "1" || (g0 === null && !askedHash) || askedHash === "graph")) setGraph(true);
 
   if (!window.claude?.use) { renderThread(); return; }
   db = await window.claude.use("db");
@@ -1090,6 +1525,7 @@ async function boot() {
     decided = Object.fromEntries(snap.docs.map((d) => [d.id, d.data()]));
     if (sortBy === "needs") sortScreens();
     renderList(); renderFor();
+    if (graphOn) renderGraph();
   }, () => {});
   const slow = setTimeout(() => status("Notes can't be reached yet. They'll appear when the connection returns."), 10000);
   db.collection("comments").onSnapshot((snap) => {

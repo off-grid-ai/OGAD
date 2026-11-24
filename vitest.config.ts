@@ -38,11 +38,15 @@ const commonExcludes = ['e2e/**', 'node_modules/**', 'out/**']
 export default defineConfig({
   // `?asset` imports resolve to the file's path, as electron-vite does in the app.
   plugins: [assetPathPlugin()],
+  // Tests compile JSX against the same i18n runtime as the renderer build (electron.vite.config.ts).
+  esbuild: { jsx: 'automatic', jsxImportSource: '@offgrid/i18n' },
   // Renderer path aliases, mirrored 1:1 from tsconfig.web.json `paths`. Without these
   // a .tsx render test cannot import any renderer module (electron-vite provides them
   // in the app build, but vitest has no tsconfig-paths plugin), so the *.test.tsx glob
   // above is inert until they exist. Additive only — no gate/threshold/include change.
   resolve: {
+    // The i18n JSX runtime lives in the shared repo, which has no React: it must use this app's React.
+    dedupe: ['react'],
     alias: {
       '@renderer': resolve(__dirname, 'src/renderer/src'),
       '@offgrid/core': resolve(__dirname, 'src'),
@@ -57,6 +61,10 @@ export default defineConfig({
     // those browser boundaries in one renderer harness so Radix-backed components
     // exercise the real product tree without every suite redefining the platform.
     setupFiles: ['src/renderer/src/__tests__/browser-boundaries.setup.ts'],
+    // The session type is the host's, so a Wayland workstation sent capture through the portal
+    // path the fakes do not cover while CI (no session) did not. Tests that exercise Wayland set
+    // it themselves.
+    env: { XDG_SESSION_TYPE: 'x11', WAYLAND_DISPLAY: '' },
     // The ui/* primitives come from @offgrid/operator-ui; inline it so the suite's
     // motion/react stub reaches those components as it reaches local ones.
     server: { deps: { inline: ['@offgrid/operator-ui'] } },

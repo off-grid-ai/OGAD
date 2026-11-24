@@ -19,12 +19,12 @@ ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
 import scan  # noqa: E402  (the change map)
 
-PLATFORMS = ['Mac', 'Windows', 'Linux', 'Android', 'iPhone', 'Chrome', 'Firefox']
+PLATFORMS = ['Mac', 'Windows', 'Linux', 'Android', 'iPhone', 'Chrome', 'Firefox', 'Web']
 REPO = {'shared': ('shared', 'Shared rules'), 'ui-library': ('ui-library', 'UI library'), 'desktop': ('OGAD', 'Desktop'),
         'desktop-pro': ('desktop-pro', 'Desktop Pro'), 'mobile': ('OGAM', 'Mobile'), 'mobile-pro': ('mobile-pro', 'Mobile Pro'),
-        'extension': ('browser-extension', 'Extension')}
+        'extension': ('browser-extension', 'Extension'), 'license-worker': ('license-worker', 'Checkout')}
 DIRS = {'shared': 'shared', 'desktop': 'desktop', 'desktop-pro': 'desktop/pro', 'mobile': 'mobile', 'mobile-pro': 'mobile/pro',
-        'extension': 'browser-extension'}
+        'extension': 'browser-extension', 'license-worker': 'license-worker'}
 RANK = {'GO': 0, 'INFO': 0, 'WATCH': 1, 'NO GO': 2}
 
 
@@ -84,6 +84,84 @@ def principle_calls(concepts):
     return calls
 
 
+GROUP = {'writing': ('scribe', 'writing', 'in a web text box', 'editor'), 'notes': ('notes',), 'vault': ('vault',),
+         'onboarding': ('onboarding', 'desktop onboarding', 'desktop after onboarding', 'mobile onboarding')}
+PLAT_OF = {'desktop': ['Mac', 'Windows', 'Linux'], 'desktop-pro': ['Mac', 'Windows', 'Linux'], 'mobile': ['iPhone', 'Android'], 'mobile-pro': ['iPhone', 'Android'],
+           'extension': ['Chrome', 'Firefox'], 'shared': ['Mac', 'iPhone', 'Android', 'Chrome', 'Firefox']}
+LAYERS = ('owner', 'engine', 'logic', 'view', 'data', 'copy')
+
+
+def graph(m, spec, screens, calls):
+    """The change as a graph for the page: concepts -> every place they live -> the platforms the screens prove.
+
+    Edge weight is the file count; collisions are concepts outside the change that share files with it; `live` is
+    what the checked-out branches change right now; calls sit on the place whose code they are about."""
+    keys = spec['concepts']
+    surfs = [s for s, _ in scan.SURF]
+    names = dict(scan.SURF) | {'extension': 'extension'}
+    concepts, edges = [], []
+    for k in keys:
+        c = m['c'][k]
+        cells = c['cells']
+        def cnt(s, l): return cells.get(f'{s}|{l}', {}).get('n', 0)
+        concepts.append({'key': k, 'name': c['name'].replace('Writing (Scribe)', 'Scribe'), 'does': c['does'],
+                         'files': sum(cnt(s, l) for s in surfs for l in LAYERS),
+                         'tests': sum(cnt(s, 'proof') for s in surfs),
+                         'rows': [r for s in ('desktop', 'mobile') for r in cells.get(f'{s}|checklist', {}).get('all', [])]})
+        for s in surfs:
+            layers = {l: cnt(s, l) for l in LAYERS if cnt(s, l)}
+            if not layers:
+                continue
+            files = [f for l in LAYERS for f in cells.get(f'{s}|{l}', {}).get('all', [])]
+            edges.append({'c': k, 's': s, 'n': sum(layers.values()), 'layers': layers, 'tests': cnt(s, 'proof'),
+                          'files': files[:80], 'more': max(0, len(files) - 80)})
+    live = {}
+    for s in DIRS:
+        rx = [re.compile(scan.CONCEPTS[k][2]) for k in keys]
+        hit = [f'{DIRS[s]}/{f}' for f in changed(s) if any(r.search(scan.norm(f)) for r in rx)]
+        if hit:
+            br = subprocess.run(['git', '-C', str(ROOT / DIRS[s]), 'branch', '--show-current'], capture_output=True, text=True).stdout.strip()
+            live[s] = {'branch': br, 'files': hit}
+    places = []
+    for s in surfs:
+        n = sum(e['n'] for e in edges if e['s'] == s)
+        if n:
+            places.append({'key': s, 'name': {'shared': 'Shared rules', 'desktop': 'Desktop', 'desktop-pro': 'Desktop Pro', 'mobile': 'Mobile',
+                                              'mobile-pro': 'Mobile Pro', 'extension': 'Extension', 'website': 'Website'}[s],
+                           'path': names[s], 'n': n, 'live': live.get(s)})
+    # Checkout (license-worker) is no scan surface, so its place comes from what its branch changes now.
+    if live.get('license-worker'):
+        places.append({'key': 'license-worker', 'name': 'Checkout', 'path': DIRS['license-worker'],
+                       'n': len(live['license-worker']['files']), 'live': live['license-worker']})
+    plats = []
+    for p in PLATFORMS:
+        # An iPhone shot with an Android version proves Android too, as the coverage rows count it.
+        on = [sc for sc in screens if sc['platform'] == p or
+              (p == 'Android' and any(v.get('android') for v in sc.get('versions', [])))]
+        if not on:
+            continue
+        by = {k: [sc['id'] for sc in on if str(sc.get('group', '')).lower().startswith(GROUP.get(k, (k,)))] for k in keys}
+        plats.append({'name': p, 'n': len(on), 'by': by, 'first': on[0]['id']})
+    pedges = [{'s': s, 'p': p} for s in surfs for p in PLAT_OF.get(s, []) if any(x['key'] == s for x in places) and any(x['name'] == p for x in plats)]
+    col = []
+    for pair, v in m['col'].items():
+        a, b = pair.split('|')
+        if a in keys and b in keys:
+            col.append({'a': a, 'b': b, 'n': v['n'], 'files': v['files'], 'inside': True})
+        elif a in keys or b in keys:
+            ours, other = (a, b) if a in keys else (b, a)
+            col.append({'a': ours, 'b': other, 'name': m['c'][other]['name'], 'n': v['n'], 'files': v['files']})
+    col.sort(key=lambda x: -x['n'])
+    surf_of = {'desktop': 'desktop', 'mobile': 'mobile', 'extension': 'extension', 'shared': 'shared'}
+    gcalls = []
+    for c in calls:
+        scr = next((s for s in screens if any(x['id'] == c['id'] for x in s.get('calls', []))), None)
+        gcalls.append({'id': c['id'], 'title': c.get('title') or c.get('text', ''), 'kind': c.get('kind', ''),
+                       's': c.get('surface') or surf_of.get(scr['surface'] if scr else '', 'shared'), 'screen': scr['id'] if scr else None})
+    return {'concepts': concepts, 'places': places, 'edges': edges, 'platforms': plats, 'pedges': pedges,
+            'collides': [x for x in col if not x.get('inside')][:6], 'inside': [x for x in col if x.get('inside')], 'calls': gcalls}
+
+
 def main(spec_path, out):
     spec = json.load(open(spec_path))
     out = Path(out)
@@ -119,14 +197,17 @@ def main(spec_path, out):
         rel = json.load(open(p)).get('data', {})
     feats = [f for f in rel.get('features', []) if f['key'] in spec['features']]
     epics = [e for e in rel.get('ship', {}).get('epics', []) if e['key'] in spec['features']]
-    shown = {pl for e in epics for pl in e.get('shown', [])} | {s['platform'] for s in screens}
+    shown = {pl for e in epics for pl in e.get('shown', [])} | {s['platform'] for s in screens} | \
+        {'Android' for s in screens for v in s.get('versions', []) if v.get('android')}
     platforms = [{'name': pl, 'shown': pl in shown} for pl in PLATFORMS if any(pl in e.get('shown', []) + e.get('missing', []) for e in epics) or pl in shown]
     # The platforms each feature must be shot on: the spec's `require` (the release bar), else
     # what Argus lists. A feature counts as shot on a platform when this page has a shot of it there.
     require = spec.get('require', {})
     def shot_on(e):
         keys = {e['key'], e['name'].lower()}
-        return {sc['platform'] for sc in screens if proves.get(id(sc), set()) & keys}
+        mine = [sc for sc in screens if proves.get(id(sc), set()) & keys]
+        # An iPhone shot with an Android version proves Android for that feature too.
+        return {sc['platform'] for sc in mine} | {'Android' for sc in mine for v in sc.get('versions', []) if v.get('android')}
     names = {'tech': 'Tech', 'design': 'Design', 'product': 'Product', 'business': 'Business', 'quality': 'Quality'}
 
     def current(f, c):
@@ -154,8 +235,8 @@ def main(spec_path, out):
                if pl not in shot_on(e)]
 
     repos = {x['dir']: x for x in rel.get('repos', [])}
-    order = ['shared', 'ui-library', 'desktop', 'desktop-pro', 'mobile', 'mobile-pro', 'extension']
-    dirmap = {'shared': 'shared', 'ui-library': 'ui-library', 'desktop': 'desktop', 'desktop-pro': 'desktop/pro', 'mobile': 'mobile', 'mobile-pro': 'mobile/pro', 'extension': 'browser-extension'}
+    order = ['shared', 'ui-library', 'desktop', 'desktop-pro', 'mobile', 'mobile-pro', 'extension', 'license-worker']
+    dirmap = {'shared': 'shared', 'ui-library': 'ui-library', 'desktop': 'desktop', 'desktop-pro': 'desktop/pro', 'mobile': 'mobile', 'mobile-pro': 'mobile/pro', 'extension': 'browser-extension', 'license-worker': 'license-worker'}
     cmap = []
     for s in order:
         x = repos.get(dirmap[s])
@@ -170,6 +251,29 @@ def main(spec_path, out):
             proven.append(f"{REPO[s][1]}: CI passing on PR #{pr.get('n')}")
 
     m = scan.build(str(ROOT))
+    # Every product the change belongs in must show on the page: one with no code yet, or no shots yet, gets
+    # a missing row, so a gap is seen without anyone looking for it (the extension's first run was missed).
+    def shots_of(k):
+        """The platforms this concept's own screens are shot on: an unrelated screen proves nothing for it."""
+        mine = [s for s in screens if k in proves.get(id(s), set())
+                or str(s.get('group', '')).lower().startswith(GROUP.get(k, (k,)))]
+        return {s['platform'] for s in mine} | {'Android' for s in mine for v in s.get('versions', []) if v.get('android')}
+    for k in spec['concepts']:
+        c = m['c'].get(k, {})
+        shots = shots_of(k)
+        for app in c.get('apps', []):
+            for pl in PLAT_OF.get(app, []):
+                # Windows and Linux are outside the release bar: checked only once the page has shots there.
+                if pl in ('Windows', 'Linux') and not any(s['platform'] == pl for s in screens):
+                    continue
+                name = f"{c['name']} · {pl}"
+                unbuilt = app in c.get('missing', [])
+                # Shots of today's screens never close a product that has nothing built yet.
+                if (pl in shots and not unbuilt) or any(x['name'] == name for x in missing):
+                    continue
+                missing.append({'name': name, 'why': f'not built on the {app} yet' if unbuilt else 'not shot yet'})
+                if not any(x['name'] == pl for x in platforms):
+                    platforms.append({'name': pl, 'shown': False})
     col = defaultdict(int)
     for k, v in m['col'].items():
         a, b = k.split('|')
@@ -231,7 +335,8 @@ def main(spec_path, out):
                       'status': 'ok' if sx.get('ci') == 'passing' else 'watch', 'line': f'{len(shared_files)} source files changed'}]
 
     change = {'title': spec['title'], 'verdict': rel.get('verdict', ''), 'lenses': lenses, 'map': cmap, 'collides': collides,
-              'platforms': platforms, 'missing': missing, 'noScreen': no_screen, 'proven': proven}
+              'platforms': platforms, 'missing': missing, 'noScreen': no_screen, 'proven': proven,
+              'graph': graph(m, spec, screens, calls)}
     json.dump(screens, open(out / 'screens.json', 'w'), indent=1)
     json.dump(change, open(out / 'change.json', 'w'), indent=1)
     json.dump(files, open(out / 'files.json', 'w'), indent=1)

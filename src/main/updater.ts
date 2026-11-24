@@ -13,6 +13,7 @@ import { valid } from 'semver'
 import { getSetting, saveSetting } from './database'
 import { resolveChannelConfig, type UpdateChannel } from './update-channel'
 import { listPreviousUpdateReleases } from './update-release-history'
+import { storeDistribution, storeName } from './store-distribution'
 
 const GITHUB_UPDATE_PROVIDER = {
   provider: 'github' as const,
@@ -110,7 +111,9 @@ export function registerUpdateIpc(): void {
     currentVersion: app.getVersion(),
     auto: autoEnabled(),
     channel: channelPref(),
-    skippedVersion: skippedVersion()
+    skippedVersion: skippedVersion(),
+    // A store install is updated by its store; Settings shows that instead of controls.
+    store: storeLabel()
   }))
 
   // Toggle automatic updates. Persisted + applied live; turning it on kicks an
@@ -250,7 +253,14 @@ async function downloadPreviousVersion(
   }
 }
 
+function storeLabel(): string | null {
+  const store = storeDistribution()
+  return store ? storeName(store) : null
+}
+
 export function startAutoUpdates(): void {
+  // The store delivers updates to a store install; the app never swaps its own bundle there.
+  if (storeDistribution()) return
   applySkippedVersionPolicy()
   applyAutoPref()
   applyChannel()
@@ -327,6 +337,10 @@ export function checkForUpdates(timeoutMs = 30_000): Promise<UpdateCheckResult> 
       status: 'error',
       error: 'Updates only work in the installed app, not a dev build.'
     })
+  }
+  const store = storeLabel()
+  if (store) {
+    return Promise.resolve({ status: 'error', error: `Updates come from ${store}.` })
   }
   return new Promise<UpdateCheckResult>((resolve) => {
     let done = false

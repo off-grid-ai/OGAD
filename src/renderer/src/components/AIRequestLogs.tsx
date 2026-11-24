@@ -713,9 +713,9 @@ export function AIRequestLogs({
             <motion.div
               key="filters"
               id="ai-log-filters"
-              initial={{ opacity: 0, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, filter: 'blur(4px)' }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               transition={{ duration: 0.3, ease }}
               className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-muted/20 p-3"
             >
@@ -779,9 +779,9 @@ export function AIRequestLogs({
             <motion.p
               key="error"
               role="alert"
-              initial={{ opacity: 0, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, filter: 'blur(4px)' }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               transition={{ duration: 0.3, ease }}
               className="rounded-md border border-border p-3 text-xs"
             >
@@ -827,7 +827,7 @@ export function AIRequestLogs({
                 <motion.div
                   key="loading"
                   role="status"
-                  exit={{ opacity: 0, filter: 'blur(4px)' }}
+                  exit={{ opacity: 0 }}
                   transition={{ duration: 0.3, ease }}
                   className="space-y-3 p-4"
                 >
@@ -843,9 +843,9 @@ export function AIRequestLogs({
               ) : !page.rows.length ? (
                 <motion.div
                   key="empty"
-                  initial={{ opacity: 0, y: 8, filter: 'blur(4px)' }}
-                  animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                  exit={{ opacity: 0, y: -8, filter: 'blur(4px)' }}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
                   transition={{ duration: 0.35, ease }}
                 >
                   <Empty className="p-6 md:py-6">
@@ -871,9 +871,9 @@ export function AIRequestLogs({
                 <motion.div
                   key={`rows-${offset}`}
                   className="h-full min-h-0 flex-1"
-                  initial={{ opacity: 0, y: 6, filter: 'blur(4px)' }}
-                  animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                  exit={{ opacity: 0, y: -6, filter: 'blur(4px)' }}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
                   transition={{ duration: 0.3, ease }}
                 >
                   <TableVirtuoso
@@ -1023,8 +1023,8 @@ export function AIRequestLogs({
             {record ? (
               <motion.div
                 key={record.id}
-                initial={{ opacity: 0, y: 6, filter: 'blur(4px)' }}
-                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease }}
               >
                 <RequestDetail record={record} display={display} raw={raw} />
@@ -1079,9 +1079,9 @@ export function AIRequestLogs({
               key="confirm-clear"
               role="group"
               aria-label="Confirm clear activity"
-              initial={{ opacity: 0, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, filter: 'blur(4px)' }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               transition={{ duration: 0.3, ease }}
               className="flex flex-wrap items-center gap-3 rounded-md border border-border p-3"
             >

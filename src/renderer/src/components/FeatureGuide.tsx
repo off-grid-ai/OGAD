@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { openImageChat } from '@/lib/chat-image-mode'
 import {
   ArrowSquareOutIcon,
   CaretRightIcon,
@@ -14,6 +15,7 @@ import { Button } from './ui/button'
 import { ChatMarkdown } from './ChatMarkdown'
 import { currentPlatform } from '@renderer/lib/device'
 import { openExternal } from '@renderer/constants/links'
+import { productAction } from '@offgrid/features'
 import { cn } from '@renderer/lib/utils'
 import type { ViewMode } from '@renderer/lib/view-modes'
 import {
@@ -22,7 +24,6 @@ import {
   guideAnswerBlocks,
   guideAnswerLength,
   guideAnswerReveal,
-  guideFlowAnswerById,
   guideTypingMs,
   type GuideAnswerBlock,
   guideTurnsToSend,
@@ -32,6 +33,7 @@ import {
   GUIDE_GROUPS,
   answerParts,
   guideGrounding,
+  guideFlowStepsById,
   guideStarterAnswer,
   guideStepsAnswer,
   guideTopics,
@@ -132,29 +134,52 @@ function TopicAction({
   topic,
   isPro,
   onOpen,
-  size = 'default'
+  size = 'default',
+  quiet = false
 }: Readonly<{
   topic: GuideTopic
   isPro: boolean
   onOpen: (view: ViewMode) => void
   size?: 'default' | 'sm'
+  /** Outline, when the screen's one primary action is elsewhere (onboarding's Set up). */
+  quiet?: boolean
 }>): React.ReactElement | null {
   if (topic.route) {
     const route = topic.route
+    // Images opens chat in image mode; with no image model, Models on the Image tab instead.
+    const open = (): void => {
+      if (topic.id !== 'images') return onOpen(route)
+      void openImageChat(onOpen)
+    }
     return (
-      <Button size={size} onClick={() => onOpen(route)}>
+      <Button size={size} variant={quiet ? 'outline' : 'default'} onClick={open}>
         {topic.pro && !isPro ? <LockSimpleIcon className="h-4 w-4" /> : null}
         Open {topic.label}
       </Button>
     )
   }
-  if (!topic.url) return null
-  const url = topic.url
+  if (!topic.get) return null
+  // It lives in another Off Grid AI app: the shared Get / Open <app> action. The extension's
+  // store depends on this computer's default browser, which the main process works out.
+  const action = productAction({ product: topic.get })
+  const get = (): void => {
+    if (topic.get === 'extension') void window.api.getExtension?.()
+    else if (action.url) openExternal(action.url)
+  }
   return (
-    <Button size={size} variant="outline" onClick={() => openExternal(url)}>
-      Get it
-      <ArrowSquareOutIcon className="h-4 w-4" />
-    </Button>
+    <span className="flex flex-wrap gap-2">
+      <Button size={size} variant="outline" onClick={get}>
+        {action.label}
+        <ArrowSquareOutIcon className="h-4 w-4" />
+      </Button>
+      {topic.get === 'mobile' ? (
+        // Already have the phone app: pairing it is in Sync, on this computer.
+        <Button size={size} variant="ghost" onClick={() => onOpen('devices')}>
+          {isPro ? null : <LockSimpleIcon className="h-4 w-4" />}
+          Pair your phone
+        </Button>
+      ) : null}
+    </span>
   )
 }
 
@@ -162,12 +187,19 @@ function TopicDetail({
   topic,
   isPro,
   onOpen,
-  onAsk
+  onAsk,
+  mediaHeight = 'h-[56vh]',
+  footer,
+  quiet = false
 }: Readonly<{
   topic: GuideTopic
   isPro: boolean
   onOpen: (view: ViewMode) => void
   onAsk: (question: string) => void
+  mediaHeight?: string
+  /** Shown under the feature: onboarding puts Get Pro or the connections here. */
+  footer?: ReactNode
+  quiet?: boolean
 }>): React.ReactElement {
   return (
     <article className="og-guide-in grid max-w-5xl gap-5" aria-labelledby="guide-topic-title">
@@ -188,10 +220,10 @@ function TopicDetail({
             <ChatCircleIcon className="h-4 w-4" />
             Ask more
           </Button>
-          <TopicAction topic={topic} isPro={isPro} onOpen={onOpen} />
+          <TopicAction topic={topic} isPro={isPro} onOpen={onOpen} quiet={quiet} />
         </div>
       </div>
-      <MediaFrame topic={topic} height="h-[56vh]" />
+      <MediaFrame topic={topic} height={mediaHeight} />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <p className="text-sm leading-relaxed text-neutral-400">{topic.description}</p>
         <ul className="grid content-start gap-2">
@@ -203,6 +235,7 @@ function TopicDetail({
           ))}
         </ul>
       </div>
+      {footer}
     </article>
   )
 }
@@ -338,7 +371,7 @@ function AskPane({
     const instant = retry
       ? null
       : flowId
-        ? guideFlowAnswerById('desktop', flowId, topics)
+        ? guideFlowStepsById(flowId, topics, currentPlatform())
         : guideStarterAnswer(text, topics)
     if (instant) {
       setTurns([...history, { role: 'assistant', content: instant }])
@@ -351,7 +384,7 @@ function AskPane({
     // A "how do I…" answer is the app's own steps, found by what the question means when the
     // guide's search model is on this computer, else by its words; the model answers the rest.
     const vector = (await window.api.embedGuideQuestion(text).catch(() => null)) ?? undefined
-    const steps = retry ? null : guideStepsAnswer(text, topics, currentPlatform(), vector)
+    const steps = retry ? null : guideStepsAnswer(text, topics, currentPlatform(), vector, turns)
     if (steps) {
       setWaiting(false)
       setTurns([...history, { role: 'assistant', content: steps }])
@@ -473,6 +506,25 @@ function AskPane({
                                 className="size-4 shrink-0 text-neutral-500"
                                 aria-hidden
                               />
+                            </button>
+                          ))}
+                        </div>
+                      ) : block.kind === 'nexts' ? (
+                        <div
+                          key={j}
+                          className="flex max-w-xl flex-wrap gap-2"
+                          aria-label="Follow-ups"
+                        >
+                          {block.nexts.map((next) => (
+                            <button
+                              key={next.id}
+                              type="button"
+                              disabled={waiting}
+                              onClick={() => void ask(next.label, false, next.id)}
+                              className="rounded-full border border-white/10 px-3 py-1.5 text-left text-xs text-neutral-300 transition-colors hover:bg-white/5 hover:text-neutral-100 active:bg-white/10 disabled:opacity-50"
+                              data-testid={`guide-next-${next.id}`}
+                            >
+                              {next.label}
                             </button>
                           ))}
                         </div>
@@ -599,13 +651,139 @@ function NavRow({
  */
 export function FeatureGuide({
   isPro,
-  onOpen
-}: Readonly<{ isPro: boolean; onOpen: (view: ViewMode) => void }>): React.ReactElement {
+  onOpen,
+  picks
+}: Readonly<{
+  isPro: boolean
+  onOpen: (view: ViewMode) => void
+  /**
+   * Onboarding's "How it works": only these topics, in this order, as "Your picks", starting on
+   * the first. The footer goes under each one (Get Pro, connections).
+   */
+  picks?: {
+    ids: string[]
+    footer?: (topic: GuideTopic) => ReactNode
+    /** Under the list of picks: onboarding's where-it-runs line and opt-in. */
+    navFooter?: ReactNode
+  }
+}>): React.ReactElement {
   const topics = useMemo(() => guideTopics(currentPlatform()), [])
-  const [selectedId, setSelectedId] = useState(ASK)
+  // A pick this platform does not have yet still shows, with a line saying so.
+  const withUnsupported = useMemo(
+    () => (picks ? guideTopics(currentPlatform(), { unsupported: true }) : topics),
+    [picks, topics]
+  )
+  const picked = useMemo(
+    () =>
+      picks?.ids
+        .map((id) => withUnsupported.find((t) => t.id === id))
+        .filter((t): t is GuideTopic => Boolean(t)) ?? [],
+    [picks?.ids, withUnsupported]
+  )
+  const [selectedId, setSelectedId] = useState(() => picked[0]?.id ?? ASK)
   const [pending, setPending] = useState<{ question: string; at: number } | null>(null)
-  const selected = topics.find((t) => t.id === selectedId)
+  const selected = withUnsupported.find((t) => t.id === selectedId)
 
+  const askRow = (
+    <NavRow
+      active={!selected}
+      onClick={() => setSelectedId(ASK)}
+      icon={SparkleIcon}
+      label="Ask about Off Grid AI"
+    />
+  )
+  const body = (
+    <div className="grid min-h-0 flex-1 gap-8 md:grid-cols-[220px_minmax(0,1fr)]">
+      <nav
+        aria-label="Features"
+        className={cn(
+          'min-h-0 overflow-y-auto pr-1',
+          picks ? 'flex flex-col gap-5' : 'grid content-start gap-5'
+        )}
+      >
+        {picks ? null : askRow}
+        {picks ? (
+          <section aria-labelledby="guide-your-picks">
+            <h2
+              id="guide-your-picks"
+              className="pb-1.5 pl-2 font-mono text-[10px] uppercase tracking-widest text-neutral-500"
+            >
+              Your picks
+            </h2>
+            <ul className="grid gap-0.5">
+              {picked.map((t) => (
+                <li key={t.id}>
+                  <NavRow
+                    active={t.id === selectedId}
+                    onClick={() => setSelectedId(t.id)}
+                    icon={t.icon}
+                    label={t.label}
+                  />
+                </li>
+              ))}
+              <li>{askRow}</li>
+            </ul>
+          </section>
+        ) : null}
+        {picks?.navFooter ? <div className="mt-auto grid gap-4">{picks.navFooter}</div> : null}
+        {(picks ? [] : GUIDE_GROUPS).map((group) => {
+          const inGroup = topics.filter((t) => t.group === group.id)
+          if (inGroup.length === 0) return null
+          return (
+            <section key={group.id} aria-labelledby={`guide-${group.id}`}>
+              <h2
+                id={`guide-${group.id}`}
+                className="pb-1.5 pl-2 font-mono text-[10px] uppercase tracking-widest text-neutral-500"
+              >
+                {group.title}
+              </h2>
+              <ul className="grid gap-0.5">
+                {inGroup.map((t) => (
+                  <li key={t.id}>
+                    <NavRow
+                      active={t.id === selectedId}
+                      onClick={() => setSelectedId(t.id)}
+                      icon={t.icon}
+                      label={t.label}
+                      locked={t.pro && !isPro && Boolean(t.route)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )
+        })}
+      </nav>
+      <div className="min-h-0 min-w-0">
+        <div className={cn('h-full', selected && 'hidden')}>
+          <AskPane
+            topics={topics}
+            isPro={isPro}
+            onShow={setSelectedId}
+            onOpen={onOpen}
+            pending={pending}
+          />
+        </div>
+        {selected ? (
+          <div key={selected.id} className="h-full overflow-y-auto pr-2">
+            <TopicDetail
+              topic={selected}
+              isPro={isPro}
+              onOpen={onOpen}
+              onAsk={(question) => {
+                setPending({ question, at: Date.now() })
+                setSelectedId(ASK)
+              }}
+              mediaHeight={picks ? 'h-[34vh]' : undefined}
+              footer={picks?.footer?.(selected)}
+              quiet={Boolean(picks)}
+            />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+  if (picks) return body
   return (
     <PageShell
       fill
@@ -613,70 +791,7 @@ export function FeatureGuide({
       eyebrow="Off Grid AI"
       description="Everything runs on your own computer and phone. Ask, or pick a feature to see it."
     >
-      <div className="grid min-h-0 flex-1 gap-8 md:grid-cols-[220px_minmax(0,1fr)]">
-        <nav
-          aria-label="Features"
-          className="grid min-h-0 content-start gap-5 overflow-y-auto pr-1"
-        >
-          <NavRow
-            active={!selected}
-            onClick={() => setSelectedId(ASK)}
-            icon={SparkleIcon}
-            label="Ask about Off Grid AI"
-          />
-          {GUIDE_GROUPS.map((group) => {
-            const inGroup = topics.filter((t) => t.group === group.id)
-            if (inGroup.length === 0) return null
-            return (
-              <section key={group.id} aria-labelledby={`guide-${group.id}`}>
-                <h2
-                  id={`guide-${group.id}`}
-                  className="pb-1.5 pl-2 font-mono text-[10px] uppercase tracking-widest text-neutral-500"
-                >
-                  {group.title}
-                </h2>
-                <ul className="grid gap-0.5">
-                  {inGroup.map((t) => (
-                    <li key={t.id}>
-                      <NavRow
-                        active={t.id === selectedId}
-                        onClick={() => setSelectedId(t.id)}
-                        icon={t.icon}
-                        label={t.label}
-                        locked={t.pro && !isPro && Boolean(t.route)}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )
-          })}
-        </nav>
-        <div className="min-h-0 min-w-0">
-          <div className={cn('h-full', selected && 'hidden')}>
-            <AskPane
-              topics={topics}
-              isPro={isPro}
-              onShow={setSelectedId}
-              onOpen={onOpen}
-              pending={pending}
-            />
-          </div>
-          {selected ? (
-            <div key={selected.id} className="h-full overflow-y-auto pr-2">
-              <TopicDetail
-                topic={selected}
-                isPro={isPro}
-                onOpen={onOpen}
-                onAsk={(question) => {
-                  setPending({ question, at: Date.now() })
-                  setSelectedId(ASK)
-                }}
-              />
-            </div>
-          ) : null}
-        </div>
-      </div>
+      {body}
     </PageShell>
   )
 }

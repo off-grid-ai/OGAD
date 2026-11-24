@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { skipGpuSetup } from './helpers/launch'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -40,17 +41,19 @@ test('records real local requests for all five AI modalities', async ({ playwrig
         .listen(port, '127.0.0.1', () => probe.close(() => resolve()))
     })
   }
-  const app = await playwright._electron.launch({
-    args: [process.env.OFFGRID_AI_ACTIVITY_APP ?? '.'],
-    env: {
-      ...process.env,
-      OFFGRID_USER_DATA: profile,
-      OFFGRID_E2E_ISOLATED_INSTANCE: '1',
-      OFFGRID_E2E_HEADLESS: '1',
-      OFFGRID_PRO: '0',
-      OFFGRID_SEED: ''
-    }
-  })
+  const app = skipGpuSetup(
+    await playwright._electron.launch({
+      args: [process.env.OFFGRID_AI_ACTIVITY_APP ?? '.'],
+      env: {
+        ...process.env,
+        OFFGRID_USER_DATA: profile,
+        OFFGRID_E2E_ISOLATED_INSTANCE: '1',
+        OFFGRID_E2E_HEADLESS: '1',
+        OFFGRID_PRO: '0',
+        OFFGRID_SEED: ''
+      }
+    })
+  )
   const output: string[] = []
   app.process().stdout?.on('data', (data) => output.push(String(data)))
   app.process().stderr?.on('data', (data) => output.push(String(data)))

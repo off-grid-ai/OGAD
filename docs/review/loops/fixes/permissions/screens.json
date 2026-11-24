@@ -1,0 +1,137 @@
+[
+  {
+    "id": "phone-composer-mic-off",
+    "name": "Composer: microphone off",
+    "group": "Phone · Chat",
+    "what": "With the microphone refused, the composer says \"Microphone access is off.\" with Open Settings beside the crossed-out mic (was a crossed-out mic with no word).",
+    "file": null,
+    "step": "composer-permission",
+    "shot": null,
+    "steps": [
+      "Android Settings > Apps > Off Grid AI > Permissions > Microphone > Don't allow.",
+      "Open any chat and look above the composer."
+    ]
+  },
+  {
+    "id": "phone-composer-camera-off",
+    "name": "Composer: camera off",
+    "group": "Phone · Chat",
+    "what": "Take photo with the camera refused says \"Camera access is off.\" with Open Settings above the composer (was nothing).",
+    "file": null,
+    "step": "composer-permission",
+    "shot": null,
+    "steps": [
+      "Refuse Camera for Off Grid AI in Android Settings.",
+      "In a chat with a vision model: Attach > Take photo."
+    ]
+  },
+  {
+    "id": "phone-sync-not-on-wifi",
+    "name": "Sync: not on Wi-Fi",
+    "group": "Phone · Sync",
+    "what": "Off Wi-Fi, the Sync devices card says \"This phone is not on Wi-Fi.\" with Try again (was a bare Offline).",
+    "file": null,
+    "step": "sync-wifi",
+    "shot": null,
+    "steps": [
+      "Turn Wi-Fi off (mobile data on); Pro on.",
+      "Settings > Sync."
+    ]
+  },
+  {
+    "id": "phone-screenshot-photos-off",
+    "name": "Screenshot sharing: photo access off",
+    "group": "Phone · Sync",
+    "what": "Screenshot sharing turned on with photo access refused shows \"Photo access is off.\" with Open Settings on its row.",
+    "file": null,
+    "step": "sync-sharing",
+    "shot": null,
+    "steps": [
+      "Refuse Photos and videos for Off Grid AI in Android Settings.",
+      "Settings > Sync > Automatic sharing > Screenshots: choose Ask or Auto."
+    ]
+  },
+  {
+    "id": "desktop-memory-capture-state",
+    "name": "Day, Reflect, Entities, Search: capture state",
+    "group": "Desktop · Memory",
+    "what": "Capture paused: the header says Paused with Resume, so capture off never reads as a quiet day. Same header on Day, Reflect, Entities and Search.",
+    "file": "desktop-capture-paused.png",
+    "step": "capture-state",
+    "shot": "desktop-capture-paused.png",
+    "steps": [
+      "Pause capture.",
+      "Open Day, Reflect, Entities and Search."
+    ]
+  },
+  {
+    "id": "desktop-capture-permission",
+    "name": "Day, Reflect, Entities, Search: permission required",
+    "group": "Desktop · Memory",
+    "what": "Screen access refused: the header says Permission required with Review permissions.",
+    "file": "desktop-capture-permission.png",
+    "step": "capture-state"
+  },
+  {
+    "id": "desktop-load-failure",
+    "name": "Replay, Reflect, Day, Meetings calendar: failed load",
+    "group": "Desktop · Memory",
+    "what": "A failed read says why with Try again instead of No frames / No activity / No meetings.",
+    "file": null,
+    "step": "load-failure",
+    "shot": null,
+    "steps": [
+      "Make the database busy or unreadable, then open each screen."
+    ]
+  },
+  {
+    "id": "desktop-clipboard-capture-off",
+    "name": "Clipboard: capture off",
+    "group": "Desktop · Clipboard",
+    "what": "With capture off the empty list says \"Clipboard capture is off.\" with Turn on (was Nothing copied yet).",
+    "file": "desktop-clipboard.png",
+    "step": "clipboard-capture",
+    "shot": "desktop-clipboard.png",
+    "steps": [
+      "Clipboard > Settings > turn capture off, go back."
+    ]
+  },
+  {
+    "id": "desktop-clipboard-quick-paste",
+    "name": "Clipboard: quick paste cannot work",
+    "group": "Desktop · Clipboard",
+    "what": "Under the search: The quick paste shortcut is in use by another app, or Accessibility access is off. Open Settings after a paste that could not type.",
+    "file": null,
+    "step": "clipboard-quick-paste",
+    "shot": null,
+    "steps": [
+      "Hold Ctrl/Cmd+Shift+C in another app, then open Off Grid AI; or paste from the popup without Accessibility."
+    ]
+  },
+  {
+    "id": "desktop-dictation-hotkey",
+    "name": "Dictation: shortcut and hold",
+    "group": "Desktop · Dictation",
+    "what": "Shortcut in use by another app: Change shortcut. Hold without Accessibility: Accessibility access is off. Open Settings, and the header says Tap.",
+    "file": null,
+    "step": "dictation-hotkey",
+    "shot": null,
+    "steps": [
+      "Revoke Accessibility, set mode to Hold, open Dictation."
+    ]
+  },
+  {
+    "id": "ext-fill-shortcut-answers",
+    "name": "Fill login and Generate password shortcuts",
+    "group": "Extension · Vault",
+    "what": "The shortcut and the right-click item always answer. One login fills. Anything else (vault locked, not paired, Desktop closed, no saved login, a refused fill) opens the in-field menu with its line and button; a page that cannot be filled opens the panel vault, which says why and offers Allow on all sites (was nothing at all).",
+    "file": null,
+    "step": "fill-shortcut",
+    "shot": null,
+    "steps": [
+      "Lock the vault in Desktop.",
+      "On a login page, click the username field and press Ctrl+Shift+L (Cmd+Shift+L on a Mac).",
+      "The menu under the field says \"Your Off Grid AI vault is locked.\" with Unlock in Off Grid AI Desktop."
+    ]
+  }
+]

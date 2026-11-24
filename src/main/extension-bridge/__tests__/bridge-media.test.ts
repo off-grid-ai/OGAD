@@ -275,7 +275,8 @@ describe('sealed models and audio', () => {
     })
     expect(manager.getActiveModalities().text).toBe(family.id)
     // The chat engine loads the activated model.
-    await vi.waitFor(() => expect(chatEngine.launches()).toHaveLength(1))
+    // Spawning the engine process takes about a second on its own, more on a busy machine.
+    await vi.waitFor(() => expect(chatEngine.launches()).toHaveLength(1), { timeout: 10_000 })
     const inventory = await s.call('models.inventory')
     expect(inventory.body).toMatchObject({
       ok: true,

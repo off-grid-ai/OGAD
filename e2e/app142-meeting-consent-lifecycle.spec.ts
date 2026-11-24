@@ -18,7 +18,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { completeOnboarding } from './helpers/onboarding'
-import { targetIsPackaged } from './helpers/launch'
+import { targetIsPackaged, skipGpuSetup } from './helpers/launch'
 import { navButton } from './helpers/settings'
 
 interface RecorderEvent {
@@ -94,18 +94,20 @@ function ffmpegPath(): string {
 }
 
 async function launchApp(): Promise<void> {
-  app = await electron.launch({
-    args: [process.cwd()],
-    cwd: boundaryRoot,
-    env: {
-      ...process.env,
-      OFFGRID_USER_DATA: profileDir,
-      OFFGRID_PRO: '1',
-      OFFGRID_APP142_AUDIT_FILE: auditFile,
-      OFFGRID_APP142_FFMPEG: ffmpegPath(),
-      NODE_ENV: 'production'
-    }
-  })
+  app = skipGpuSetup(
+    await electron.launch({
+      args: [process.cwd()],
+      cwd: boundaryRoot,
+      env: {
+        ...process.env,
+        OFFGRID_USER_DATA: profileDir,
+        OFFGRID_PRO: '1',
+        OFFGRID_APP142_AUDIT_FILE: auditFile,
+        OFFGRID_APP142_FFMPEG: ffmpegPath(),
+        NODE_ENV: 'production'
+      }
+    })
+  )
   page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   await page.emulateMedia({ reducedMotion: 'reduce' })

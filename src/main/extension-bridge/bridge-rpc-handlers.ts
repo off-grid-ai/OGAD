@@ -2,6 +2,7 @@ import { chatHandlers } from './bridge-chat-handlers'
 import { bridgeMediaData, mediaHandlers } from './bridge-media-handlers'
 import { parseConversationParams, type ConversationSearchParams } from './bridge-conversations'
 import { isSettingsSection, parseSettingsPatch } from './bridge-settings'
+import { announceSettingsChangedElsewhere } from '../task-settings-events'
 import type { BridgeFeatures, RpcMethod } from './bridge-protocol'
 import type { BridgeDeps, PairedBrowser } from './bridge-types'
 import { nextSettingsVersion, settingsChanged } from '../settings-version'
@@ -158,6 +159,7 @@ export function rpcHandlers(
       }
       await deps.data.writeSettings(p.section, patch)
       settingsChanged()
+      announceSettingsChangedElsewhere(p.section)
       return deps.data.readSettings(p.section)
     },
     // Held open until something a Settings screen shows changes, so an open panel re-reads on

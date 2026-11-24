@@ -1,3 +1,5 @@
+import { PRODUCT_GET_URL } from '@offgrid/features'
+
 // External links out of the app. Kept in one place so a URL change is a single
 // edit and cross-sell surfaces stay consistent. These open in the user's browser
 // via window.api.openExternal (never in-app).
@@ -10,11 +12,10 @@ export const OFF_GRID_DESKTOP_RELEASES_URL = 'https://github.com/off-grid-ai/OGA
 
 /** Off Grid AI Mobile landing page — carries both App Store and Google Play links.
  *  Mirrors mobile's link to getoffgridai.co/desktop. */
-export const OFF_GRID_MOBILE_URL = 'https://getoffgridai.co/mobile'
+export const OFF_GRID_MOBILE_URL = PRODUCT_GET_URL.mobile
 
-/** The Off Grid AI browser extension on the Chrome Web Store, as the website links it. */
-export const OFF_GRID_EXTENSION_URL =
-  'https://chromewebstore.google.com/detail/off-grid-ai/mohdjadebdkpineabaglhbeepcehahkd'
+// The browser extension has no link here: its store depends on the default browser, so screens
+// call window.api.getExtension(), which opens the right one (@offgrid/features productAction).
 
 /** Open a URL in the user's default browser (falls back to window.open). */
 export function openExternal(url: string): void {

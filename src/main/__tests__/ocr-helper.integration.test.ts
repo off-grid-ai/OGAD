@@ -15,7 +15,8 @@ import { createOfflineFetchBoundary } from './harness/offline-fetch'
 // rather than failing - honest: it guards the behavior wherever the binary is present.
 // Vision OCR of a FILE needs no TCC permission, so it works headless.
 const OCR_BIN = path.resolve(__dirname, '../../../electron/accessibility/ocr')
-const HAVE_BIN = existsSync(OCR_BIN)
+// Vision is macOS-only: a Mac-built binary copied onto Linux exists but cannot run.
+const HAVE_BIN = process.platform === 'darwin' && existsSync(OCR_BIN)
 const offlineNetwork = createOfflineFetchBoundary()
 const OCR_PROCESS_TIMEOUT_MS = 30_000
 const OCR_TEST_TIMEOUT_MS = 35_000

@@ -451,6 +451,8 @@ const offGridApi = {
     return unsubscribe('gateway:keep-loaded:engine-update', subscription)
   },
   getSettings: () => ipcRenderer.invoke('settings:get'),
+  // Opens the extension's store page for this computer's default browser.
+  getExtension: (): Promise<void> => ipcRenderer.invoke('extension-bridge:get'),
   aiLogsList: (
     query: import('../shared/ai-request-log').AILogQuery = {}
   ): Promise<import('../shared/ai-request-log').AILogPage> =>
@@ -715,6 +717,13 @@ const offGridApi = {
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
   readClipboardText: (): Promise<string> => ipcRenderer.invoke('clipboard:read-text'),
   cancelSetupDownload: (modelId: string) => ipcRenderer.invoke('setup:cancel-download', modelId),
+  /** Downloads the starter chat model and makes it active, unless a chat model is already active. */
+  setupQuickStart: (): Promise<{
+    success: boolean
+    error?: string
+    modelId?: string
+    modelName?: string
+  }> => ipcRenderer.invoke('setup:quick-start'),
   autoConfigure: (selectedModelIds?: string[], mode?: 'conservative' | 'balanced' | 'extreme') =>
     ipcRenderer.invoke('setup:auto-configure', selectedModelIds, mode),
   restartComponent: (id: string) => ipcRenderer.invoke('system:restart', id),
@@ -941,6 +950,8 @@ const offGridApi = {
     languages: { code: string; label: string }[]
     options: { id: string | null; name: string; active: boolean }[]
     selectedId: string | null
+    /** A speech model is there (or a remote server transcribes). */
+    modelReady?: boolean
   }> => ipcRenderer.invoke('transcription:active-info'),
 
   // --- Voice output (text-to-speech via Kokoro) ---

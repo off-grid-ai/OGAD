@@ -46,6 +46,7 @@ jobs:
           - { task: unit, shard: 4, name: 'vitest (4/4)' }
           - { task: db, name: 'DB journeys' }
           - { task: heavy, name: 'heavy integration' }
+          - { task: perf, name: 'performance budgets' }
     steps:
       - uses: actions/checkout@v4
       - name: Set up the workspace
@@ -169,6 +170,26 @@ jobs:
           name: coverage-heavy
           path: coverage-heavy/coverage-final.json
           retention-days: 1
+
+      # ── perf: the cheap performance budgets (perf/README.md). size-limit fails a bundle that grows
+      # past its budget; the retrieval benchmarks fail one that gets more than 10% slower than
+      # perf/bench-baseline.json. The heavy checks (app journeys, memlab) run nightly in perf-nightly.yml.
+      - name: Build the app bundles
+        if: ${{ matrix.task == 'perf' }}
+        timeout-minutes: 8
+        run: npx electron-vite build
+      - name: Bundle budgets (size-limit)
+        if: ${{ !cancelled() && matrix.task == 'perf' }}
+        timeout-minutes: 3
+        run: npm run perf:size
+      - name: Retrieval benchmarks against the baseline
+        if: ${{ !cancelled() && matrix.task == 'perf' }}
+        timeout-minutes: 8
+        # Shared runners swing 10-35% between runs of the same code (measured on two runs, 21 Nov),
+        # so the gate here allows 25% over the runner-recorded baseline; a real regression is larger.
+        env:
+          PERF_BENCH_TOLERANCE: '0.25'
+        run: npm run perf:bench
 
   # The full Playwright tour on the BUILT app. OFF BY DEFAULT since 2026-08-11: it was advisory, so it
   # never gated anything, and it spent up to 28 minutes of every run to say so. The suite runs on a

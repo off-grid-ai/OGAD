@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Moves resources/engine-pins.json to the newest upstream engines: llama.cpp, the Prism fork,
-// stable-diffusion.cpp, whisper.cpp, sherpa-onnx (Parakeet) and the NVIDIA CUDA libraries the ONNX
-// pack carries.
+// stable-diffusion.cpp, whisper.cpp, sherpa-onnx (Parakeet), MLX (the macOS Kev runtime) and the
+// NVIDIA CUDA libraries the ONNX pack carries. FFmpeg is tracked but not moved: a newer release is
+// reported, because moving it means new mirrored Linux and Windows builds and a rebuilt macOS binary.
 // Every asset hash comes from the SHA-256 GitHub (or PyPI) publishes for it. An engine whose
 // newest release lacks any asset we ship is left on its current pin and reported, so a changed
 // upstream layout never produces a half-updated pin.
 //
 //   node scripts/update-engine-pins.mjs [--summary <file.md>] [--dry-run]
-//     [--engines llama,prism,sd,whisper,sherpa,nvidia] [--llama-min-builds <n>]
+//     [--engines llama,prism,sd,whisper,sherpa,mlx,ffmpeg,nvidia] [--llama-min-builds <n>]
 //
 // llama.cpp tags several builds a day; --llama-min-builds moves it only once upstream is at least
 // that many builds ahead, so a nightly run does not rebuild every engine every night.
@@ -20,7 +21,7 @@ const { values } = parseArgs({
   options: {
     summary: { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
-    engines: { type: 'string', default: 'llama,prism,sd,whisper,sherpa,nvidia' },
+    engines: { type: 'string', default: 'llama,prism,sd,whisper,sherpa,mlx,ffmpeg,nvidia' },
     'llama-min-builds': { type: 'string', default: '1' }
   }
 })
@@ -209,6 +210,57 @@ async function pypiLatest(name, current, wheelPattern) {
   return null
 }
 
+/** MLX for the macOS Kev runtime: the newest release with a CPython 3.12 macOS 14 arm64 wheel,
+ *  and the mlx-metal wheel of the same version. build-native-engines.yml rebuilds the Kev runtime
+ *  when this moves. */
+async function updateMlx() {
+  const from = pins.mlx.version
+  const latest = await pypiLatest('mlx', from, /-cp312-cp312-macosx_14_0_arm64\.whl$/)
+  if (!latest || latest.version === from) return
+  const wheel = async (name, pattern) => {
+    const data = await json(`https://pypi.org/pypi/${name}/${latest.version}/json`)
+    const file = data.urls.find((f) => pattern.test(f.filename) && !f.yanked)
+    return file && { name: file.filename, url: file.url, sha256: file.digests.sha256 }
+  }
+  const mlx = await wheel('mlx', /-cp312-cp312-macosx_14_0_arm64\.whl$/)
+  const metal = await wheel('mlx-metal', /-py3-none-macosx_14_0_arm64\.whl$/)
+  const missing = [
+    !mlx && 'mlx macOS 14 arm64 wheel',
+    !metal && 'mlx-metal macOS 14 arm64 wheel'
+  ].filter(Boolean)
+  apply(
+    'mlx',
+    { version: latest.version, wheels: { mlx, 'mlx-metal': metal }, missing },
+    from,
+    latest.version
+  )
+}
+
+/** FFmpeg: reported, not moved. The newest nX.Y[.Z] release tag in the pinned major version. */
+async function updateFfmpeg() {
+  const tags = await github(`repos/${pins.ffmpeg.repo}/tags?per_page=100`)
+  const version = (tag) => tag.slice(1).split('.').map(Number)
+  const newer = (a, b) => {
+    const [pa, pb] = [version(a), version(b)]
+    for (let i = 0; i < 3; i++)
+      if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) > (pb[i] ?? 0)
+    return false
+  }
+  const major = version(pins.ffmpeg.ref)[0]
+  const latest = tags
+    .map((t) => t.name)
+    .filter((name) => /^n\d+\.\d+(\.\d+)?$/.test(name) && version(name)[0] === major)
+    .reduce((best, name) => (newer(name, best) ? name : best), pins.ffmpeg.ref)
+  if (latest === pins.ffmpeg.ref) return
+  skipped.push({
+    engine: 'ffmpeg',
+    reason:
+      `${latest} is out (pinned ${pins.ffmpeg.ref}). Move it by hand: mirror BtbN's ${latest} Linux lgpl and ` +
+      'Windows gpl builds to the native-deps release, update `ffmpeg` in resources/engine-pins.json, ' +
+      'and rebuild resources/bin/ffmpeg with scripts/build-ffmpeg-macos.sh'
+  })
+}
+
 async function updateNvidia() {
   const before = JSON.stringify(pins.nvidia)
   for (const [name, version] of Object.entries(pins.nvidia.linux)) {
@@ -234,6 +286,8 @@ const updates = {
   sd: updateSd,
   whisper: updateWhisper,
   sherpa: updateSherpa,
+  mlx: updateMlx,
+  ffmpeg: updateFfmpeg,
   nvidia: updateNvidia
 }
 for (const [engine, update] of Object.entries(updates)) {
@@ -248,6 +302,23 @@ for (const [engine, update] of Object.entries(updates)) {
 if (changed.length && !values['dry-run']) {
   fs.writeFileSync(PINS_FILE, `${JSON.stringify(pins, null, 2)}\n`)
 }
+/** Desktop's llama.cpp build beside the one mobile ships in @ogai/llama.rn, so the two apps
+ *  cannot drift apart unnoticed. A gap over 50 builds is flagged. */
+async function llamaDriftLine() {
+  const desktop = Number(pins.llama.ref.slice(1))
+  try {
+    const { version } = await json('https://registry.npmjs.org/@ogai%2Fllama.rn/latest')
+    const mobile = Number(/-b(\d+)/.exec(version)?.[1])
+    if (!mobile)
+      return `llama.cpp: desktop \`${pins.llama.ref}\`, @ogai/llama.rn \`${version}\` (no build number)`
+    const gap = Math.abs(desktop - mobile)
+    const flag = gap > 50 ? ' **Over 50 builds apart: update the lagging app.**' : ''
+    return `llama.cpp: desktop \`${pins.llama.ref}\`, @ogai/llama.rn \`${version}\` (${gap} builds apart).${flag}`
+  } catch (error) {
+    return `llama.cpp: desktop \`${pins.llama.ref}\`, @ogai/llama.rn unknown (${error.message})`
+  }
+}
+
 if (values.summary) {
   const body = [
     changed.length
@@ -255,7 +326,9 @@ if (values.summary) {
       : 'Every engine is on its newest release.',
     ...(skipped.length
       ? ['', '**Left on the current pin:**', ...skipped.map((s) => `- ${s.engine}: ${s.reason}`)]
-      : [])
+      : []),
+    '',
+    await llamaDriftLine()
   ].join('\n')
   fs.writeFileSync(values.summary, `${body}\n`)
 }

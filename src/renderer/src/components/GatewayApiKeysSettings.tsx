@@ -49,25 +49,29 @@ export function GatewayApiKeysSettings(): React.JSX.Element {
     [confirming]
   )
 
+  const [loadAttempt, setLoadAttempt] = useState(0)
   useEffect(() => {
     let mounted = true
     window.api
       .gatewayApiKeys()
       .then((value) => {
-        if (mounted) setSettings(value)
+        if (mounted) {
+          setError('')
+          setSettings(value)
+        }
       })
       .catch((reason: unknown) => {
         if (mounted)
           setError(
             reason instanceof Error && reason.message.includes('API key storage is locked')
-              ? 'API key storage is locked. Unlock system key storage and reopen this page.'
-              : 'Could not read API keys. Unlock system key storage and reopen this page.'
+              ? 'API key storage is locked. Unlock system key storage, then try again.'
+              : 'Could not read API keys. Unlock system key storage, then try again.'
           )
       })
     return () => {
       mounted = false
     }
-  }, [])
+  }, [loadAttempt])
 
   async function run(work: () => Promise<void>): Promise<void> {
     setBusy(true)
@@ -98,7 +102,12 @@ export function GatewayApiKeysSettings(): React.JSX.Element {
 
   if (!settings)
     return error ? (
-      <Alert className="py-2 text-xs">{error}</Alert>
+      <Alert className="flex items-center justify-between gap-3 py-2 text-xs">
+        <span>{error}</span>
+        <Button size="sm" variant="outline" onClick={() => setLoadAttempt((n) => n + 1)}>
+          Try again
+        </Button>
+      </Alert>
     ) : (
       <p role="status">
         <TextShimmer as="span">Loading API keys...</TextShimmer>

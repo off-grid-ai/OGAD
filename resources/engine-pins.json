@@ -28,12 +28,12 @@
   },
   "sd": {
     "repo": "leejet/stable-diffusion.cpp",
-    "ref": "master-1104-5dcfa79",
-    "commit": "5dcfa79801213f23e27b3e83617350ebb8ea93aa",
+    "ref": "master-1106-532d2c1",
+    "commit": "532d2c15c430a785a712b2d94281f04e733008a4",
     "sha256": {
-      "win-cuda": "c7132d6f7e36dee6c39d3d51e8970470c615e5c9c8db498d6f73d5c14b4b1f5d",
-      "win-vulkan": "7cec077a90a97ccb4b8988b6e590a470bfe84d839f4c6eccf4d8d08fd2a10771",
-      "win-cpu": "b5297bea319d6247e95e9a6834c190047ab0a493a29539b41f217e9cc440025a"
+      "win-cuda": "b087219145a382cc1b1e826318289e1f672b9bb6965977734ef0deb85fe2d03a",
+      "win-vulkan": "3e66222c87ca27074e1fd8ce79706eef17a8aaf39949906aa1bee7e060f22ecc",
+      "win-cpu": "abef332cfca7861cc567910e79bedb70bfb2920bb4eedac97fcbb6db477f1596"
     }
   },
   "whisper": {
@@ -53,6 +53,37 @@
       "mac-universal": "bf6718f708e15390f1da133dd888661a68df270791b178aaf765d4e3f0baa9fe",
       "linux-x64": "2e823376987c3b6960d50726b6560155e2ad92da0b8b3886325773225ec6bdec",
       "win-x64": "dc703575a68594435f53dec93df775ff4913af851a196c0537163f21d8d2364e"
+    }
+  },
+  "ffmpeg": {
+    "repo": "FFmpeg/FFmpeg",
+    "ref": "n9.0.2",
+    "opusRef": "v1.6.1",
+    "build": "n9.0.2-28-g669f5ab083",
+    "archives": {
+      "linux-lgpl": {
+        "name": "ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-9.0.tar.xz",
+        "sha256": "b70078970e033c7e728a0c42d83a39d57f28b471a60866a2c4b0a2f598aec666"
+      },
+      "win-gpl": {
+        "name": "ffmpeg-n9.0.2-28-g669f5ab083-win64-gpl-9.0.zip",
+        "sha256": "1bb62cfd4bdc12a63a6a1151458ea5ae7001fd055202afc5463517028882a631"
+      }
+    }
+  },
+  "mlx": {
+    "version": "0.32.4",
+    "wheels": {
+      "mlx": {
+        "name": "mlx-0.32.4-cp312-cp312-macosx_14_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/69/b0/e726ce51e1b445e4ed08c2d0e036a01c7532f4d1a856328da546a6f883bd/mlx-0.32.4-cp312-cp312-macosx_14_0_arm64.whl",
+        "sha256": "ff1d7be54758ea3a875b8fe54eff13bed17ad9566505e301f5d7851bf869680f"
+      },
+      "mlx-metal": {
+        "name": "mlx_metal-0.32.4-py3-none-macosx_14_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/77/24/7e5b7ed5d28abacab4577c7a8dd1fca6e9058504f5f95ae4333c09420e2e/mlx_metal-0.32.4-py3-none-macosx_14_0_arm64.whl",
+        "sha256": "8019b2db622599267d66cc168b2f0dbf5af929790a6c3b3913e00eabc42a7947"
+      }
     }
   },
   "nvidia": {

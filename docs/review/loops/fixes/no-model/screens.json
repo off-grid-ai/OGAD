@@ -1,0 +1,251 @@
+[
+  {
+    "id": "phone-chat-offline-computer",
+    "name": "Chat: computer offline",
+    "group": "Phone · Chat",
+    "what": "A chat whose computer is asleep says \"<computer> is offline. Wake it, or get a model here.\" above the composer, with Try again and Choose model or Get a model (was Text \"—\" with no reason).",
+    "file": null,
+    "step": "chat-no-model",
+    "shot": null,
+    "steps": [
+      "Pair the phone with a computer and choose one of its text models in a chat.",
+      "Sleep or quit Off Grid AI on the computer.",
+      "Open that chat on the phone and look above the composer."
+    ]
+  },
+  {
+    "id": "phone-chat-no-model",
+    "name": "Chat: no model",
+    "group": "Phone · Chat",
+    "what": "With no model, the Chats list says \"Needs a chat model.\" with Get a model (opens Models, Text tab). New opens the model picker.",
+    "file": "phone-chat-no-model.png",
+    "step": "chat-no-model",
+    "shot": "phone-chat-no-model.png",
+    "steps": [
+      "Have no model on the phone.",
+      "Open Chats."
+    ]
+  },
+  {
+    "id": "phone-models-sheet-readiness",
+    "name": "Models sheet: chat line",
+    "group": "Phone · Models",
+    "what": "The Models sheet shows the chat model's line at the top (computer offline, or no model) with its step.",
+    "file": null,
+    "step": "models-sheet",
+    "shot": null,
+    "steps": [
+      "With the computer asleep (as above), Home > tap the model chip to open the Models sheet."
+    ]
+  },
+  {
+    "id": "phone-gallery-no-image-model",
+    "name": "Gallery: no image model",
+    "group": "Phone · Gallery",
+    "what": "Gallery with no images and no image model says \"Needs an image model.\" with Get a model (opens Models, Image tab).",
+    "file": "phone-gallery-no-image-model.png",
+    "step": "gallery-empty",
+    "shot": "phone-gallery-no-image-model.png",
+    "steps": [
+      "Have no image model and no generated images.",
+      "Home > Gallery."
+    ]
+  },
+  {
+    "id": "phone-voice-hero-no-speech-model",
+    "name": "Voice mode: no speech model",
+    "group": "Phone · Voice",
+    "what": "Voice mode's big Tap to speak says \"Needs a speech model.\" with Get a model, and the tap opens Models (Transcription tab) instead of doing nothing.",
+    "file": null,
+    "step": "voice-hero",
+    "shot": null,
+    "steps": [
+      "Have no speech (Whisper) model downloaded; Pro on.",
+      "Chats > New > switch to Voice mode and look under Tap to speak."
+    ]
+  },
+  {
+    "id": "desktop-chat-no-model",
+    "name": "Chat: no model",
+    "group": "Desktop · Chat",
+    "what": "With no chat model the composer shows a Get a model chip (opens Models, Text); the sidebar dot says No model and opens Models; a send that fails says \"No chat model yet.\" with Get a model (was a dead bubble asking to finish onboarding).",
+    "file": "desktop-chat-no-model.png",
+    "step": "chat-no-model",
+    "shot": null,
+    "steps": [
+      "Remove every text model in Models.",
+      "Open Chat and look at the composer and the sidebar dot.",
+      "Send a message."
+    ]
+  },
+  {
+    "id": "desktop-chat-image-video-no-model",
+    "name": "Chat: Image and Video with no model",
+    "group": "Desktop · Chat",
+    "what": "Image and Video (chip and + menu) open Models on the Image or Video tab when no model is there; the menu items stay, dimmed, with a reason (were greyed with no word, or turned on a dead mode).",
+    "file": null,
+    "step": "chat-image-no-model",
+    "shot": null,
+    "steps": [
+      "Have no image model.",
+      "Open Chat, click Image, then + > Generate image."
+    ]
+  },
+  {
+    "id": "desktop-chat-mic-no-speech-model",
+    "name": "Chat: mic with no speech model",
+    "group": "Desktop · Chat",
+    "what": "The mic error names the real reason (No speech model yet) with Get a speech model (was a generic Check Settings line).",
+    "file": null,
+    "step": "chat-voice-no-model",
+    "shot": null,
+    "steps": [
+      "Remove every transcription model.",
+      "Open Chat and record with the mic."
+    ]
+  },
+  {
+    "id": "desktop-guide-images",
+    "name": "Guide: Open Images",
+    "group": "Desktop · Guide",
+    "what": "Open Images starts chat in image mode, or opens Models on Image when no image model is there (was a plain chat).",
+    "file": "desktop-guide-images.png",
+    "step": "guide-images",
+    "shot": null,
+    "steps": [
+      "Open the Guide, Images topic, click Open Images."
+    ]
+  },
+  {
+    "id": "desktop-meetings-no-speech-model",
+    "name": "Meetings: no speech model",
+    "group": "Desktop · Meetings",
+    "what": "Beside Record: Needs a speech model. Get a model. A failed transcription keeps that reason with its step; a failed summary says why with Try again, never a cut of the transcript.",
+    "file": "desktop-meetings-record.png",
+    "step": "meeting-no-model",
+    "shot": null,
+    "steps": [
+      "Remove every transcription model.",
+      "Open Meetings and look beside Record; record a short meeting."
+    ]
+  },
+  {
+    "id": "desktop-dictation-readiness",
+    "name": "Dictation: what is missing",
+    "group": "Desktop · Dictation",
+    "what": "With no speech model, Dictation says Needs a speech model. Get a model under the search (microphone, shortcut and Accessibility lines show the same way when they are missing).",
+    "file": "desktop-dictation-readiness.png",
+    "step": "dictation-no-model",
+    "shot": null,
+    "steps": [
+      "Remove every transcription model, or turn microphone access off.",
+      "Open Dictation."
+    ]
+  },
+  {
+    "id": "desktop-send-model-failure",
+    "name": "Send model: failure and empty list",
+    "group": "Desktop · Sync",
+    "what": "A failed model send says one plain line (Pixel already has this model. Open Models there…); the empty list says No models here can run on <device> yet (was raw engine text and an OGAM jargon line).",
+    "file": null,
+    "step": "send-model",
+    "shot": null,
+    "steps": [
+      "Sync > a paired phone > Send model; send one the phone already has."
+    ]
+  },
+  {
+    "id": "ext-chat-no-model",
+    "name": "Chat: no model",
+    "group": "Extension · Chat",
+    "what": "With no model the header pill \"No model\" opens Models, and a line above the composer says \"No model is active. Choose one in Models, then try again.\" with Choose model (was a grey pill, a dead Send and no step; a Desktop with no model also read as \"Offline\").",
+    "file": "ext-chat-no-model.png",
+    "step": "chat-no-model",
+    "shot": "ext-chat-no-model.png",
+    "steps": [
+      "Pair the browser with a Desktop that has no active text model.",
+      "Open the Off Grid AI panel.",
+      "Press Choose model, or the No model pill: Models opens on Text."
+    ]
+  },
+  {
+    "id": "ext-composer-needs",
+    "name": "Composer: a mode the models cannot run",
+    "group": "Extension · Chat",
+    "what": "Create image, Agent, Attach screenshot and the mic stay in place and say what they need (\"Needs an image model.\", \"Needs a model that can use tools.\", \"Needs a model that can see pictures.\", \"Voice input. Needs a speech model.\"). A press opens Models on the right tab (Agent was greyed and dead; screenshot and mic were missing).",
+    "file": "ext-composer-needs.png",
+    "step": "composer-needs",
+    "shot": "ext-composer-needs.png",
+    "steps": [
+      "Use a Desktop with only a text model.",
+      "Open the panel and press + in the composer.",
+      "Press \"Create image\": Models opens on Image. The mic with a slash opens Models on Transcription."
+    ]
+  },
+  {
+    "id": "ext-settings-desktop-away",
+    "name": "Settings tabs: Desktop closed",
+    "group": "Extension · Settings",
+    "what": "A settings tab that gets no answer says the real reason: not paired shows the pairing card in place; a closed Desktop says \"Off Grid AI Desktop is not running. Open it and its text settings show here.\" with Open and Get, and fills in by itself (was \"Pair with Off Grid AI Desktop in Settings > Desktop\" to a paired browser).",
+    "file": null,
+    "step": "settings-no-answer",
+    "shot": null,
+    "steps": [
+      "Pair the browser, then quit Off Grid AI Desktop.",
+      "Open the panel, Settings, any tab from Text to Connectors.",
+      "Start Desktop again: the rows appear without a reload."
+    ]
+  },
+  {
+    "id": "ext-models-retry",
+    "name": "Models: error and empty",
+    "group": "Extension · Models",
+    "what": "A failed read shows its line with a Try again button and the list re-reads when the panel gets focus. An empty kind keeps \"Download one in its Models screen\" and adds Open Off Grid AI Desktop.",
+    "file": null,
+    "step": "models-error",
+    "shot": null,
+    "steps": [
+      "Open Models with Desktop closed: the line has Try again.",
+      "Open a kind with no models: the note has the Open link."
+    ]
+  },
+  {
+    "id": "ext-writing-failure-step",
+    "name": "Writing: a check or rewrite that fails",
+    "group": "Extension · Writing",
+    "what": "The failure notice has its step: no model has Choose model (opens Models), not paired has Pair with desktop, a closed Desktop has Open Off Grid AI, anything else has Try again (was the line alone).",
+    "file": null,
+    "step": "writing-failure",
+    "shot": null,
+    "steps": [
+      "Open Writing with no text model active and press Rewrite.",
+      "The notice says rewrites need a model, with Choose model."
+    ]
+  },
+  {
+    "id": "ext-desktop-pointers",
+    "name": "Notes that say \"do it in Desktop\"",
+    "group": "Extension · Settings",
+    "what": "Each note has an Open Off Grid AI Desktop link: no remote servers, no image model, add accounts, edit the system prompt, export the vault, download a model.",
+    "file": null,
+    "step": "desktop-pointers",
+    "shot": null,
+    "steps": [
+      "Open Settings > Remote with no servers saved, or Vault > Import and export.",
+      "Press Open Off Grid AI Desktop."
+    ]
+  },
+  {
+    "id": "ext-vault-update-desktop",
+    "name": "Vault: Desktop too old",
+    "group": "Extension · Vault",
+    "what": "\"Update Off Grid AI Desktop to use your vault here.\" has Open and Get Off Grid AI Desktop (the download page is the update).",
+    "file": null,
+    "step": "update-desktop",
+    "shot": null,
+    "steps": [
+      "Pair with a Desktop too old for the browser vault.",
+      "Open Vault in the panel."
+    ]
+  }
+]

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Off Grid AI
+Exec=off-grid-ai %U
+Terminal=false
+Type=Application
+Icon=${SNAP}/meta/gui/off-grid-ai.png
+StartupWMClass=off-grid-ai
+Comment=Private AI studio that runs on your computer
+MimeType=x-scheme-handler/offgrid;
+Categories=Utility;

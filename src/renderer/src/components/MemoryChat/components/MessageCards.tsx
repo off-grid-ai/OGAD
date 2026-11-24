@@ -102,7 +102,7 @@ function AskCardComponent({
   return (
     <div className="mt-2 flex flex-col gap-1.5">
       <p className="text-xs text-neutral-400">{ask.question}</p>
-      <AnimatedGroup preset="blur-slide" className="flex flex-wrap gap-1.5">
+      <AnimatedGroup preset="slide" className="flex flex-wrap gap-1.5">
         {ask.options.map((option) => {
           const active = selected.includes(option)
           const className = active

@@ -79,7 +79,7 @@ export function ExploreSection({
             {/* Thin rows in one surface, divided by hairlines; rows cascade in and each arrow
                 leans forward under the pointer. */}
             <AnimatedGroup
-              preset="blur-slide"
+              preset="slide"
               className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-background"
             >
               {section.presets.map((preset) => (

@@ -1,0 +1,236 @@
+{
+ "id": "approvals-tasks",
+ "title": "Tasks and approvals finish where they started",
+ "problem": "A phone cannot approve an action it started; Web Use waits for the browser without naming the blocker.",
+ "fix": "Approve or reject on any paired device from the synced record; name the exact switch that blocks a task, on both sides.",
+ "count": 12,
+ "items": [
+  {
+   "id": "dm-approval-no-card-on-phone",
+   "product": "desktop+mobile",
+   "direction": "mobile->desktop",
+   "platform": null,
+   "screen": "Mobile chat and task card",
+   "kind": "cross-product",
+   "title": "Phone cannot approve an action it started",
+   "what": "The shared rule says any paired device may approve. The phone stores approval records but has no approval screen and never writes a decision. Desktop sends model-facing text, 'Waiting for the user's approval in Off Grid AI Desktop (Action Approval)'. The real desktop screen is Actions, tab Approvals.",
+   "risk": "A task started from the phone stalls until the user walks to the computer. The phone names a screen that does not exist.",
+   "rec": "mobile: show an Approve / Reject card from the synced approval record. Smallest first step: one line 'Approve on <device>: Actions, Approvals'. desktop: fix the screen name in the waiting text.",
+   "files": [
+    "shared/packages/sync/src/action-approval.ts:4",
+    "desktop/src/main/tools/nativeActionToolExtension.ts:383",
+    "desktop/pro/renderer/screens/ActionsScreen.tsx:357",
+    "mobile/pro/sync/stateSyncOutbound.ts:49"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "dm-gateway-key-revoked-reason-dropped",
+   "product": "desktop+mobile",
+   "direction": "desktop->mobile",
+   "platform": null,
+   "screen": "Mobile model picker and Remote servers",
+   "kind": "cross-product",
+   "title": "Phone drops the computer's 'pair again' reason",
+   "what": "When the computer revokes the phone's key it sends 'This computer's key for this phone was revoked. Pair again.' The phone logs it and clears the key. The phone then tells the user to copy an API key from Gateway and paste it in Remote servers.",
+   "risk": "The user pastes keys by hand. The right fix was to pair again.",
+   "rec": "mobile: keep the failure line on the paired server row and show it in place of the API-key text, with a Pair again button.",
+   "files": [
+    "shared/packages/sync/src/gateway-access.ts:34",
+    "desktop/pro/main/sync/gateway-access-mesh.ts:53",
+    "mobile/pro/sync/pairedGatewayAdoption.ts:118",
+    "mobile/src/services/offGridDesktopModels.ts:318"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "dm-remote-actions-off-no-reason",
+   "product": "desktop+mobile",
+   "direction": "mobile->desktop",
+   "platform": null,
+   "screen": "Mobile Tools, Desktop tools switch",
+   "kind": "cross-product",
+   "title": "Tools switch snaps back with no reason",
+   "what": "When 'Remote actions' is off on the computer, it answers the phone's request with a bare revoke. The phone removes the server and the switch returns to off. No reason is sent or shown.",
+   "risk": "The user flips the switch again and again. Nothing says the computer refuses.",
+   "rec": "pro: add a reason to the revoke message. mobile: show 'Turned off on <device>. Turn on Remote actions in Devices there.'",
+   "files": [
+    "desktop/pro/main/sync/tool-grant-mesh.ts:93",
+    "desktop/pro/renderer/components/ToolSharingControls.tsx:18",
+    "mobile/pro/mcp/mcpToolGrantService.ts:89",
+    "mobile/pro/ui/CompanionToolsSection.tsx:94"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "dm-task-recovery-hint-never-sent",
+   "product": "desktop+mobile",
+   "direction": "mobile->desktop",
+   "platform": null,
+   "screen": "Mobile task card",
+   "kind": "cross-product",
+   "title": "Failed task on computer gives phone no next step",
+   "what": "The phone has recovery lines ready, 'Open Off Grid AI Desktop on <name>.' and 'Reconnect <name> and try again.' It shows them only for a recoverable failure. Desktop always sends recoverable false and no recovery action. A missing Screen Recording permission arrives as desktop-only text with no computer name.",
+   "risk": "A Computer Use or Web Use task fails on the phone with instructions meant for someone at the computer.",
+   "rec": "pro: set recoverable true and recoveryAction 'open_execution_device' for setup and permission failures. No phone change needed.",
+   "files": [
+    "desktop/pro/main/sync/task-run-projection.ts:113",
+    "desktop/src/main/vision/computer-use-permissions.ts:15",
+    "mobile/pro/ui/task-card/presentation.ts:12",
+    "mobile/pro/ui/task-card/TaskNotices.tsx:65"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "dm-task-control-times-out",
+   "product": "desktop+mobile",
+   "direction": "mobile->desktop",
+   "platform": null,
+   "screen": "Mobile task card (stop, pause, guidance)",
+   "kind": "cross-product",
+   "title": "Refused stop or pause ends as a timeout",
+   "what": "When the computer no longer accepts this phone's task controls, it drops the request and sends no reply. The phone waits 15 seconds, then says the computer 'did not confirm the request. Try again.'",
+   "risk": "The user cannot stop a running task from the phone and is told to retry something that cannot work.",
+   "rec": "pro: answer a refused control with a rejected result and the reason. mobile already renders rejected controls.",
+   "files": [
+    "desktop/pro/main/sync/task-control-sync.ts:47",
+    "desktop/pro/main/sync/task-tool-mesh.ts:142",
+    "mobile/pro/ui/task-card/TaskNotices.tsx:36"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "desktop-gateway-no-health",
+   "product": "desktop",
+   "direction": "desktop",
+   "platform": null,
+   "screen": "Gateway (gateway)",
+   "kind": "state-elsewhere",
+   "title": "Gateway page never says if it is running",
+   "what": "The page shows the base URL, code samples, keys and endpoints. Whether the gateway is up, and Restart, are shown only in Settings > Setup & health. If reading API keys fails there is an alert with no retry button.",
+   "risk": "A user copies the URL into another tool, gets 'connection refused', and this page shows nothing wrong.",
+   "rec": "Put the gateway row from HealthPanel (state pill + Restart) in the page header. Add the existing 'Refresh status' button to the key-load error.",
+   "files": [
+    "src/renderer/src/components/GatewayScreen.tsx:209",
+    "src/renderer/src/components/setup/HealthPanel.tsx:234",
+    "src/main/setup.ts:164",
+    "src/renderer/src/components/GatewayApiKeysSettings.tsx:59"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "xa-web-use-waiting-no-reason",
+   "product": "extension+desktop",
+   "direction": "desktop->extension",
+   "platform": "both",
+   "screen": "Desktop Settings > Tasks > Web Use > Browser",
+   "kind": "cross-product",
+   "title": "'Waiting for your browser' hides the real blocker",
+   "what": "With Default browser chosen, the desktop waits for the extension's live socket. The extension connects only when its own switch 'Let Off Grid AI tasks use this browser' has granted all-sites access. The desktop hint says to open the browser and reload the extension. It never names that switch. Tasks run in the Off Grid AI browser meanwhile.",
+   "risk": "The setting looks on, but tasks keep running in the built-in browser, not signed in as the user. The user reloads the extension and nothing changes.",
+   "rec": "Desktop: change the hint to name the switch ('In the extension, turn on Settings > Tasks > Let Off Grid AI tasks use this browser'). Extension: when the desktop wants tasks and access is not granted, show the ask once in the panel with a one-click Allow.",
+   "files": [
+    "desktop/pro/shared/web-use-browser.ts:35",
+    "browser-extension/src/background/browser-tasks.ts:176",
+    "browser-extension/src/sidepanel/BrowserTasksRow.tsx:22",
+    "desktop/src/main/browser/web-use-host.ts:35"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "xa-panel-settings-not-live-on-desktop",
+   "product": "extension+desktop",
+   "direction": "extension->desktop",
+   "platform": "both",
+   "screen": "Desktop Settings (Tools, Voice, Image, Transcription, Text) while open",
+   "kind": "cross-product",
+   "title": "Only Tasks settings update live on desktop",
+   "what": "The panel says a change 'shows there too'. The desktop announces a change to its windows only for Web Use and Computer Use settings. Tools, voice, image, transcription and text changes from the panel are saved, but an open desktop Settings screen is not told. The other way works: the panel watches a settings version.",
+   "risk": "An open desktop screen shows the old value. The user may think the change did not arrive, or save the old value back.",
+   "rec": "Desktop: send one 'settings changed' event to windows from settingsChanged() and have Settings screens re-read on it, as the task screen already does.",
+   "files": [
+    "desktop/src/main/task-settings-events.ts:9",
+    "desktop/src/main/extension-bridge/bridge-rpc-handlers.ts:158",
+    "desktop/src/main/database.ts:2060",
+    "desktop/src/preload/index.ts:265",
+    "browser-extension/src/sidepanel/DesktopSection.tsx:29"
+   ],
+   "effort": "M"
+  },
+  {
+   "id": "xa-feature-rows-wrong-reasons",
+   "product": "extension+desktop",
+   "direction": "desktop->extension",
+   "platform": "both",
+   "screen": "Extension Settings > Desktop feature rows",
+   "kind": "cross-product",
+   "title": "Feature rows name reasons that do not exist",
+   "what": "An off row says 'Off in the desktop' for chats and 'Not set up' for the vault. On the desktop both flags are just Pro plus a registered hook. No desktop switch turns chats off for browsers, and vault set-up state is not part of the flag. Scribe (writing) and Web Use (browserTasks) have no row.",
+   "risk": "The user looks for a desktop setting that is not there. They cannot see from this list whether Scribe or Web Use is available to the browser.",
+   "rec": "Extension: derive the notes from real states (vault status call for 'Not set up'), drop 'Off in the desktop', and add Scribe and Web Use rows with their own next step.",
+   "files": [
+    "browser-extension/src/shared/desktop/summary.ts:21",
+    "browser-extension/src/shared/desktop/summary.ts:25",
+    "desktop/src/main/extension-bridge/bridge-electron.ts:247",
+    "browser-extension/src/sidepanel/DesktopPairing.tsx:231"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "extension-web-tasks-hint-points-away",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel > Settings > Tasks, access granted but Desktop set to another browser",
+   "kind": "state-elsewhere",
+   "title": "Web tasks hint sends you to Desktop needlessly",
+   "what": "The hint says \"Turn on Tasks > Web Use > Default browser in Off Grid AI Desktop to use it.\" The same Desktop setting is the \"Browser\" select a few rows lower on this very screen.",
+   "risk": "The user leaves the browser to change a setting they could change in one tap right here.",
+   "rec": "When access is granted and Desktop does not want this browser, show a \"Use this browser\" button in the row that sets web.browserTarget to default_browser (the same change the select makes).",
+   "files": [
+    "browser-extension/src/shared/desktop/summary.ts:36",
+    "browser-extension/src/sidepanel/BrowserTasksRow.tsx:24",
+    "browser-extension/src/sidepanel/TasksSettings.tsx:145"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "extension-desktop-feature-rows-no-step",
+   "product": "extension",
+   "direction": "extension",
+   "platform": "both",
+   "screen": "Panel > Settings > Desktop, paired",
+   "kind": "state-elsewhere",
+   "title": "Feature list shows \"off\" with no next step",
+   "what": "The paired screen lists four features with a tick or a dash and a note: \"Off in the desktop\", \"None set up\", \"None available\", \"Not set up\". None says where to turn it on. Writing help and web tasks are not in the list at all.",
+   "risk": "The user learns that chats do not sync or the vault is not set up, but not what to do. They cannot see here whether Scribe or web tasks are available.",
+   "rec": "Give each off row its step: Vault opens the panel's Vault screen (it already explains setup), Connectors opens Settings > Connectors, chats names the Desktop setting. Add rows for Writing and Web tasks from the same features object.",
+   "files": [
+    "browser-extension/src/shared/desktop/summary.ts:14",
+    "browser-extension/src/sidepanel/DesktopPairing.tsx:230"
+   ],
+   "effort": "S"
+  },
+  {
+   "id": "mobile-assistant-task-offline",
+   "product": "mobile",
+   "direction": "mobile",
+   "platform": "both",
+   "screen": "Chat task card, Assistant button",
+   "kind": "dead-end",
+   "title": "Computer offline for a task: red text, no button",
+   "what": "The task card says '<name> is offline' as plain text and keeps Pause and Stop live. A failed task shows 'Reconnect <name> and try again' as text. Resend with Assistant on shows 'Connect an active Desktop' with OK only. 'Desktop tasks unavailable' says 'Allow remote tasks on the Desktop' with OK only and does not name the setting.",
+   "risk": "You get a red sentence and must find Sync yourself. A failed task has no retry.",
+   "rec": "Make the offline line a row that opens Sync and disable the controls while offline. Reuse the composer's 'Set up Sync' action in the two alerts, and name the exact computer setting.",
+   "files": [
+    "mobile/pro/ui/task-card/TaskNotices.tsx:45",
+    "mobile/pro/ui/task-card/presentation.ts:15",
+    "mobile/src/screens/ChatScreen/useChatMessageHandlers.ts:117",
+    "mobile/src/components/ChatInput/index.tsx:523",
+    "mobile/src/components/ChatInput/index.tsx:531",
+    "mobile/src/screens/ChatScreen/ChatMessageArea.tsx:594"
+   ],
+   "effort": "S"
+  }
+ ]
+}

@@ -25,7 +25,7 @@ import type {
 } from './types'
 import { noticeText } from './utlis'
 import type { TaskSession } from '@renderer/lib/task-session-store'
-import { taskReferenceFromResult } from '../chat-tool-projection'
+import { taskReferenceFromResult, visibleToolText } from '@offgrid/failures'
 import type { ProcessingAttachment } from '@offgrid/operator-ui/operator/workflows/attachments'
 import type { QueuedMessage } from '@offgrid/operator-ui/operator/workflows/queue'
 import type { QueuedTurn } from '@renderer/lib/chat-queue-types'
@@ -206,7 +206,13 @@ function mapRagMessage(message: RawRagMessage): ChatMessage[] {
     provenance
   })
   if (!turn || shouldHideProjectedTurn(turn)) return []
-  const projected = projectChatMessage(turn, context)
+  const shown = projectChatMessage(turn, context)
+  // A task started from chat saves its launch note (written for the model) as the reply. A person
+  // reads the outcome ("Task started."); the stored message keeps the reference.
+  const projected =
+    shown.role === 'assistant' && taskReferenceFromResult(shown.content)
+      ? { ...shown, content: visibleToolText(shown.content) }
+      : shown
   return [message.versions ? { ...projected, threadVersions: message.versions } : projected]
 }
 

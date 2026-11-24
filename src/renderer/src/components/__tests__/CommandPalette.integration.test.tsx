@@ -18,7 +18,7 @@ const SCREENS = [
   { label: 'Sync sharing', view: 'devices', subroute: 'sharing' },
   { label: 'Activity', view: 'devices', subroute: 'activity' },
   { label: 'Files', view: 'devices', subroute: 'files' },
-  { label: 'Integrations', view: 'connectors' },
+  { label: 'Connectors', view: 'connectors' },
   { label: 'Models', view: 'models' },
   { label: 'Vault', view: 'vault', locked: true },
   { label: 'Settings', view: 'settings' },

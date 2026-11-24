@@ -32,23 +32,29 @@ import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import {
   CONVERSATION_SUMMARY_MAX_TOKENS,
   boundToolResult,
+  estimateTextTokens,
   callsWithinToolBudget,
   conversationSummaryRequest,
   conversationSummaryTurn,
   elideStaleToolResults,
   normalizeConversationSummary,
   normalizeMaxToolCalls,
+  parseToolArguments,
+  promptBreakdown,
   repeatedToolCallDecision,
   repeatedToolCallFinalAnswerInstruction,
   resolveToolName,
+  toolArgumentsDecision,
   toolCallKey,
   toolFailureMessage,
   toolLimitFinalAnswerInstruction,
   toolResultCharBudget,
   unknownToolMessage,
+  type PromptBreakdown,
   type ToolCallRecord
 } from '@offgrid/models'
 import { toolPromptChars, toolPromptTokens } from './tools/prompt-budget'
+import { withAIRequestMetrics } from './ai-request-log'
 import { checkCitations } from '@offgrid/rag/documents'
 import {
   describeRecordStatus,
@@ -67,6 +73,11 @@ import {
 } from './tools/tool-origin'
 import { selectChatToolSchemas } from './tools/chat-tool-selection'
 import { budgetTools } from './tools/tool-budget'
+import {
+  claimsTaskLaunch,
+  historyContentForModel,
+  LAUNCH_CLAIM_RETRY_INSTRUCTION
+} from './tools/task-launch-history'
 import { ANSWER_NOW_INSTRUCTION, emptyAnswerReason } from '../shared/empty-answer'
 
 /** What a project chat's system prompt says about its knowledge base (Settings → Project knowledge). */
@@ -144,6 +155,8 @@ export type ToolActivity =
   | { kind: 'waiting_server'; label: string }
   /** `summary` stands in for every earlier turn; the app keeps it with the conversation. */
   | { kind: 'compacted'; label: 'Compacted'; summary?: string }
+  /** The streamed answer was wrong and is dropped; the model answers again. */
+  | { kind: 'answer_discarded'; label: string }
   /** Reading the conversation's attached documents, then what was read. */
   | import('./documents/chat-turn').DocumentsActivity
 
@@ -739,6 +752,8 @@ export async function selectChatTools(
   tools: unknown[]
   protectedToolCount: number
   hints: string[]
+  /** Where each hint came from, in the same order: an extension id or a fixed name. */
+  hintSources: string[]
   exts: ToolExtension[]
 }> {
   const toolsEnabled = opts.allTools || getSetting<boolean>('toolsEnabled', true) !== false
@@ -759,7 +774,8 @@ export async function selectChatTools(
       : []
   const extSchemas: unknown[] = []
   const hints: string[] = []
-  const extensionHints: { names: Set<string>; text: string }[] = []
+  const hintSources: string[] = []
+  const extensionHints: { names: Set<string>; text: string; source: string }[] = []
   const disabled = opts.allTools ? new Set<string>() : disabledSet()
   for (const e of exts) {
     try {
@@ -787,7 +803,8 @@ export async function selectChatTools(
                 return typeof name === 'string' ? [name] : []
               })
             ),
-            text: e.systemHint()
+            text: e.systemHint(),
+            source: e.id
           })
         }
       }
@@ -837,17 +854,18 @@ export async function selectChatTools(
       return typeof name === 'string' ? [name] : []
     })
   )
-  hints.push(
-    ...extensionHints
-      .filter((hint) => [...hint.names].some((name) => relevantNames.has(name)))
-      .map((hint) => hint.text)
-  )
+  for (const hint of extensionHints) {
+    if (![...hint.names].some((name) => relevantNames.has(name))) continue
+    hints.push(hint.text)
+    hintSources.push(hint.source)
+  }
   if (droppedCount) {
     hints.push(
       `Note: ${droppedCount} connector tool(s) were omitted this turn to fit the context window; ask the user to disable some connectors if a needed tool is missing.`
     )
+    hintSources.push('connectorsOmitted')
   }
-  return { tools: relevantTools, protectedToolCount, hints, exts }
+  return { tools: relevantTools, protectedToolCount, hints, hintSources, exts }
 }
 
 /**
@@ -994,7 +1012,7 @@ export async function toolChat(
     }
   }
 
-  const { tools, protectedToolCount, hints, exts } = await selectChatTools(
+  const { tools, protectedToolCount, hints, hintSources, exts } = await selectChatTools(
     query,
     { ...opts, imageAvailable },
     history
@@ -1020,24 +1038,49 @@ export async function toolChat(
   const projectKnowledgeMode = opts.projectId
     ? projectDocumentsMode(getSetting<unknown>('knowledgeBaseRetrieval', null))
     : undefined
-  const sys =
-    'You are Off Grid AI, a private on-device assistant. Answer general questions using your knowledge. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. Answer questions directly. Call web_use only when the user asks you to do something on a website. Keep answers concise.' +
-    (opts.allMemory
-      ? ' Use search_memory when the user asks about their memories, past conversations, people, or captured activity. Do not invent personal facts or claim to have searched when you have not. Cite retrieved sources accurately.'
-      : '') +
-    (opts.projectId ? projectKnowledgeHint(projectKnowledgeMode) : '') +
-    (projectPrompt ? `\n\nProject instructions:\n${projectPrompt}` : '') +
-    (opts.assistantOnly
-      ? ' web_use and computer_use are available when the user asks you to do something on a website or in a desktop app.'
-      : '') +
-    (hints.length ? ' ' + hints.join(' ') : '') +
-    (typeof opts.context === 'string' && opts.context.trim()
-      ? `\n\nWhat you know about the user right now:\n${opts.context.trim().slice(0, 2000)}`
-      : '') +
-    (opts.startTab
-      ? '\nThis request comes from a paired browser tab. Use web_use for requested work on that website, including opening notifications. It will use that tab and its current login. Prefer visible page controls; do not invent URL paths or supply a guessed starting URL.'
-      : '') +
-    standingRules(opts.rules)
+  // The system prompt in order, each addition named by its source so the request log can show
+  // where the prompt goes. The text sent is the parts joined as they are.
+  const systemParts: [source: string, text: string][] = [
+    [
+      'base',
+      'You are Off Grid AI, a private on-device assistant. Answer general questions using your knowledge. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. Answer questions directly. Call web_use only when the user asks you to do something on a website. Keep answers concise.'
+    ],
+    [
+      'memory',
+      opts.allMemory
+        ? ' Use search_memory when the user asks about their memories, past conversations, people, or captured activity. Do not invent personal facts or claim to have searched when you have not. Cite retrieved sources accurately.'
+        : ''
+    ],
+    ['projectKnowledge', opts.projectId ? projectKnowledgeHint(projectKnowledgeMode) : ''],
+    ['projectInstructions', projectPrompt ? `\n\nProject instructions:\n${projectPrompt}` : ''],
+    [
+      'acting',
+      opts.assistantOnly
+        ? ' web_use and computer_use are available when the user asks you to do something on a website or in a desktop app.'
+        : ''
+    ],
+    ...hints.map((hint, index): [string, string] => [hintSources[index] ?? 'tools', ' ' + hint]),
+    [
+      'userContext',
+      typeof opts.context === 'string' && opts.context.trim()
+        ? `\n\nWhat you know about the user right now:\n${opts.context.trim().slice(0, 2000)}`
+        : ''
+    ],
+    [
+      'pairedTab',
+      opts.startTab
+        ? '\nThis request comes from a paired browser tab. Use web_use for requested work on that website, including opening notifications. It will use that tab and its current login. Prefer visible page controls; do not invent URL paths or supply a guessed starting URL.'
+        : ''
+    ],
+    ['standingRules', standingRules(opts.rules)]
+  ]
+  const sys = systemParts.map(([, text]) => text).join('')
+  // Estimated tokens of each system-prompt addition, by source (the base is what remains).
+  const hintTokens: Record<string, number> = {}
+  const addHintTokens = (source: string, text: string): void => {
+    if (text) hintTokens[source] = (hintTokens[source] ?? 0) + estimateTextTokens(text)
+  }
+  for (const [source, text] of systemParts) if (source !== 'base') addHintTokens(source, text)
 
   // Attached images ride on the current user turn so the vision model can read
   // them even in tools/connectors mode (otherwise they were silently dropped).
@@ -1049,7 +1092,7 @@ export async function toolChat(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const messages: any[] = [
     { role: 'system', content: sys },
-    ...history.map((m) => ({ role: m.role, content: m.content })),
+    ...history.map((m) => ({ role: m.role, content: historyContentForModel(m.role, m.content) })),
     {
       role: 'user',
       content: buildContentParts(
@@ -1077,6 +1120,11 @@ export async function toolChat(
   const anchor = `\n\n${timeAnchor(Date.now())}`
   const turnReplyReserve = Math.min(1024, Math.max(256, Math.floor(ctx * 0.1)))
   let documentSources: UnifiedSource[] = []
+  // Estimated tokens of attached documents: the part in the system prompt and this turn's passages.
+  const documentTokens = { stable: 0, turn: 0 }
+  // The person's message object; compaction keeps it, so history is what lies between it and the
+  // system prompt and tool rounds are what follows it.
+  const questionMessage = messages[messages.length - 1]
   const { prepareTurnDocuments } = await import('./documents/chat-turn')
   const attachedDocuments = await prepareTurnDocuments({
     conversationId: opts.conversationId,
@@ -1107,11 +1155,16 @@ export async function toolChat(
         )
       )
       exts.push(documentToolExtension)
-      messages[0].content = `${messages[0].content}\n${documentToolExtension.systemHint()}`
+      const documentToolHint = `\n${documentToolExtension.systemHint()}`
+      addHintTokens('documentTools', documentToolHint)
+      messages[0].content = `${messages[0].content}${documentToolHint}`
     }
-    if (attachedDocuments.stable)
+    if (attachedDocuments.stable) {
       messages[0].content = `${messages[0].content}\n\n${attachedDocuments.stable}`
+      documentTokens.stable = estimateTextTokens(`\n\n${attachedDocuments.stable}`)
+    }
     if (attachedDocuments.turn) {
+      documentTokens.turn = estimateTextTokens(`${attachedDocuments.turn}\n\n`)
       const turn = messages[messages.length - 1]
       if (typeof turn.content === 'string')
         turn.content = `${attachedDocuments.turn}\n\n${turn.content}`
@@ -1123,6 +1176,33 @@ export async function toolChat(
     documentSources = attachedDocuments.sources
   }
   messages[0].content = `${messages[0].content}${anchor}`
+  addHintTokens('timeAnchor', anchor)
+  const systemMessage = messages[0]
+  /** Where the prompt for the next model request goes, for the AI request log. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const breakdownOf = (sent: any[], sentTools: unknown[]): { promptBreakdown: PromptBreakdown } => {
+    const questionAt = sent.indexOf(questionMessage)
+    const afterSystem = sent[0]?.role === 'system' ? 1 : 0
+    const systemTokens = afterSystem ? toolPromptTokens([sent[0]]) : 0
+    // A forced final answer replaces the turn's system prompt with its own instruction.
+    const ownSystem = sent[0] === systemMessage
+    const hintTotal = ownSystem ? Object.values(hintTokens).reduce((sum, n) => sum + n, 0) : 0
+    const stableDocuments = ownSystem ? documentTokens.stable : 0
+    return {
+      promptBreakdown: promptBreakdown({
+        systemBase: systemTokens - hintTotal - stableDocuments,
+        hints: ownSystem ? hintTokens : {},
+        tools: sentTools.length ? toolPromptTokens([], sentTools) : 0,
+        toolCount: sentTools.length,
+        history: toolPromptTokens(
+          sent.slice(afterSystem, questionAt < 0 ? afterSystem : questionAt)
+        ),
+        documents: stableDocuments + (questionAt < 0 ? 0 : documentTokens.turn),
+        question: questionAt < 0 ? 0 : toolPromptTokens([questionMessage]) - documentTokens.turn,
+        toolResults: toolPromptTokens(sent.slice(questionAt < 0 ? afterSystem : questionAt + 1))
+      })
+    }
+  }
   // One model call folds every earlier turn into a structured summary that stands in for them
   // from now on. If it fails, the oldest turns fall back to short excerpts as before.
   const summary =
@@ -1275,7 +1355,10 @@ export async function toolChat(
   let round = 0
   // Every call this response made or declined, in order, for repeat detection.
   const callRecords: ToolCallRecord[] = []
+  // Calls per tool this response whose arguments failed the schema check.
+  const invalidArgumentCalls = new Map<string, number>()
   let stopInstruction: string | undefined
+  let launchClaimRetried = false
   while (toolCalls.length < maxToolCalls) {
     // Past the soft threshold, older bulky tool results become short stubs so a long
     // tool sequence keeps room to finish instead of ending in "Context is full."
@@ -1321,37 +1404,40 @@ export async function toolChat(
       reasoningDetails,
       finishReason,
       metrics
-    } = await llm.streamChat(messages, onDelta, {
-      tools: roundTools,
-      toolChoice: roundTools.length ? 'auto' : undefined,
-      temperature: 0.3,
-      // Keep the user's lower Max Output setting, but never request more than
-      // this round has room to generate inside the configured context window.
-      maxTokens: sentMaxTokens(roundMaxTokens),
-      thinking: opts.thinking,
-      signal: opts.signal,
-      onToolCallStart: (name) =>
-        opts.onActivity?.({ kind: 'preparing_tool_calls', label: 'Preparing actions…', name }),
-      onWaitStatus: (label) => opts.onActivity?.({ kind: 'waiting_server', label }),
-      onToolCallReady:
-        opts.onImageRequest &&
-        roundTools.some(
-          (tool) => (tool as { function?: { name?: unknown } }).function?.name === 'generate_image'
-        )
-          ? (call) => {
-              if (call.name !== 'generate_image' || opts.signal?.aborted) return
-              const request = earlyImageRequest(call.arguments)
-              if (
-                !request ||
-                earlyImagePrompts.has(request.prompt) ||
-                earlyImagePrompts.size >= requestedImageCount
-              )
-                return
-              earlyImagePrompts.add(request.prompt)
-              opts.onImageRequest?.(request)
-            }
-          : undefined
-    })
+    } = await withAIRequestMetrics(breakdownOf(messages, roundTools), () =>
+      llm.streamChat(messages, onDelta, {
+        tools: roundTools,
+        toolChoice: roundTools.length ? 'auto' : undefined,
+        temperature: 0.3,
+        // Keep the user's lower Max Output setting, but never request more than
+        // this round has room to generate inside the configured context window.
+        maxTokens: sentMaxTokens(roundMaxTokens),
+        thinking: opts.thinking,
+        signal: opts.signal,
+        onToolCallStart: (name) =>
+          opts.onActivity?.({ kind: 'preparing_tool_calls', label: 'Preparing actions…', name }),
+        onWaitStatus: (label) => opts.onActivity?.({ kind: 'waiting_server', label }),
+        onToolCallReady:
+          opts.onImageRequest &&
+          roundTools.some(
+            (tool) =>
+              (tool as { function?: { name?: unknown } }).function?.name === 'generate_image'
+          )
+            ? (call) => {
+                if (call.name !== 'generate_image' || opts.signal?.aborted) return
+                const request = earlyImageRequest(call.arguments)
+                if (
+                  !request ||
+                  earlyImagePrompts.has(request.prompt) ||
+                  earlyImagePrompts.size >= requestedImageCount
+                )
+                  return
+                earlyImagePrompts.add(request.prompt)
+                opts.onImageRequest?.(request)
+              }
+            : undefined
+      })
+    )
 
     // Stop pressed during the round: streamCompletion resolves with the partial
     // tool_calls it assembled (it doesn't reject on abort), so we MUST NOT execute
@@ -1373,18 +1459,33 @@ export async function toolChat(
     const effective = !roundTools.length
       ? []
       : calls.length > 0
-        ? calls.map((c) => ({
-            id: c.id,
-            name: resolveToolName(c.name, roundToolNames),
-            args: safeParseArgs(c.arguments),
-            rawArgs: c.arguments || '{}'
-          }))
-        : parseToolCallsFromText(content).map((c, i) => ({
-            id: `txt-${String(round)}-${String(i)}`,
-            name: resolveToolName(c.name, roundToolNames),
-            args: c.args,
-            rawArgs: JSON.stringify(c.args)
-          }))
+        ? calls.map((c) => {
+            const parsed = parseToolArguments(c.arguments)
+            return {
+              id: c.id,
+              name: resolveToolName(c.name, roundToolNames),
+              args: parsed.args,
+              ...(parsed.error ? { parseError: parsed.error } : {}),
+              rawArgs: c.arguments || '{}'
+            }
+          })
+        : parseToolCallsFromText(content).map(
+            (
+              c,
+              i
+            ): {
+              id: string
+              name: string
+              args: Record<string, unknown>
+              parseError?: string
+              rawArgs: string
+            } => ({
+              id: `txt-${String(round)}-${String(i)}`,
+              name: resolveToolName(c.name, roundToolNames),
+              args: c.args,
+              rawArgs: JSON.stringify(c.args)
+            })
+          )
     // A text-form call is not permission to cross the selected memory scope.
     const scopedEffective = effective.filter((call) =>
       isMemoryToolAllowed(call.name, {
@@ -1410,7 +1511,7 @@ export async function toolChat(
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
       let remainingImageRequests = requestedImageCount - imageRequests.length
       const callsToRun = callsWithinToolBudget(permitted, toolCalls.length, maxToolCalls).filter(
-        (call) => (call.name !== 'generate_image' || remainingImageRequests-- > 0)
+        (call) => call.name !== 'generate_image' || remainingImageRequests-- > 0
       )
       // Re-add the assistant turn (with its tool_calls) so the model sees what it invoked.
       messages.push({
@@ -1431,7 +1532,43 @@ export async function toolChat(
           !String((c.args as { query?: unknown }).query ?? '').trim()
         ) {
           c.args = { ...c.args, query }
+          // The person's question stands in for unreadable arguments, as it always has.
+          delete c.parseError
         }
+        // Arguments are checked against the tool's schema before it runs. A bad call is not run:
+        // the model gets one repair turn naming the field; a second bad call to that tool ends
+        // tool use with an answer that says the step could not be done.
+        const checked = toolArgumentsDecision({
+          name: c.name,
+          args: c.args,
+          ...(c.parseError ? { parseError: c.parseError } : {}),
+          tools: roundTools,
+          invalidSoFar: invalidArgumentCalls.get(c.name) ?? 0
+        })
+        if (checked.action === 'stop') {
+          messages.push({ role: 'tool', tool_call_id: c.id, content: checked.message })
+          for (const unrun of callsToRun.slice(callsToRun.indexOf(c) + 1)) {
+            messages.push({
+              role: 'tool',
+              tool_call_id: unrun.id,
+              content:
+                'Not run: tool use has ended because a call kept arriving with invalid arguments.'
+            })
+          }
+          toolCalls.push({ name: c.name, args: c.args, result: checked.message, status: 'failed' })
+          opts.onToolResult?.({ name: c.name, result: checked.message, status: 'failed' })
+          stopInstruction = checked.instruction
+          break
+        }
+        if (checked.action === 'repair') {
+          invalidArgumentCalls.set(c.name, (invalidArgumentCalls.get(c.name) ?? 0) + 1)
+          callRecords.push({ key: toolCallKey(c.name, c.args), outcome: 'failed' })
+          toolCalls.push({ name: c.name, args: c.args, result: checked.message, status: 'failed' })
+          opts.onToolResult?.({ name: c.name, result: checked.message, status: 'failed' })
+          messages.push({ role: 'tool', tool_call_id: c.id, content: checked.message })
+          continue
+        }
+        c.args = checked.args
         // A call identical to the one just before it is not run again: the model is told it
         // already has that result. Repeating after that ends tool use with a forced answer.
         const key = toolCallKey(c.name, c.args)
@@ -1519,18 +1656,34 @@ export async function toolChat(
       continue // let the model use the results
     }
     // No tool calls this round: `content` is the final answer (already streamed via onDelta).
+    // A reply claiming a task started with no task tool called would leave the chat saying
+    // "Web Use started" while nothing runs (found live): ask once more, plainly.
+    if (
+      !launchClaimRetried &&
+      !toolCalls.some((call) => isTaskAction(call.name)) &&
+      roundToolNames.some((name) => isTaskAction(name)) &&
+      claimsTaskLaunch(answerFrom(content)) &&
+      !opts.signal?.aborted
+    ) {
+      launchClaimRetried = true
+      opts.onActivity?.({ kind: 'answer_discarded', label: 'Starting the task…' })
+      // A user turn, not a system one: Qwen-style templates reject a system message mid-chat.
+      messages.push({ role: 'assistant', content: answerFrom(content) })
+      messages.push({ role: 'user', content: LAUNCH_CLAIM_RETRY_INSTRUCTION })
+      round += 1
+      continue
+    }
     if (!answerFrom(content).trim() && !opts.signal?.aborted) {
       // Finished with nothing to say (often reasoning used the whole allowance): ask once more
       // for an answer from what is already here, then say why if there is still none.
-      const retry = await llm.streamChat(
-        [...messages, { role: 'system', content: ANSWER_NOW_INSTRUCTION }],
-        onDelta,
-        {
+      const retryMessages = [...messages, { role: 'system', content: ANSWER_NOW_INSTRUCTION }]
+      const retry = await withAIRequestMetrics(breakdownOf(retryMessages, []), () =>
+        llm.streamChat(retryMessages, onDelta, {
           temperature: 0.3,
           maxTokens: sentMaxTokens(roundMaxTokens),
           thinking: false,
           signal: opts.signal
-        }
+        })
       )
       const retried = answerFrom(retry.content)
       return resultWithImages({
@@ -1570,13 +1723,15 @@ export async function toolChat(
     typeof settings.maxTokens === 'number' && settings.maxTokens > 0
       ? Math.min(settings.maxTokens, finalOutputRoom)
       : finalOutputRoom
-  const final = await llm.streamChat(finalMessages, onDelta, {
-    temperature: 0.3,
-    // Forced final answer obeys the same context-bound cap as every tool round.
-    maxTokens: sentMaxTokens(finalMaxTokens),
-    thinking: false,
-    signal: opts.signal
-  })
+  const final = await withAIRequestMetrics(breakdownOf(finalMessages, []), () =>
+    llm.streamChat(finalMessages, onDelta, {
+      temperature: 0.3,
+      // Forced final answer obeys the same context-bound cap as every tool round.
+      maxTokens: sentMaxTokens(finalMaxTokens),
+      thinking: false,
+      signal: opts.signal
+    })
+  )
   return resultWithImages({
     answer: answerFrom(final.content) || 'Stopped after too many tool steps.',
     toolCalls,
@@ -1632,16 +1787,6 @@ function boundedToolHistory(history: { role: string; content: string }[]): ToolC
       role: turn.role,
       content: turn.content.slice(0, TOOL_HISTORY_CHARS_PER_TURN)
     }))
-}
-
-/** Parse a tool-call arguments JSON string to an object; empty object on failure. */
-function safeParseArgs(raw: string | undefined): Record<string, unknown> {
-  try {
-    const v = JSON.parse(raw || '{}')
-    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
-  } catch {
-    return {}
-  }
 }
 
 /** Names + descriptions + enabled state of all tools (for the settings UI). */

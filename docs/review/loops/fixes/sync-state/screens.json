@@ -1,0 +1,18 @@
+[
+  {
+    "id": "desktop-sync-off-on-pixel",
+    "name": "Clipboard header: off on the other device",
+    "group": "Desktop · Sync",
+    "what": "Pixel 9 has Clipboard sync off, so the header says \"Off on Pixel 9\" with the step to turn it on there (was \"Clipboard sync is on\").",
+    "file": "desktop-sync-off-on-pixel.png",
+    "step": "peer-sharing"
+  },
+  {
+    "id": "desktop-devices-activity",
+    "name": "Sync activity: failed transfer",
+    "group": "Desktop · Sync",
+    "what": "A failed transfer says why in one line: \"Pixel 9 has files receiving off. Turn it on there in Sync, Receiving.\"",
+    "file": "desktop-devices-activity.png",
+    "step": "transfer-activity"
+  }
+]

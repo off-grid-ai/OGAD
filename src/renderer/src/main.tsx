@@ -4,6 +4,7 @@ import { applyTheme, getThemeMode, onThemeModeChanged } from './theme'
 import { applyUiAnimations, uiAnimationsOn, UI_ANIMATIONS_CHANGED } from './ui-animations'
 import { initFocusModality } from './lib/focus-modality'
 import { initScrollActivity } from './lib/scroll-activity'
+import { applyAppLanguage } from './lib/app-language'
 import { cspNonce, initShadowStyleNonce } from './lib/shadow-style-nonce'
 
 // Apply the saved/system theme (dark default) before first paint.
@@ -26,6 +27,7 @@ import { createRoot } from 'react-dom/client'
 import { AliveProvider, LivingField } from '@offgrid/operator-ui/operator/alive'
 import App from './App'
 import { TooltipProvider } from './components/ui/tooltip'
+import { AppLanguageRoot } from './components/AppLanguageRoot'
 import { AIRequestLogs } from './components/AIRequestLogs'
 
 // The quick-paste popup is a Pro feature; its component lives in the pro package.
@@ -78,38 +80,47 @@ if (!isClipPopup && !isDictation && !isCuSupervisor && !isGodTwin) {
     window.addEventListener(UI_ANIMATIONS_CHANGED, reportAppearance)
   }
 }
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    {/* popLayout exits pin themselves with a <style>; the CSP admits it only with the nonce. */}
-    <MotionConfig nonce={cspNonce()}>
-      {/* Base UI's popups (selects, menus) render <style> tags; same nonce. */}
-      <CSPProvider nonce={cspNonce()}>
-        {/* Starts the operator-ui alive conductor (pointer light, pulses) for every surface. */}
-        <AliveProvider>
-          {hash === '#ai-activity' ? (
-            <TooltipProvider delayDuration={300}>
-              <AIRequestLogs standalone />
-            </TooltipProvider>
-          ) : isClipPopup ? (
-            <ClipboardPopup />
-          ) : isDictation ? (
-            <DictationOverlay />
-          ) : isCuSupervisor ? (
-            <ComputerUseSupervisor />
-          ) : isGodTwin ? (
-            <GodTwinCompanion />
-          ) : (
-            <>
-              {/* The breathing background lives in the main window only; the floating
-              overlays above stay transparent. */}
-              <LivingField />
-              <TooltipProvider delayDuration={300}>
-                <App />
-              </TooltipProvider>
-            </>
-          )}
-        </AliveProvider>
-      </CSPProvider>
-    </MotionConfig>
-  </StrictMode>
-)
+// The app language's catalog is on before the first frame, so no screen draws in English first.
+// A promise, not a top-level await: the entry also compiles to CommonJS for the native test runs.
+// A catalog that fails to load still opens the app, in English.
+void applyAppLanguage()
+  .catch((error: unknown) => console.warn('[i18n] language catalog failed to load', error))
+  .then(() => {
+    createRoot(document.getElementById('root')!).render(
+      <StrictMode>
+        {/* popLayout exits pin themselves with a <style>; the CSP admits it only with the nonce. */}
+        <MotionConfig nonce={cspNonce()}>
+          {/* Base UI's popups (selects, menus) render <style> tags; same nonce. */}
+          <CSPProvider nonce={cspNonce()}>
+            {/* Starts the operator-ui alive conductor (pointer light, pulses) for every surface. */}
+            <AliveProvider>
+              {hash === '#ai-activity' ? (
+                <TooltipProvider delayDuration={300}>
+                  <AIRequestLogs standalone />
+                </TooltipProvider>
+              ) : isClipPopup ? (
+                <ClipboardPopup />
+              ) : isDictation ? (
+                <DictationOverlay />
+              ) : isCuSupervisor ? (
+                <ComputerUseSupervisor />
+              ) : isGodTwin ? (
+                <GodTwinCompanion />
+              ) : (
+                <>
+                  {/* The breathing background lives in the main window only; the floating
+                overlays above stay transparent. */}
+                  <LivingField />
+                  <TooltipProvider delayDuration={300}>
+                    <AppLanguageRoot>
+                      <App />
+                    </AppLanguageRoot>
+                  </TooltipProvider>
+                </>
+              )}
+            </AliveProvider>
+          </CSPProvider>
+        </MotionConfig>
+      </StrictMode>
+    )
+  })

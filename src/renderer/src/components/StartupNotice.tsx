@@ -105,9 +105,9 @@ export function StartupNotice(): React.JSX.Element {
               <AnimatePresence mode="wait" initial={false}>
                 <motion.span
                   key={phase === 'degraded' ? degradedText(snapshot) : pendingText(snapshot)}
-                  initial={reduceMotion ? false : { opacity: 0, y: 4, filter: 'blur(4px)' }}
-                  animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4, filter: 'blur(4px)' }}
+                  initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
                   transition={{ duration: reduceMotion ? 0 : 0.3, ease: EASE }}
                 >
                   {phase === 'degraded' ? (

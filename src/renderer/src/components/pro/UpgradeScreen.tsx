@@ -7,15 +7,110 @@ import {
   CircleNotch,
   DeviceMobile,
   Clock,
-  Desktop
+  Desktop,
+  PuzzlePiece
 } from '@phosphor-icons/react'
 import { PageShell } from '../PageShell'
 import { AnimatedGroup } from '@offgrid/operator-ui/operator/motion/animated-group'
 import { Button } from '../ui/button'
 import { PRO_PAY_URL, PRO_FEATURES, featureSupportsPlatform, type ProFeature } from './proCatalog'
 import { OFF_GRID_MOBILE_URL, OFF_GRID_WEBSITE_URL, openExternal } from '../../constants/links'
+import { withUtm } from '@offgrid/core/shared/utm'
 import { deviceNoun, currentPlatform } from '@renderer/lib/device'
 import { projectPersonalMeshActivationFailure } from '@offgrid/sync'
+import {
+  LICENCE_ACTION_LABEL,
+  activationFailureActions,
+  licenceLine,
+  productAction,
+  type LicenceAction
+} from '@offgrid/features'
+import { SUPPORT_EMAIL } from '@offgrid/core/shared/analytics'
+
+const KEY_INPUT_ID = 'license-key-input'
+
+/** What each way back does on this computer. An action with nowhere to go here is not shown. */
+function licenceActionRunners(retry?: () => void): Partial<Record<LicenceAction, () => void>> {
+  return {
+    renew: () => void window.api.license?.openPay(),
+    'get-pro': () => void window.api.license?.openPay(),
+    'enter-key': () => document.getElementById(KEY_INPUT_ID)?.focus(),
+    // Devices opens for an unlicensed install only where pairing can turn Pro on.
+    ...(window.api.proEntitlementBootstrapEnabled
+      ? {
+          'pair-again': () =>
+            window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'devices' }))
+        }
+      : {}),
+    ...(retry ? { retry } : {}),
+    support: () => openExternal(`mailto:${SUPPORT_EMAIL}`)
+  }
+}
+
+function LicenceActions({
+  actions,
+  retry
+}: Readonly<{ actions: LicenceAction[]; retry?: () => void }>): React.ReactElement | null {
+  const run = licenceActionRunners(retry)
+  const shown = actions.filter((action) => run[action])
+  if (!shown.length) return null
+  return (
+    <span className="flex flex-wrap gap-2">
+      {shown.map((action, index) => (
+        <Button
+          key={action}
+          size="sm"
+          variant={index === 0 ? 'default' : 'outline'}
+          onClick={() => run[action]?.()}
+        >
+          {LICENCE_ACTION_LABEL[action]}
+        </Button>
+      ))}
+    </span>
+  )
+}
+
+/**
+ * Why Pro is off on this computer, and the way back: the license ended, or another device removed
+ * this one. Nothing for someone who never had Pro. The line and its actions are the shared rule
+ * (licenceLine) the phone and the browser extension draw too.
+ */
+export function LicenceNotice(): React.ReactElement | null {
+  const [info, setInfo] = useState<ProLicenseInfo | null>(null)
+  useEffect(() => {
+    const license = window.api.license
+    if (!license) return
+    let active = true
+    void license
+      .status()
+      .then((next) => active && setInfo(next))
+      .catch(() => {})
+    const off = license.onChanged((next) => active && setInfo(next))
+    return () => {
+      active = false
+      off()
+    }
+  }, [])
+  const line = info
+    ? licenceLine({
+        hasAccess: info.isPro,
+        expiry: info.expiry,
+        removedBy: info.removedBy ?? null,
+        hadLicence: info.verifiedAt > 0
+      })
+    : null
+  if (!line) return null
+  return (
+    <div
+      role="status"
+      data-testid="licence-notice"
+      className="og-guide-in flex flex-col gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5"
+    >
+      <span className="text-xs leading-relaxed text-neutral-200">{line.text}</span>
+      <LicenceActions actions={line.actions} />
+    </div>
+  )
+}
 
 function availableOnLinux(feature?: ProFeature): boolean {
   return !!feature && featureSupportsPlatform(feature, 'linux')
@@ -35,10 +130,14 @@ function showComingSoonBadge(comingSoon: boolean, linux: boolean, feature?: ProF
 // a core build has no pro code bundled, so entering a key would unlock nothing.
 // Main and renderer lifecycle owners react to the saved entitlement, so activation
 // completes in this process without a restart.
-function LicenseActivation(): React.ReactElement {
+export function LicenseActivation(): React.ReactElement {
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [msg, setMsg] = useState<{
+    kind: 'ok' | 'err'
+    text: string
+    actions?: LicenceAction[]
+  } | null>(null)
 
   const activate = async (): Promise<void> => {
     const license = window.api.license
@@ -50,13 +149,15 @@ function LicenseActivation(): React.ReactElement {
       if (r.ok) {
         setMsg({ kind: 'ok', text: 'Activated. Pro is starting.' })
       } else {
+        const failure = projectPersonalMeshActivationFailure(r.reason)
         setMsg({
           kind: 'err',
-          text: projectPersonalMeshActivationFailure(r.reason).description
+          text: failure.description,
+          actions: activationFailureActions(failure.code, failure.retryable)
         })
       }
     } catch {
-      setMsg({ kind: 'err', text: 'Activation failed. Please try again.' })
+      setMsg({ kind: 'err', text: 'Activation failed.', actions: ['retry', 'support'] })
     } finally {
       setBusy(false)
     }
@@ -69,6 +170,7 @@ function LicenseActivation(): React.ReactElement {
       </label>
       <div className="flex gap-2">
         <input
+          id={KEY_INPUT_ID}
           value={key}
           onChange={(e) => setKey(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !busy && activate()}
@@ -87,13 +189,16 @@ function LicenseActivation(): React.ReactElement {
       </div>
       {msg && (
         <div
-          className={`flex items-center justify-between gap-3 text-left text-xs ${
+          className={`flex flex-wrap items-center justify-between gap-3 text-left text-xs ${
             msg.kind === 'ok'
               ? 'text-emerald-600 dark:text-emerald-400'
               : 'text-red-600 dark:text-red-400'
           }`}
         >
           <span>{msg.text}</span>
+          {msg.actions ? (
+            <LicenceActions actions={msg.actions} retry={() => void activate()} />
+          ) : null}
         </div>
       )}
     </div>
@@ -159,7 +264,12 @@ export function UpgradeScreen({
           </p>
 
           {f && (
-            <AnimatedGroup as="ul" asChild="li" preset="blur-slide" className="grid gap-2 sm:grid-cols-2">
+            <AnimatedGroup
+              as="ul"
+              asChild="li"
+              preset="slide"
+              className="grid gap-2 sm:grid-cols-2"
+            >
               {f.highlights.map((h) => (
                 <div key={h} className="flex items-start gap-2 text-sm text-neutral-300">
                   <Check
@@ -210,7 +320,7 @@ export function UpgradeScreen({
               </p>
               <div className="border-t border-neutral-800" />
               <button
-                onClick={() => openExternal(OFF_GRID_WEBSITE_URL)}
+                onClick={() => openExternal(withUtm(OFF_GRID_WEBSITE_URL, 'upgrade-website'))}
                 className="group flex items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-900/40 px-3 py-2.5 text-left transition-colors hover:border-green-500/30"
               >
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800 transition-colors group-hover:border-green-500/30">
@@ -224,7 +334,8 @@ export function UpgradeScreen({
                     Use Pro on Windows, Linux, or macOS
                   </span>
                   <span className="mt-0.5 block text-[11px] leading-tight text-neutral-500">
-                    Install Off Grid AI Desktop on Windows, Linux, or macOS and use the same license.
+                    Install Off Grid AI Desktop on Windows, Linux, or macOS and use the same
+                    license.
                   </span>
                 </span>
                 <ArrowSquareOut weight="bold" className="h-4 w-4 shrink-0 text-neutral-500" />
@@ -246,6 +357,7 @@ export function UpgradeScreen({
                   </span>
                 </div>
               )}
+              <LicenceNotice />
               {(!linux || !f || linuxFeatureAvailable) && (
                 <>
                   <div className="text-[10px] uppercase tracking-widest text-neutral-500">
@@ -256,7 +368,7 @@ export function UpgradeScreen({
                     className="w-full"
                     onClick={() => {
                       flow.step('pro_upgrade', 'paywall_viewed')
-                      open(PRO_PAY_URL)
+                      open(withUtm(PRO_PAY_URL, 'upgrade-screen'))
                     }}
                   >
                     Get Pro <ArrowSquareOut weight="bold" className="h-4 w-4" />
@@ -281,7 +393,7 @@ export function UpgradeScreen({
               "Get Off Grid AI Desktop" row on its Pro tab. */}
           <div className="border-t border-neutral-800" />
           <button
-            onClick={() => openExternal(OFF_GRID_MOBILE_URL)}
+            onClick={() => openExternal(withUtm(OFF_GRID_MOBILE_URL, 'upgrade-mobile'))}
             className="group flex items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-900/40 px-3 py-2.5 text-left transition-colors hover:border-green-500/30"
           >
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800 transition-colors group-hover:border-green-500/30">
@@ -292,12 +404,33 @@ export function UpgradeScreen({
             </span>
             <span className="min-w-0 flex-1">
               <span className="block text-xs font-medium text-neutral-200">
-                Get Off Grid AI Mobile
+                {productAction({ product: 'mobile' }).label}
               </span>
               <span className="mt-0.5 block text-[11px] leading-tight text-neutral-500">
                 {linux
                   ? 'Off Grid AI Mobile is available on your phone.'
-                  : 'Your license covers your phone too - up to 5 devices, synced over your own network.'}
+                  : 'Your license covers your phone too. Install it, then scan the code in Sync to pair.'}
+              </span>
+            </span>
+            <ArrowSquareOut weight="bold" className="h-4 w-4 shrink-0 text-neutral-500" />
+          </button>
+          {/* The browser extension is part of Pro: the store for this computer's default browser. */}
+          <button
+            onClick={() => void window.api.getExtension?.()}
+            className="group flex items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-900/40 px-3 py-2.5 text-left transition-colors hover:border-green-500/30"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800 transition-colors group-hover:border-green-500/30">
+              <PuzzlePiece
+                weight="regular"
+                className="h-4 w-4 text-neutral-300 transition-colors group-hover:text-emerald-500"
+              />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-medium text-neutral-200">
+                {productAction({ product: 'extension' }).label}
+              </span>
+              <span className="mt-0.5 block text-[11px] leading-tight text-neutral-500">
+                Chat, your vault and Scribe in your browser. Included in Pro.
               </span>
             </span>
             <ArrowSquareOut weight="bold" className="h-4 w-4 shrink-0 text-neutral-500" />

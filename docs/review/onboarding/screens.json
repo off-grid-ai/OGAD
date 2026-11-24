@@ -1,0 +1,250 @@
+[
+ {
+  "id": "welcome",
+  "name": "Welcome",
+  "group": "Desktop onboarding",
+  "what": "The first screen, unchanged: the lamp, the name, one line on what runs where.",
+  "file": "screens/v/welcome-2.jpg",
+  "versions": [
+   {
+    "v": 0,
+    "label": "Before: on main",
+    "at": "2026-11-06T13:52:00Z",
+    "file": "screens/v/welcome-0.jpg",
+    "what": "Welcome on main: one dark slide, then four more steps."
+   },
+   {
+    "v": 1,
+    "label": "New screen",
+    "at": "2026-11-18T12:40:00Z",
+    "file": "screens/v/welcome-2.jpg"
+   }
+  ],
+  "step": "welcome"
+ },
+ {
+  "id": "groups",
+  "name": "What do you want to do?",
+  "group": "Desktop onboarding",
+  "what": "Pick any of seven groups. Chat starts picked; picking a group picks its first feature.",
+  "file": "screens/v/groups-3.jpg",
+  "versions": [
+   {
+    "v": 0,
+    "label": "Before: on main",
+    "at": "2026-11-06T13:52:00Z",
+    "file": "screens/v/groups-0.jpg",
+    "what": "On main: \"Your devices work as one\" was its own step. Now sync is a pick under Private and connected."
+   },
+   {
+    "v": 1,
+    "label": "First build",
+    "at": "2026-11-18T12:05:00Z",
+    "file": "screens/v/groups-1.jpg"
+   },
+   {
+    "v": 2,
+    "label": "Built to the design doc",
+    "at": "2026-11-18T12:40:00Z",
+    "file": "screens/v/groups-2.jpg",
+    "clip": "screens/v/groups-2.mp4",
+    "what": "The living background shows through; tiles use the design tokens and fill the width; the block sits centred above the footer."
+   },
+   {
+    "v": 3,
+    "label": "Live run, fresh profile",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/groups-3.jpg",
+    "what": "Pick the jobs you want; Continue opens the details.",
+    "clip": "screens/v/groups-3.mp4"
+   }
+  ],
+  "clip": "screens/v/groups-3.mp4",
+  "step": "groups"
+ },
+ {
+  "id": "details",
+  "name": "Which ones?",
+  "group": "Desktop onboarding",
+  "what": "The features of each picked group, a column per group. A picked Pro feature brings the license key box.",
+  "file": "screens/v/details-3.jpg",
+  "versions": [
+   {
+    "v": 0,
+    "label": "Before: on main",
+    "at": "2026-11-06T13:52:00Z",
+    "file": "screens/v/details-0.jpg",
+    "what": "On main: \"What Pro adds\" was its own step. Now the Pro key sits under the feature columns."
+   },
+   {
+    "v": 1,
+    "label": "First build",
+    "at": "2026-11-18T12:05:00Z",
+    "file": "screens/v/details-1.jpg"
+   },
+   {
+    "v": 2,
+    "label": "Built to the design doc",
+    "at": "2026-11-18T12:40:00Z",
+    "file": "screens/v/details-2.jpg",
+    "what": "Columns fill the width; the license key box sits under them instead of under the title."
+   },
+   {
+    "v": 3,
+    "label": "Live run, no Pro",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/details-3.jpg",
+    "what": "Without Pro, a Pro pick shows where to enter a licence. With Pro active it no longer shows."
+   }
+  ],
+  "step": "details"
+ },
+ {
+  "id": "how-chat",
+  "name": "How it works: Chat",
+  "group": "Desktop onboarding",
+  "what": "The guide, filtered to the picks. Where models run and the analytics opt-in sit under Your picks.",
+  "file": "screens/v/how-chat-3.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "First build",
+    "at": "2026-11-18T12:05:00Z",
+    "file": "screens/v/how-chat-1.jpg"
+   },
+   {
+    "v": 2,
+    "label": "Built to the design doc",
+    "at": "2026-11-18T12:40:00Z",
+    "file": "screens/v/how-chat-2.jpg",
+    "what": "One emerald action (Set up my models); the settings moved under Your picks so the guide gets the right side."
+   },
+   {
+    "v": 3,
+    "label": "Live run",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/how-chat-3.jpg",
+    "what": "One page per pick, then Set up my models opens the app.",
+    "clip": "screens/v/how-chat-3.mp4"
+   }
+  ],
+  "clip": "screens/v/how-chat-3.mp4",
+  "step": "guide"
+ },
+ {
+  "id": "how-meetings",
+  "name": "How it works: a Pro feature",
+  "group": "Desktop onboarding",
+  "what": "A Pro pick shows the price, Get Pro and Enter license key under it.",
+  "file": "screens/v/how-meetings-2.jpg",
+  "versions": [
+   {
+    "v": 1,
+    "label": "First build",
+    "at": "2026-11-18T12:05:00Z",
+    "file": "screens/v/how-meetings-1.jpg"
+   },
+   {
+    "v": 2,
+    "label": "Built to the design doc",
+    "at": "2026-11-18T12:40:00Z",
+    "file": "screens/v/how-meetings-2.jpg",
+    "what": "Get Pro is outline now, so Set up my models stays the one primary action."
+   }
+  ]
+ },
+ {
+  "id": "how-integrations",
+  "name": "How it works: Connectors",
+  "group": "Desktop onboarding",
+  "what": "Connectors shows the connections inline (the old Connect step), still optional.",
+  "file": "screens/v/how-integrations-2.jpg",
+  "versions": [
+   {
+    "v": 0,
+    "label": "Before: on main",
+    "at": "2026-11-06T13:52:00Z",
+    "file": "screens/v/how-integrations-0.jpg",
+    "what": "On main: \"Connect your work\" was its own step. Now connections show in How it works."
+   },
+   {
+    "v": 1,
+    "label": "New screen",
+    "at": "2026-11-18T12:40:00Z",
+    "file": "screens/v/how-integrations-2.jpg"
+   }
+  ]
+ },
+ {
+  "id": "handoff",
+  "name": "After setup: models",
+  "group": "Desktop onboarding",
+  "what": "Set up my models hands off to model setup as today, with the picks saved. Step 5 makes it use them.",
+  "file": "screens/v/handoff-3.jpg",
+  "versions": [
+   {
+    "v": 0,
+    "label": "Before: on main",
+    "at": "2026-11-06T13:52:00Z",
+    "file": "screens/v/handoff-0.jpg",
+    "what": "On main: \"Choose what runs locally\" was its own step. Now where models run sits in How it works."
+   },
+   {
+    "v": 1,
+    "label": "First build",
+    "at": "2026-11-18T12:05:00Z",
+    "file": "screens/v/handoff-1.jpg"
+   },
+   {
+    "v": 2,
+    "label": "Built to the design doc",
+    "at": "2026-11-18T12:40:00Z",
+    "file": "screens/v/handoff-2.jpg"
+   },
+   {
+    "v": 3,
+    "label": "Checked for the picks",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/handoff-3.jpg",
+    "what": "Setup comes checked for the picks (chat and image here; Pro picks wait for Pro)."
+   }
+  ],
+  "step": "setup"
+ },
+ {
+  "id": "sidebar",
+  "name": "Menu: your picks",
+  "group": "Desktop after onboarding",
+  "what": "The menu leads with Your picks; the other groups stay closed.",
+  "versions": [
+   {
+    "v": 1,
+    "label": "New",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/sidebar-1.jpg",
+    "what": "The menu leads with Your picks; the other groups stay closed."
+   }
+  ],
+  "file": "screens/v/sidebar-1.jpg",
+  "step": "home"
+ },
+ {
+  "id": "what-you-use",
+  "name": "Settings: What you use",
+  "group": "Desktop after onboarding",
+  "what": "Settings \u2192 What you use: a pick turned on shows in the menu at once.",
+  "versions": [
+   {
+    "v": 1,
+    "label": "New",
+    "at": "2026-11-18T14:15:00Z",
+    "file": "screens/v/what-you-use-1.jpg",
+    "what": "Settings \u2192 What you use: a pick turned on shows in the menu at once.",
+    "clip": "screens/v/what-you-use-1.mp4"
+   }
+  ],
+  "clip": "screens/v/what-you-use-1.mp4",
+  "file": "screens/v/what-you-use-1.jpg",
+  "step": "what-you-use"
+ }
+]

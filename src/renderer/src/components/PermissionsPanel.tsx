@@ -116,7 +116,7 @@ export function PermissionsPanel({
 
   return (
     <div>
-      <AnimatedGroup preset="blur-slide" className="divide-y divide-border/50">
+      <AnimatedGroup preset="slide" className="divide-y divide-border/50">
         <PermissionRow
           title="Accessibility"
           description="Read exact text, app names, and URLs when macOS exposes them."
@@ -160,9 +160,9 @@ export function PermissionsPanel({
             <motion.p
               key="error"
               role="alert"
-              initial={{ opacity: 0, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, filter: 'blur(4px)' }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               transition={{ duration: 0.4, ease }}
               className="mt-3 rounded-xl px-3 py-2 text-xs text-red-300 shadow-[inset_0_0_0_1px_rgb(239_68_68/0.3)]"
             >
