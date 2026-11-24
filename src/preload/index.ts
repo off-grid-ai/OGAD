@@ -572,6 +572,8 @@ const offGridApi = {
     ipcRenderer.invoke('permissions:open-screen-recording-settings'),
   relaunchForPermissions: () => ipcRenderer.invoke('permissions:relaunch'),
   openMicrophoneSettings: () => ipcRenderer.invoke('permissions:open-microphone-settings'),
+  snapPlugFix: (plug: 'audio-record' | 'camera') =>
+    ipcRenderer.invoke('permissions:snap-plug-fix', plug),
   openLocalNetworkSettings: () => ipcRenderer.invoke('permissions:open-local-network-settings'),
   openFilesAndFoldersSettings: () =>
     ipcRenderer.invoke('permissions:open-files-and-folders-settings'),

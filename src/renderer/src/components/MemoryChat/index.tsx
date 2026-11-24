@@ -36,6 +36,7 @@ import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
 import { parseSqliteUtc, shiftLocalDay, startOfLocalDay } from '@renderer/lib/time'
 import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
+import { CopyButton } from '../ui/CopyButton'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { appendTimelineEvent, applyStreamEvent } from '@renderer/lib/stream-reducer'
@@ -5815,7 +5816,19 @@ export function MemoryChat({
                         <ActionGateDock conversationId={activeConversationId} />
                         {/* Vision rail: the supervisor overlay slides in during a computer-use task */}
                         {TaskSupervisorOverlay ? <TaskSupervisorOverlay /> : null}
-                        {voiceTurns.microphoneDenied && (
+                        {voiceTurns.microphoneDenied && voiceTurns.microphoneFix ? (
+                          // A snap with its microphone plug off: the one command that turns it on, to copy.
+                          <div
+                            role="alert"
+                            className="mx-2 mb-2 flex flex-col gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+                          >
+                            <span>{voiceTurns.error}</span>
+                            <div className="flex items-center gap-2 rounded bg-black/30 py-1 pl-2 pr-1 font-mono text-[11px] text-amber-50">
+                              <code className="min-w-0 flex-1 truncate">{voiceTurns.microphoneFix}</code>
+                              <CopyButton text={voiceTurns.microphoneFix} />
+                            </div>
+                          </div>
+                        ) : voiceTurns.microphoneDenied && (
                           <div
                             role="alert"
                             className="mx-2 mb-2 flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
