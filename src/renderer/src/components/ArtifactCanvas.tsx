@@ -5,6 +5,7 @@ import AIArtifact from '@offgrid/operator-ui/operator/ai-artifact'
 import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { ARTIFACT_KIND_LABELS, type ArtifactKind } from '@renderer/lib/artifact-labels'
 import { withHtmlErrorOverlay } from '@renderer/lib/artifact-error-overlay'
+import { useFollowScrollBottom } from '@renderer/lib/use-follow-scroll-bottom'
 import { artifactTitle } from '../../../shared/artifact-title'
 import { modelDisplayName } from '@offgrid/models'
 import { capturePathFromUrl } from '../../../shared/ogcapture-url'
@@ -119,6 +120,9 @@ export function ArtifactCanvas({
   // preview is never shown while the new one is being registered.
   const [preview, setPreview] = useState<{ html: string; url: string } | null>(null)
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null)
+  // The code tab follows new code as it streams while it is scrolled to the end.
+  const artifactFrameRef = useRef<HTMLDivElement | null>(null)
+  useFollowScrollBottom(artifactFrameRef, 'pre', artifact.code)
   const artifactAudioRef = useRef<HTMLAudioElement | null>(null)
   // Holds the active drag's teardown so we can force it on unmount — otherwise
   // closing the canvas mid-drag (e.g. switching chats) leaks the window listeners
@@ -617,6 +621,7 @@ else { __ogShow('No React component found — define a component named App or a 
             // Keyed by kind only: a title that arrives or changes mid-reply must not fade the
             // whole frame out and back in.
             key={artifact.kind}
+            ref={artifactFrameRef}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
