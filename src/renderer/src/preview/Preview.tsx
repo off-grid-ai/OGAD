@@ -5,6 +5,8 @@ import { TooltipProvider } from '../components/ui/tooltip'
 import App from '../App'
 
 const params = new URLSearchParams(window.location.search)
+// Read before main.tsx moves the address to the app's route, so catalogs load from beside preview.html.
+const CATALOG_BASE = new URL('./catalogs/', window.location.href)
 
 interface CatalogMessage {
   type: 'offgrid-i18n'
@@ -21,7 +23,7 @@ const LOCALE_CODE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/
 async function loadCatalog(code: string): Promise<Strings> {
   if (!LOCALE_CODE.test(code)) return {}
   const read = async (file: string): Promise<Strings> => {
-    const res = await fetch(`./catalogs/${code}/${file}.json`)
+    const res = await fetch(new URL(`${code}/${file}.json`, CATALOG_BASE))
     return res.ok ? ((await res.json()) as Strings) : {}
   }
   const [common, desktop] = await Promise.all([read('common'), read('desktop')])
@@ -37,16 +39,23 @@ export function Preview(): React.JSX.Element {
       document.documentElement.lang = locale
       setVersion((v) => v + 1)
     }
+    // Strings the editor sends are newer than the ?lang= file, so they win if they arrive first.
+    let fromEditor = false
     const lang = params.get('lang')
-    if (lang) void loadCatalog(lang).then((strings) => apply(lang, strings))
+    if (lang)
+      void loadCatalog(lang).then((strings) => {
+        if (!fromEditor) apply(lang, strings)
+      })
     const onMessage = (event: MessageEvent): void => {
       // The editor serves this preview from its own address, so only that origin may send a catalog.
       if (
         event.origin === window.location.origin &&
         event.source === window.parent &&
         isCatalogMessage(event.data)
-      )
+      ) {
+        fromEditor = true
         apply(event.data.locale, event.data.strings)
+      }
     }
     window.addEventListener('message', onMessage)
     window.parent.postMessage(
