@@ -446,8 +446,26 @@ function startServerOnlyMode(): void {
         clients: llm.gatewayClients() ?? 'auto'
       })
     }
-    return llm.init().catch((err) => console.error('[gateway] LLM init failed', err))
+    return llm
+      .init()
+      .then(() => applyHeadlessSpeedSettings())
+      .catch((err) => console.error('[gateway] LLM init failed', err))
   })
+}
+
+/** The headless server has no settings panel. --fastest-settings (or OFFGRID_FASTEST_SETTINGS=1)
+ *  turns on "Use fastest settings", as the button does; without it, an install already on them
+ *  stays current as the hardware or model changes. */
+async function applyHeadlessSpeedSettings(): Promise<void> {
+  const best = await import('./best-settings')
+  if (process.argv.includes('--fastest-settings') || process.env.OFFGRID_FASTEST_SETTINGS === '1') {
+    const { plan } = await best.applyBestSettings()
+    writeDiagnosticLog('gateway', 'server-only.fastest_settings', {
+      speculativeDecoding: plan.chat.speculativeDecoding ?? 'unchanged'
+    })
+  } else {
+    await best.prepareBestSettingsOnStartup()
+  }
 }
 
 app.whenReady().then(async () => {
