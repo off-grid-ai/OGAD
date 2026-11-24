@@ -130,7 +130,9 @@ def graph(m, spec, screens, calls):
                            'path': names[s], 'n': n, 'live': live.get(s)})
     plats = []
     for p in PLATFORMS:
-        on = [sc for sc in screens if sc['platform'] == p]
+        # An iPhone shot with an Android version proves Android too, as the coverage rows count it.
+        on = [sc for sc in screens if sc['platform'] == p or
+              (p == 'Android' and any(v.get('android') for v in sc.get('versions', [])))]
         if not on:
             continue
         by = {k: [sc['id'] for sc in on if str(sc.get('group', '')).lower().startswith(GROUP.get(k, (k,)))] for k in keys}
@@ -226,7 +228,7 @@ def main(spec_path, out):
                if pl not in shot_on(e)]
 
     repos = {x['dir']: x for x in rel.get('repos', [])}
-    order = ['shared', 'ui-library', 'desktop', 'desktop-pro', 'mobile', 'mobile-pro', 'extension']
+    order = ['shared', 'ui-library', 'desktop', 'desktop-pro', 'mobile', 'mobile-pro', 'extension', 'license-worker']
     dirmap = {'shared': 'shared', 'ui-library': 'ui-library', 'desktop': 'desktop', 'desktop-pro': 'desktop/pro', 'mobile': 'mobile', 'mobile-pro': 'mobile/pro', 'extension': 'browser-extension', 'license-worker': 'license-worker'}
     cmap = []
     for s in order:
@@ -244,9 +246,14 @@ def main(spec_path, out):
     m = scan.build(str(ROOT))
     # Every product the change belongs in must show on the page: one with no code yet, or no shots yet, gets
     # a missing row, so a gap is seen without anyone looking for it (the extension's first run was missed).
-    shots = {s['platform'] for s in screens} | {'Android' for s in screens for v in s.get('versions', []) if v.get('android')}
+    def shots_of(k):
+        """The platforms this concept's own screens are shot on: an unrelated screen proves nothing for it."""
+        mine = [s for s in screens if k in proves.get(id(s), set())
+                or str(s.get('group', '')).lower().startswith(GROUP.get(k, (k,)))]
+        return {s['platform'] for s in mine} | {'Android' for s in mine for v in s.get('versions', []) if v.get('android')}
     for k in spec['concepts']:
         c = m['c'].get(k, {})
+        shots = shots_of(k)
         for app in c.get('apps', []):
             for pl in PLAT_OF.get(app, []):
                 name = f"{c['name']} · {pl}"

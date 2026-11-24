@@ -708,7 +708,8 @@ function renderCompareSwitch(s) {
     const on = !picked || picked.has(p);
     b.setAttribute("aria-pressed", String(on));
     b.onclick = () => {
-      const next = new Set(picked || names);
+      // Only this step's platforms count: a platform kept from another step is not a choice here.
+      const next = new Set(picked ? names.filter((n) => picked.has(n)) : names);
       if (on && next.size > 1) next.delete(p); else next.add(p);
       setPicked(next.size === names.length ? null : next);
     };
@@ -1416,10 +1417,11 @@ function badge(x, y, n, fill, txt) {
   return svgEl("g", { class: "badge" }, svgEl("circle", { cx: x, cy: y, r: 9, fill }) + svgEl("text", { x, y: y + 3.6, "text-anchor": "middle" }, txt || String(n)));
 }
 function conceptOfScreen(s) {
-  const gr = String(s.group || "").toLowerCase();
-  if (gr.startsWith("notes")) return "notes";
-  if (gr.startsWith("vault")) return "vault";
-  return "writing";
+  // The graph names each concept's screens (by platform); a screen in none belongs to no concept.
+  for (const l of change.graph?.platforms || []) {
+    for (const [k, ids] of Object.entries(l.by || {})) if (ids.includes(s.id)) return k;
+  }
+  return null;
 }
 function callCard(c) {
   const d = decided[c.id];
