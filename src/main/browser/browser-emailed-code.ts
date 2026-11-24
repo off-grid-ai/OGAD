@@ -175,8 +175,10 @@ export async function fillEmailedCode(
   const readMail = options.readMail ?? readCodeMail
   if (!options.readMail && !hasCodeMailbox()) return { kind: 'no_mailbox' }
   const deadline = Date.now() + (options.waitMs ?? waitBudgetMs())
-  const pollMs = options.pollMs ?? 5_000
+  const pollMs = options.pollMs ?? 3_000
   options.onWaiting?.(site)
+  // Code emails land in a second or two: the first read waits that long, then every few seconds.
+  await sleep(Math.min(pollMs, 2_000), options.signal)
   for (;;) {
     if (contents.isDestroyed() || contents.getURL() !== pageUrl) return { kind: 'left_page' }
     const decision = pickEmailedCode(
