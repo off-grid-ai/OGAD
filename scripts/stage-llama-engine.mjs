@@ -169,9 +169,11 @@ if (platform === 'linux') {
   copyMatching(contentRoot(cudartUnpacked), runtimeDir, () => true)
 }
 
+// The pinned build's floor (scripts/engine-floors.mjs); another --ref has none.
+const minApp = values.ref === PINS.llama.ref ? PINS.llama.minApp : undefined
 const smokeTest = platform === 'win32' ? 'llama-cuda/llama-server.exe' : 'llama-cuda/llama-server'
 fs.writeFileSync(
   path.join(out, 'engine.json'),
-  `${JSON.stringify({ id: 'llama-cuda', version: ref, smokeTest }, null, 2)}\n`
+  `${JSON.stringify({ id: 'llama-cuda', version: ref, ...(minApp ? { minApp } : {}), smokeTest }, null, 2)}\n`
 )
 console.log(`staged llama-cuda ${ref} for ${platform} in ${out}`)
