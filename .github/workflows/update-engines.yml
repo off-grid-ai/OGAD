@@ -36,6 +36,10 @@ on:
         description: llama.cpp build gap; empty uses ENGINE_UPDATE_LLAMA_MIN_BUILDS
         type: string
         default: ''
+      channel:
+        description: on-merge or nightly for this run; empty uses ENGINE_UPDATE_CHANNEL
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -156,7 +160,7 @@ jobs:
   # nightly: publish to every app now, then move main's pins forward.
   publish:
     needs: [check, pin-packs]
-    if: vars.ENGINE_UPDATE_CHANNEL == 'nightly'
+    if: (inputs.channel || vars.ENGINE_UPDATE_CHANNEL) == 'nightly'
     uses: ./.github/workflows/publish-engine.yml
     with:
       ref: ${{ needs.check.outputs.branch }}
@@ -193,7 +197,7 @@ jobs:
   # on-merge: a person merges the PR; publish-engine.yml then runs from main.
   pull-request:
     needs: [check, pin-packs]
-    if: vars.ENGINE_UPDATE_CHANNEL != 'nightly'
+    if: (inputs.channel || vars.ENGINE_UPDATE_CHANNEL) != 'nightly'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
