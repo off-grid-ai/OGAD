@@ -136,10 +136,7 @@ export function isLocalModelServer(remote: RemoteTextModelConnection): boolean {
 
 /** Whether llama.cpp renders a thinking-on prompt that ends inside an open <think> block. Asked of
  *  the server (/apply-template), so it holds for any template that does this, whatever its family. */
-async function promptOpensThinking(
-  remote: RemoteTextModelConnection,
-  reasoningEffort: boolean
-): Promise<boolean> {
+async function promptOpensThinking(remote: RemoteTextModelConnection): Promise<boolean> {
   try {
     const response = await fetch(`${remote.endpoint.replace(/\/v1\/?$/i, '')}/apply-template`, {
       method: 'POST',
@@ -150,8 +147,7 @@ async function promptOpensThinking(
       body: JSON.stringify({
         model: remote.model,
         messages: [{ role: 'user', content: 'Hi' }],
-        chat_template_kwargs: { enable_thinking: true },
-        ...(reasoningEffort ? { reasoning_effort: 'high' } : {})
+        chat_template_kwargs: { enable_thinking: true }
       }),
       signal: AbortSignal.timeout(5_000)
     })
@@ -218,7 +214,7 @@ export async function remoteReasoningCapability(
         control: detectThinkingDialect(body.chat_template),
         tokenBudget: true,
         reasoningEffort,
-        thinkingOpensInPrompt: await promptOpensThinking(remote, reasoningEffort)
+        thinkingOpensInPrompt: await promptOpensThinking(remote)
       }
     }
     // A server error is not an answer. An Off Grid gateway answers 502 until its model loads;
@@ -380,9 +376,11 @@ export function remoteReasoningFields(
   // llama.cpp's own controls: it reads enable_thinking itself, maps the standard reasoning_effort
   // into whichever variable the template uses ("none" switches thinking off), and caps whatever
   // thinking it finds with the budget. Templates with no switch at all (Flint) still get the cap.
+  // Thinking on sends no effort: each template names its own levels (Bonsai 2.5 refuses "high" and
+  // accepts only xhigh, medium and low), and enable_thinking already turns it on at the template's default.
   const llamaCpp = (on: boolean): Record<string, unknown> => ({
     chat_template_kwargs: { enable_thinking: on },
-    ...(capability.reasoningEffort ? { reasoning_effort: on ? 'high' : 'none' } : {}),
+    ...(capability.reasoningEffort && !on ? { reasoning_effort: 'none' } : {}),
     ...(on && budget > 0 ? { reasoning_budget_tokens: budget } : {})
   })
   return thinking === undefined
