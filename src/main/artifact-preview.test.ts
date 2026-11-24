@@ -34,9 +34,14 @@ describe('renderer content security policy', () => {
     }
   })
 
-  it('limits artifact network access to the exact package runtime host', () => {
+  it('limits artifact network access to the package runtime and the public script CDNs', () => {
     expect(ARTIFACT_CONTENT_SECURITY_POLICY).toContain("default-src 'none'")
-    expect(ARTIFACT_CONTENT_SECURITY_POLICY).toContain('https://esm.sh')
+    for (const host of ['esm.sh', 'cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'unpkg.com']) {
+      const scripts = ARTIFACT_CONTENT_SECURITY_POLICY.split('; ').find((d) =>
+        d.startsWith('script-src')
+      )
+      expect(scripts).toContain('https://' + host)
+    }
     expect(ARTIFACT_CONTENT_SECURITY_POLICY).toContain('img-src data: blob: ogcapture:')
     expect(ARTIFACT_CONTENT_SECURITY_POLICY).not.toContain('*')
   })

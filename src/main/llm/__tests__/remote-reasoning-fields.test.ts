@@ -30,11 +30,10 @@ describe('remoteReasoningFields', () => {
     expect(remoteReasoningFields(true, 512, { control: 'none' })).toEqual({})
   })
 
-  it("uses llama.cpp's standard reasoning_effort when the template reads it", () => {
+  it("turns thinking off with llama.cpp's reasoning_effort, and leaves the effort level to the template", () => {
     const capability = { control: 'none' as const, tokenBudget: true, reasoningEffort: true }
     expect(remoteReasoningFields(true, 512, capability)).toEqual({
       chat_template_kwargs: { enable_thinking: true },
-      reasoning_effort: 'high',
       reasoning_budget_tokens: 512
     })
     expect(remoteReasoningFields(false, 512, capability)).toEqual({

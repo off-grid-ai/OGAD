@@ -196,10 +196,8 @@ describe('remote Computer Use sampling transport', () => {
       options: { timeoutMs: 5_000 }
     })
 
-    expect(seen[0]).toMatchObject({
-      reasoning_effort: 'high',
-      chat_template_kwargs: { enable_thinking: true }
-    })
+    expect(seen[0]).toMatchObject({ chat_template_kwargs: { enable_thinking: true } })
+    expect(seen[0]).not.toHaveProperty('reasoning_effort')
     expect(reasoning.join('')).toBe('The user asks about primes.')
     expect(result.content).toBe('There are 10.')
   })

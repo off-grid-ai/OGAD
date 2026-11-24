@@ -5,13 +5,18 @@ const PREVIEW_HOST = 'preview'
 export const MAX_ARTIFACT_PREVIEW_BYTES = 8 * 1024 * 1024
 export const MAX_ARTIFACT_PREVIEWS_PER_OWNER = 8
 
+// Models write artifacts that load libraries (Three.js, D3, Chart.js) from the public CDNs, not
+// only esm.sh. The frame stays sandboxed (scripts only, no same-origin), so these hosts add no access.
+const ARTIFACT_SCRIPT_HOSTS =
+  'https://esm.sh https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com'
+
 export const ARTIFACT_CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
-  "script-src 'unsafe-inline' 'unsafe-eval' blob: https://esm.sh",
+  `script-src 'unsafe-inline' 'unsafe-eval' blob: ${ARTIFACT_SCRIPT_HOSTS}`,
   "style-src 'unsafe-inline'",
   'img-src data: blob: ogcapture:',
   'font-src data:',
-  'connect-src https://esm.sh'
+  `connect-src ${ARTIFACT_SCRIPT_HOSTS}`
 ].join('; ')
 
 interface ArtifactPreviewDocument {

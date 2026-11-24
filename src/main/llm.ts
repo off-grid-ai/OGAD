@@ -1599,10 +1599,10 @@ export class LLMService {
       this.mmProjPath = ''
     }
 
-    // Bonsai 2's packed ternary weights require PrismML's llama.cpp fork. Never
+    // Bonsai 2 and 2.5's packed ternary weights require PrismML's llama.cpp fork. Never
     // fall through to the stock server: it may accept a Q2_0 pack but produce
     // incorrect output without the fork's Hadamard activation runtime.
-    const requiresPrism = /^Ternary-Bonsai-2-\d+B-(?!mmproj).+\.gguf$/i.test(
+    const requiresPrism = /^Ternary-Bonsai-2(?:\.\d+)?-\d+B-(?!mmproj).+\.gguf$/i.test(
       path.basename(this.modelPath)
     )
     // Try CUDA on NVIDIA, Vulkan on other GPUs, then the CPU-only engine.
