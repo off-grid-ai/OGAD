@@ -228,7 +228,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
         <div className="flex w-full items-center justify-between gap-6">
           <p className="hidden items-center gap-2 text-xs text-muted-foreground md:flex">
             <LockSimpleIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            Your chats and files stay on your {deviceNoun()}.
+            Local models run on your {deviceNoun()}.
           </p>
           {/* A quiet progress line: thin segments, one gliding emerald pill, the step's name below. */}
           <div
