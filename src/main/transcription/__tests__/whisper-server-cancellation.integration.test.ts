@@ -9,6 +9,7 @@ import { WhisperServerTranscription } from '../whisper-server-transcription'
 const previousBinDir = process.env.OFFGRID_BIN_DIR
 const previousTrace = process.env.OFFGRID_WHISPER_TEST_TRACE
 const previousState = process.env.OFFGRID_WHISPER_TEST_STATE
+const previousDataDir = process.env.OFFGRID_DATA_DIR
 
 async function availablePort(): Promise<number> {
   const server = net.createServer()
@@ -73,6 +74,8 @@ server.listen(port, '127.0.0.1')
   process.env.OFFGRID_BIN_DIR = binDir
   process.env.OFFGRID_WHISPER_TEST_TRACE = trace
   process.env.OFFGRID_WHISPER_TEST_STATE = state
+  // Backend preferences read settings; keep them in this test's folder, never the real database.
+  process.env.OFFGRID_DATA_DIR = path.join(root, 'data')
   return { trace, state }
 }
 
@@ -95,6 +98,8 @@ afterEach(() => {
   else process.env.OFFGRID_WHISPER_TEST_TRACE = previousTrace
   if (previousState === undefined) delete process.env.OFFGRID_WHISPER_TEST_STATE
   else process.env.OFFGRID_WHISPER_TEST_STATE = previousState
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
 })
 
 describe('resident Whisper request cancellation', () => {
