@@ -69,6 +69,16 @@ describe('engine floors', () => {
     expect(publishedLlama(pins)).not.toHaveProperty('minAppVersion')
   })
 
+  it('does not count a test file as app code', () => {
+    const { floors } = applyEngineFloors({
+      basePins,
+      headPins,
+      changedFiles: ['resources/engine-pins.json', 'src/shared/__tests__/engine-floors.test.ts'],
+      appVersion: '0.0.70'
+    })
+    expect(floors).toEqual({})
+  })
+
   it('keeps an existing floor through a later pins-only bump', () => {
     const floored = { ...headPins, llama: { ...headPins.llama, minApp: '0.0.70' } }
     const next = { ...floored, llama: { ...floored.llama, ref: 'b300' } }

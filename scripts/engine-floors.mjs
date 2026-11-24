@@ -24,7 +24,11 @@ export const UPDATABLE_ENGINES = ['llama', 'prism', 'sd', 'whisper']
 /** Paths whose change means an engine moving in the same diff may need this app version. */
 const APP_CODE = [/^src\//, /^native\//, /^pro$/]
 
-export const isAppCode = (file) => APP_CODE.some((pattern) => pattern.test(file))
+/** Tests ship in no app, so they never floor an engine. */
+const TESTS = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/
+
+export const isAppCode = (file) =>
+  !TESTS.test(file) && APP_CODE.some((pattern) => pattern.test(file))
 
 /**
  * The pins with a floor on every engine whose ref moved alongside app code.
