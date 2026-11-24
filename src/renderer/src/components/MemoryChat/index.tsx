@@ -3877,8 +3877,12 @@ export function MemoryChat({
     }
     lastFollowedContentRef.current = followedContent
     // Every new artifact document reloads the preview frame, so re-reading while the reply streams
-    // made the canvas flicker. The canvas keeps what it shows and renders the finished artifact once.
-    if (followedStreaming) return
+    // made the canvas flicker. The canvas shows the artifact it opened with (never one rendered for
+    // an earlier message) and renders the finished artifact once.
+    if (followedStreaming) {
+      setLiveCanvasArtifact(null)
+      return
+    }
     setLiveCanvasArtifact(parseArtifact(followedContent))
   }, [canvasMessageId, followedContent, followedStreaming])
   const shownCanvasArtifact = liveCanvasArtifact ?? canvasArtifact
