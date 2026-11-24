@@ -57,8 +57,16 @@ on:
         type: string
         required: false
         default: ''
+      store_build:
+        # The release run's number. The Microsoft Store wants a plain a.b.c.0 that only ever grows,
+        # beta or stable, so the MSIX takes <major>.<minor>.<run> (0.0.159.0). The app inside keeps
+        # its own version. Empty = the tag's own number (a stable tag only).
+        description: 'Release run number for the MSIX version (empty = the tag version)'
+        type: string
+        required: false
+        default: ''
       snap_channel:
-        description: 'Snap Store channel for that release'
+        description: 'Store channel for that release (Snap channel; beta = the Microsoft Store beta flight)'
         type: choice
         required: false
         default: stable
@@ -435,6 +443,8 @@ jobs:
   package-msix:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.snap_release_tag != '' }}
     runs-on: windows-2022
+    env:
+      HAS_MS_STORE_API: ${{ secrets.MS_STORE_CLIENT_SECRET != '' && secrets.MS_STORE_PRODUCT_ID != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -443,12 +453,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.snap_release_tag }}
+          STORE_BUILD: ${{ inputs.store_build }}
         run: |
           version="${TAG#v}"
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "off-grid-ai-${version}-x64.nsis.7z" -O payload.7z
           7z x payload.7z -oapp -y > /dev/null
           test -f app/off-grid-ai.exe
-          npm pkg set version="$version"
+          if [ -n "$STORE_BUILD" ]; then
+            IFS=. read -r major minor _ <<< "${version%%-*}"
+            npm pkg set version="${major}.${minor}.${STORE_BUILD}"
+          else
+            npm pkg set version="$version"
+          fi
 
       - name: Package Microsoft Store MSIX
         shell: bash
@@ -467,3 +483,32 @@ jobs:
           path: dist/*.appx
           if-no-files-found: error
           compression-level: 0
+
+      # Partner Center submission: beta goes to the beta package flight, stable to the public listing.
+      # Lights up once the Store API secrets exist (MS_STORE_TENANT_ID, MS_STORE_CLIENT_ID,
+      # MS_STORE_CLIENT_SECRET, MS_STORE_SELLER_ID, MS_STORE_PRODUCT_ID, MS_STORE_BETA_FLIGHT_ID).
+      - name: Set up the Microsoft Store CLI
+        if: ${{ env.HAS_MS_STORE_API == 'true' }}
+        uses: microsoft/setup-msstore-cli@v1
+
+      - name: Submit to the Microsoft Store
+        if: ${{ env.HAS_MS_STORE_API == 'true' }}
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.snap_channel }}
+          MS_STORE_TENANT_ID: ${{ secrets.MS_STORE_TENANT_ID }}
+          MS_STORE_CLIENT_ID: ${{ secrets.MS_STORE_CLIENT_ID }}
+          MS_STORE_CLIENT_SECRET: ${{ secrets.MS_STORE_CLIENT_SECRET }}
+          MS_STORE_SELLER_ID: ${{ secrets.MS_STORE_SELLER_ID }}
+          MS_STORE_PRODUCT_ID: ${{ secrets.MS_STORE_PRODUCT_ID }}
+          MS_STORE_BETA_FLIGHT_ID: ${{ secrets.MS_STORE_BETA_FLIGHT_ID }}
+        run: |
+          msstore reconfigure --tenantId "$MS_STORE_TENANT_ID" --sellerId "$MS_STORE_SELLER_ID" \
+            --clientId "$MS_STORE_CLIENT_ID" --clientSecret "$MS_STORE_CLIENT_SECRET"
+          pkg=$(ls dist/*.appx | head -1)
+          if [ "$CHANNEL" = stable ]; then
+            msstore publish "$pkg" -id "$MS_STORE_PRODUCT_ID" -v
+          else
+            [ -n "$MS_STORE_BETA_FLIGHT_ID" ] || { echo "::warning::No MS_STORE_BETA_FLIGHT_ID: the beta MSIX stays an artifact."; exit 0; }
+            msstore publish "$pkg" -id "$MS_STORE_PRODUCT_ID" -f "$MS_STORE_BETA_FLIGHT_ID" -v
+          fi
