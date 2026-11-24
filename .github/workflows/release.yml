@@ -935,6 +935,27 @@ jobs:
           echo 'The SHA-256 checksums are attached to the versioned release as linux-packages.sha256.' >> "$GITHUB_STEP_SUMMARY"
 
   # Announce only when all three installers have built and published successfully.
+  # Every release reaches the stores too, on the matching channel: beta → the Snap Store beta
+  # channel and the Microsoft Store beta flight; stable → both stores' public listing. Branch
+  # Builds packages the snap and the MSIX from this release's own .deb and Windows payload.
+  stores:
+    needs: [version, build-mac, build-win, build-linux]
+    if: ${{ !inputs.artifact_only }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Package this release for the Snap Store and the Microsoft Store
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          CHANNEL: ${{ needs.version.outputs.channel }}
+        run: |
+          gh workflow run windows-build.yml -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+            -f platform=none -f snap_release_tag="v$VERSION" -f snap_channel="$CHANNEL" \
+            -f store_build="${{ github.run_number }}"
+
   announce:
     needs: [version, build-mac, build-win, build-linux]
     if: ${{ !inputs.artifact_only }}
