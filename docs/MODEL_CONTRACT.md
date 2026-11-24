@@ -249,6 +249,75 @@ repeat:
 user can take over at any time → same as takeover
 ```
 
+## Nested planning (contract v1, opt-in)
+
+Large jobs (rebook a cancelled flight, claim compensation, move the meeting, tell the team) are too long
+for one flat plan from a small model. With nested planning on (`runAgentLoop` input `nested`, off by
+default), the planner splits the job into units and sub-goals, and each sub-goal is planned again when
+it is reached.
+
+- **Unit:** a normal plan step. About 5 actions on one site, ending in something visible (the check).
+- **Sub-goal:** a step written `<n> goal: <sub-goal> | check: <visible condition>`. The planner writes
+  one for a part of the goal bigger than about 8 units.
+- **Levels:** the task is level 0. Default 3 levels (task, sub-goals, their sub-goals). The last level
+  is not offered sub-goals.
+
+### Requests
+
+Three optional lines follow `GOAL:`. A flat task has none of them, so flat requests are byte-identical
+with v0 and with the training rows.
+
+```
+GOAL: <this level's goal>
+WITHIN: <task goal> > <parent sub-goal>     # the goals above this one, outermost first
+NOTES:                                      # facts finished sub-goals found, newest last (max 12)
+- <sub-goal>: <its success text>
+SUBGOALS: allowed                           # planner only: may write goal: steps at this level
+```
+
+`WITHIN` and `NOTES` go to the planner, actor and evaluator. `SUBGOALS` goes to the planner only.
+
+A nested re-plan keeps `REASON` even at step 1: `DONE:` is then `(none)`. Otherwise a failed first
+sub-goal would be planned again with no reason. Flat re-plans keep the v0 shape.
+
+### Loop
+
+```
+continue(n) on a goal: step → run that sub-goal as its own level:
+  planner(GOAL=sub-goal, WITHIN, NOTES) → its plan; its evaluator judges its steps
+  success("text") → NOTES += "<sub-goal>: text"; parent PAST/LAST "goal: <sub-goal> -> done";
+                    parent evaluator judges next
+  fail / stopped  → parent re-plans: REASON "sub-goal failed: <sub-goal>: <why>"
+every level shares one action budget; user take-over works at any level
+the answer (answer request, answer-backed check) is written only at level 0
+```
+
+### Evaluator inside a sub-goal
+
+`success("...")` means this part is done. The text carries the facts later parts need: ids, amounts,
+dates, names (`new booking QRT789, departs 12:10`). That text is the note.
+
+### Example
+
+```
+GOAL: My flight QRT456 was cancelled. Rebook me, claim compensation, move my Paris meeting and tell Priya.
+SUBGOALS: allowed
+```
+```
+1 goal: Rebook QRT456 on the earliest nonstop | check: text "Confirmed"
+2 goal: Claim EU261 compensation for QRT456 | check: text "CL-"
+3 goal: Move the Paris client meeting to fit the new flight | check: text "Paris client meeting"
+4 Email Priya the new flight and claim number | check: text "Message sent"
+```
+Step 1 then runs as its own level:
+```
+GOAL: Rebook QRT456 on the earliest nonstop
+WITHIN: My flight QRT456 was cancelled. Rebook me, claim compensation, move my Paris meeting and tell Priya.
+AX: ...
+```
+Its evaluator ends with `success("rebooked QRT456 on AA210, departs 12:10, ref QRT789")`, and every
+later request carries `NOTES: - Rebook QRT456 on the earliest nonstop: rebooked ... ref QRT789`.
+
 ## On-screen AX (contract v1, candidate)
 
 Contract v0 cuts AX at 18,000 characters. Contract v1 shows what the screenshot shows, so AX and

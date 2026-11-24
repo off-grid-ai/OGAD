@@ -9,6 +9,7 @@ export interface BenchRecord {
   url: string
   steps: Record<string, unknown>[]
   timings: { planner: number[]; actor: number[]; evaluator: number[]; answerer: number[] }
+  /** The task's own plan; sub-goal plans and results are in steps (nested planning). */
   plan?: string[]
   finalPage?: string
   end?: string
