@@ -90,7 +90,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }} # raises the GitHub API rate limit
         # Also fetches the base Vulkan and CPU engines and a llama-cuda build; the pack job ignores
         # those and stages llama-cuda and cuda-runtime itself.
-        run: ./scripts/fetch-win-binaries.ps1
+        run: ./scripts/fetch-win-binaries.ps1 -EnginesOnly
       - name: Build Kev server runtime (model weights excluded)
         shell: pwsh
         run: |

@@ -177,7 +177,7 @@ jobs:
           foreach ($name in 'llama', 'llama-cpu', 'llama-prism', 'llama-prism-cpu', 'sd', 'sd-cpu', 'whisper', 'whisper-cpu') {
             Remove-Item -Recurse -Force (Join-Path 'resources/bin' $name) -ErrorAction SilentlyContinue
           }
-          ./scripts/fetch-win-binaries.ps1
+          ./scripts/fetch-win-binaries.ps1 -EnginesOnly
       - name: Publish
         shell: pwsh
         env:

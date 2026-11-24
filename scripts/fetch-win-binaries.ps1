@@ -26,6 +26,9 @@
 # that reject the tool-call GBNF the app generates from MCP tool schemas.
 # Set OFFGRID_GH_TOKEN (or GITHUB_TOKEN) to avoid the unauthenticated API rate
 # limit (CI sets GITHUB_TOKEN automatically).
+# -EnginesOnly skips the app's node addons (onnxruntime-node): engine and CUDA-pack publishing
+# stage engines only and run without npm ci.
+param([switch]$EnginesOnly)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'  # makes Invoke-WebRequest downloads fast
@@ -255,8 +258,10 @@ $onnxBindings = @(
   (Join-Path $PSScriptRoot '..\node_modules\onnxruntime-node\bin\napi-v6\win32\x64'),
   (Join-Path $PSScriptRoot '..\node_modules\@huggingface\transformers\node_modules\onnxruntime-node\bin\napi-v6\win32\x64')
 ) | Where-Object { Test-Path -LiteralPath $_ }
-if (-not $onnxBindings) { throw 'onnxruntime-node win32/x64 binding folder not found: run npm ci first' }
-$onnxBindings | ForEach-Object { Copy-VCRuntime ([System.IO.Path]::GetFullPath($_)) }
+if (-not $EnginesOnly) {
+  if (-not $onnxBindings) { throw 'onnxruntime-node win32/x64 binding folder not found: run npm ci first' }
+  $onnxBindings | ForEach-Object { Copy-VCRuntime ([System.IO.Path]::GetFullPath($_)) }
+}
 
 Write-Host 'resources/bin now contains (win64):'
 Get-ChildItem -Path $bin -Recurse -Include *.exe |
