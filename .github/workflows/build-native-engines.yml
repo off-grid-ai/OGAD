@@ -47,6 +47,8 @@ jobs:
       sd_cuda: ${{ steps.plan.outputs.sd_cuda }}
       whisper: ${{ steps.plan.outputs.whisper }}
       hold_sd: ${{ steps.sd-patches.outputs.hold }}
+      base: ${{ steps.base.outputs.base }}
+      base_sha: ${{ steps.base.outputs.sha }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -67,6 +69,15 @@ jobs:
             *"-$(pin whisper.ref)-"*) echo whisper=false ;; *) echo whisper=true ;;
           esac >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
+      # The base branch's commit as the builds start: a held engine's pin goes back to this one,
+      # so a base that moves during the builds never relabels the archive it shipped from.
+      - id: base
+        name: Record the base branch's commit
+        env:
+          BASE: ${{ vars.ENGINE_UPDATE_BASE || github.event.repository.default_branch || 'main' }}
+        run: |
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git ls-remote origin "refs/heads/$BASE" | cut -f1)" >> "$GITHUB_OUTPUT"
       # The same pinned source and patches every stable-diffusion.cpp build uses; when they no longer
       # fit, sd is held on every platform at once instead of failing three builds.
       - id: sd-patches
@@ -452,24 +463,30 @@ jobs:
       # to, so a held engine there stops the publish rather than pin a version nobody built.
       - name: Put held engines back on the base branch's pins
         env:
-          BASE: ${{ github.event.repository.default_branch || 'main' }}
+          BASE: ${{ needs.plan.outputs.base }}
+          BASE_SHA: ${{ needs.plan.outputs.base_sha }}
+          REF: ${{ needs.plan.outputs.ref }}
         run: |
           held=$(echo $HELD | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
           [ -n "$held" ] || exit 0
-          git fetch --depth 1 origin "$BASE"
-          git show "origin/$BASE:resources/engine-pins.json" > "$RUNNER_TEMP/base-pins.json"
+          git fetch --depth 1 origin "$BASE_SHA"
+          git show "$BASE_SHA:resources/engine-pins.json" > "$RUNNER_TEMP/base-pins.json"
           node -e '
             const fs = require("fs"); const file = "resources/engine-pins.json";
             const pins = JSON.parse(fs.readFileSync(file, "utf8"));
             const base = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            const branch = (ref) => ref.replace(/^refs\/heads\//, "");
+            const onBase = branch(process.argv[3]) === branch(process.argv[4]);
             for (const engine of process.argv[2].split(" ")) {
+              // Already on the base pin: nothing to put back, except on the base branch itself.
               if (JSON.stringify(pins[engine]) === JSON.stringify(base[engine])) {
+                if (!onBase) continue;
                 console.error(`${engine} did not build and is already on the base pin`); process.exit(1);
               }
               pins[engine] = base[engine];
             }
             fs.writeFileSync(file, JSON.stringify(pins, null, 2) + "\n");
-          ' "$RUNNER_TEMP/base-pins.json" "$held"
+          ' "$RUNNER_TEMP/base-pins.json" "$held" "$REF" "$BASE"
           echo "**Held on their current version (did not build):** $held" >> "$GITHUB_STEP_SUMMARY"
           echo "::warning::Held on their current version: $held"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
