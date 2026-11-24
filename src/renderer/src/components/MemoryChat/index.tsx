@@ -3860,24 +3860,15 @@ export function MemoryChat({
   const followedContent = followedArtifactMessage?.content ?? null
   const followedStreaming = Boolean(followedArtifactMessage?.streaming)
   const [liveCanvasArtifact, setLiveCanvasArtifact] = useState<Artifact | null>(null)
-  const lastCanvasReadRef = useRef(0)
   useEffect(() => {
     if (followedContent === null) {
       setLiveCanvasArtifact(null)
       return
     }
-    const read = (): void => {
-      lastCanvasReadRef.current = Date.now()
-      setLiveCanvasArtifact(parseArtifact(followedContent))
-    }
-    const wait = followedStreaming ? 500 - (Date.now() - lastCanvasReadRef.current) : 0
-    if (wait <= 0) {
-      read()
-      return
-    }
-    // A throttle, not a debounce: a new token reschedules for the same moment, never later.
-    const timer = window.setTimeout(read, wait)
-    return () => window.clearTimeout(timer)
+    // Every new artifact document reloads the preview frame, so re-reading while the reply streams
+    // made the canvas flicker. The canvas keeps what it shows and renders the finished artifact once.
+    if (followedStreaming) return
+    setLiveCanvasArtifact(parseArtifact(followedContent))
   }, [followedContent, followedStreaming])
   const shownCanvasArtifact = liveCanvasArtifact ?? canvasArtifact
 
