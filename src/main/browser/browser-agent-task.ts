@@ -191,7 +191,7 @@ async function runAgentTask(input: BrowserAgentTaskInput): Promise<BrowserPlaywr
         }
       : undefined
   const result = await runAgentLoop<Buffer>(
-    { goal: input.goal },
+    { goal: input.goal, ...(input.models.nestedPlanning ? { nested: {} } : {}) },
     {
       observe,
       ...(pageView ? { pageView } : {}),
@@ -238,10 +238,38 @@ async function runAgentTask(input: BrowserAgentTaskInput): Promise<BrowserPlaywr
         return userSaid()
       },
       onEvent: (event) => {
-        if (event.type === 'plan') {
+        if (event.type === 'plan' && event.depth) {
+          // A sub-goal's plan: traced; the stages on screen stay the task's own plan.
+          console.log('[web-use][agent] sub-plan', {
+            depth: event.depth,
+            steps: event.plan.length,
+            current: event.current
+          })
+          benchTrace.current?.steps.push({
+            depth: event.depth,
+            plan: event.plan.map((s) => s.title),
+            current: event.current
+          })
+        } else if (event.type === 'plan') {
           console.log('[web-use][agent] plan', { steps: event.plan.length, current: event.current })
           if (benchTrace.current) benchTrace.current.plan = event.plan.map((s) => s.title)
           showPlan(event.plan, event.current)
+        } else if (event.type === 'subgoal') {
+          console.log('[web-use][agent] sub-goal', {
+            depth: event.depth,
+            outcome: event.result?.outcome ?? 'start'
+          })
+          benchTrace.current?.steps.push(
+            event.result
+              ? {
+                  depth: event.depth,
+                  subgoal: event.goal,
+                  outcome: event.result.outcome,
+                  summary: event.result.summary
+                }
+              : { depth: event.depth, subgoal: event.goal }
+          )
+          if (!event.result) input.onStep(event.goal)
         } else if (event.type === 'verdict') {
           console.log('[web-use][agent] verdict', { kind: event.verdict.kind })
           benchTrace.current?.steps.push({ verdict: event.verdict })
