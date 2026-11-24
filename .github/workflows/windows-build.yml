@@ -505,9 +505,10 @@ jobs:
         run: |
           msstore reconfigure --tenantId "$MS_STORE_TENANT_ID" --sellerId "$MS_STORE_SELLER_ID" \
             --clientId "$MS_STORE_CLIENT_ID" --clientSecret "$MS_STORE_CLIENT_SECRET"
+          # The package goes in with -i: given as the path, msstore looks for a project to build and stops.
           pkg=$(ls dist/*.appx | head -1)
           if [ "$CHANNEL" = stable ]; then
-            msstore publish "$pkg" -id "$MS_STORE_PRODUCT_ID" -v
+            msstore publish . -i "$pkg" -id "$MS_STORE_PRODUCT_ID" -v
           else
             flight="$MS_STORE_BETA_FLIGHT_ID"
             if [ -z "$flight" ]; then
@@ -521,5 +522,5 @@ jobs:
                 | jq -r '.value[] | select(.friendlyName == "Beta") | .flightId' | head -1)
             fi
             [ -n "$flight" ] || { echo "::warning::No package flight named Beta: the beta MSIX stays an artifact."; exit 0; }
-            msstore publish "$pkg" -id "$MS_STORE_PRODUCT_ID" -f "$flight" -v
+            msstore publish . -i "$pkg" -id "$MS_STORE_PRODUCT_ID" -f "$flight" -v
           fi
