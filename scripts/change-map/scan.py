@@ -17,6 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = str(HERE.parents[2])
+REPO_APP = {'browser-extension': 'extension', 'desktop/pro': 'desktop-pro', 'mobile/pro': 'mobile-pro'}
 REPOS = ['shared', 'desktop', 'desktop/pro', 'mobile', 'mobile/pro', 'browser-extension', 'website', 'executorch-speech']
 
 CONCEPTS = {
@@ -57,11 +58,12 @@ NARROW = {'share': (['mobile'], 'the mark says "on my phone"; desktop and the ex
           'models': (['desktop', 'mobile'], 'the extension runs on the computer app\'s models')}
 
 def expected(k, kind, feats):
+    # A narrowing written down here wins, for a feature too.
+    if k in NARROW:
+        return NARROW[k][0]
     if kind == 'feature' and k in feats:
         pl = feats[k].get('platforms', {})
         return [a for a in PRODUCTS if pl.get(a, 'no') != 'no']
-    if k in NARROW:
-        return NARROW[k][0]
     return [a for a in PRODUCTS if any(f.get('platforms', {}).get(a, 'no') != 'no' for f in feats.values())] or PRODUCTS
 
 SKIP = re.compile(r'(^|/)(docs|outputs|\.artifacts|node_modules|dist|coverage|generated|\.github|scripts|fastlane|patches|vendor|Pods|\.vscode|test-results|marketing|demo-gifs|resources|preview-ui|tools|_includes|_layouts)(/|$)|\.(png|jpe?g|gif|webp|svg|mp4|mov|ttf|otf|woff2?|lock|ico|icns|car|mp3|wav|pdf|zip|bin|onnx|txt|md)$|package(-lock)?\.json$|tsconfig|eslint|vite|vitest|playwright|knip|jest|babel|metro')
@@ -125,9 +127,12 @@ def build(root):
     cells = defaultdict(lambda: defaultdict(list))
     file_concepts = {}
     rx = {k: re.compile(v[2]) for k, v in CONCEPTS.items()}
+    # Apps whose repo is not checked out: their coverage is unknown, not missing.
+    unavailable = set()
     for repo in REPOS:
         if not os.path.isdir(os.path.join(root, repo)):
             print(f'change-map: {repo} is not checked out; skipped', file=sys.stderr)
+            unavailable.add(REPO_APP.get(repo, repo))
             continue
         for p in ls(root, repo):
             c = classify(repo, p)
@@ -163,7 +168,8 @@ def build(root):
         apps = expected(k, kind, feats)
         has = lambda a: any(cs.get(f'{s}|{l}', {}).get('n') for s in (a, f'{a}-pro') for l in ('owner', 'engine', 'logic', 'view'))
         out['c'][k] = {'name': name, 'kind': kind, 'does': f.get('does', ''), 'group': f.get('group', 'infra'),
-                       'apps': apps, 'missing': [a for a in apps if not has(a)], 'cells': cs}
+                       'apps': apps, 'missing': [a for a in apps if a not in unavailable and not has(a)],
+                       'unknown': [a for a in apps if a in unavailable], 'cells': cs}
     return out
 
 SURF = [('shared', 'shared'), ('desktop', 'desktop'), ('desktop-pro', 'desktop/pro'), ('mobile', 'mobile'), ('mobile-pro', 'mobile/pro'), ('extension', 'extension'), ('website', 'website')]
@@ -231,7 +237,9 @@ def main():
     if a.list or not (a.plan or a.html or a.json):
         for k in sorted(m['c'], key=lambda k: -places(m, k)):
             gap = m['c'][k]['missing']
-            print(f"{k:10} {m['c'][k]['name']:20} {places(m, k)} places" + (f"  MISSING on {', '.join(gap)}" if gap else ''))
+            unk = m['c'][k].get('unknown', [])
+            print(f"{k:10} {m['c'][k]['name']:20} {places(m, k)} places" + (f"  MISSING on {', '.join(gap)}" if gap else '')
+                  + (f"  UNKNOWN on {', '.join(unk)} (not checked out)" if unk else ''))
     slim = {'c': {k: {**v, 'cells': {ck: {'n': cv['n'], 'f': cv['f']} for ck, cv in v['cells'].items()}} for k, v in m['c'].items()}, 'col': m['col']}
     if a.json: json.dump(slim, open(a.json, 'w'), indent=1)
     if a.html:

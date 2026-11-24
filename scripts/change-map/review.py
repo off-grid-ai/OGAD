@@ -85,7 +85,7 @@ def principle_calls(concepts):
 
 
 GROUP = {'writing': ('scribe', 'writing', 'in a web text box', 'editor'), 'notes': ('notes',), 'vault': ('vault',)}
-PLAT_OF = {'desktop': ['Mac'], 'desktop-pro': ['Mac'], 'mobile': ['iPhone', 'Android'], 'mobile-pro': ['iPhone', 'Android'],
+PLAT_OF = {'desktop': ['Mac', 'Windows', 'Linux'], 'desktop-pro': ['Mac', 'Windows', 'Linux'], 'mobile': ['iPhone', 'Android'], 'mobile-pro': ['iPhone', 'Android'],
            'extension': ['Chrome', 'Firefox'], 'shared': ['Mac', 'iPhone', 'Android', 'Chrome', 'Firefox']}
 LAYERS = ('owner', 'engine', 'logic', 'view', 'data', 'copy')
 
@@ -128,6 +128,10 @@ def graph(m, spec, screens, calls):
             places.append({'key': s, 'name': {'shared': 'Shared rules', 'desktop': 'Desktop', 'desktop-pro': 'Desktop Pro', 'mobile': 'Mobile',
                                               'mobile-pro': 'Mobile Pro', 'extension': 'Extension', 'website': 'Website'}[s],
                            'path': names[s], 'n': n, 'live': live.get(s)})
+    # Checkout (license-worker) is no scan surface, so its place comes from what its branch changes now.
+    if live.get('license-worker'):
+        places.append({'key': 'license-worker', 'name': 'Checkout', 'path': DIRS['license-worker'],
+                       'n': len(live['license-worker']['files']), 'live': live['license-worker']})
     plats = []
     for p in PLATFORMS:
         # An iPhone shot with an Android version proves Android too, as the coverage rows count it.
@@ -200,7 +204,9 @@ def main(spec_path, out):
     require = spec.get('require', {})
     def shot_on(e):
         keys = {e['key'], e['name'].lower()}
-        return {sc['platform'] for sc in screens if proves.get(id(sc), set()) & keys}
+        mine = [sc for sc in screens if proves.get(id(sc), set()) & keys]
+        # An iPhone shot with an Android version proves Android for that feature too.
+        return {sc['platform'] for sc in mine} | {'Android' for sc in mine for v in sc.get('versions', []) if v.get('android')}
     names = {'tech': 'Tech', 'design': 'Design', 'product': 'Product', 'business': 'Business', 'quality': 'Quality'}
 
     def current(f, c):
@@ -256,6 +262,9 @@ def main(spec_path, out):
         shots = shots_of(k)
         for app in c.get('apps', []):
             for pl in PLAT_OF.get(app, []):
+                # Windows and Linux are outside the release bar: checked only once the page has shots there.
+                if pl in ('Windows', 'Linux') and not any(s['platform'] == pl for s in screens):
+                    continue
                 name = f"{c['name']} · {pl}"
                 unbuilt = app in c.get('missing', [])
                 # Shots of today's screens never close a product that has nothing built yet.
