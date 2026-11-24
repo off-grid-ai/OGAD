@@ -57,7 +57,9 @@ export function findCodeField(
   pageText: string
 ): CodeField | null {
   const pageSaysSent = CODE_SENT.test(pageText)
-  const single = candidates.find((field) => field.maxLength !== 1 && isCodeInput(field, pageSaysSent))
+  const single = candidates.find(
+    (field) => field.maxLength !== 1 && isCodeInput(field, pageSaysSent)
+  )
   if (single) return { indexes: [single.index], filled: single.hasValue }
   // Split boxes: consecutive maxlength=1 inputs. Their hints are often empty, so the page text
   // (or a code word on any box) decides.
@@ -95,7 +97,8 @@ const BEFORE_WORD = new RegExp(
   'gi'
 )
 /** A line holding only the code, as most code emails print it. */
-const LINE_ONLY = /^[ \t>*_]*(\d{3}[ -]\d{3}|\d{4,8}|(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{4,8})[ \t*_.]*$/gm
+const LINE_ONLY =
+  /^[ \t>*_]*(\d{3}[ -]\d{3}|\d{4,8}|(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{4,8})[ \t*_.]*$/gm
 /** An email that is about a code at all. */
 const CODE_MAIL = new RegExp(CODE_WORD, 'i')
 
@@ -115,7 +118,7 @@ function isPlausible(code: string, context: 'word' | 'line'): boolean {
  * none when the email is not a code email; more than one is ambiguous.
  */
 export function extractOneTimeCodes(subject: string, text: string): string[] {
-  const body = `${subject}\n${text}`.replace(/\r/g, '').replace(/ /g, ' ')
+  const body = `${subject}\n${text}`.replace(/\r/g, '').replace(/\u00a0/g, ' ')
   if (!CODE_MAIL.test(body)) return []
   const found = new Set<string>()
   for (const pattern of [AFTER_WORD, BEFORE_WORD]) {
@@ -173,9 +176,7 @@ export interface CodeMail {
 }
 
 export type CodeDecision =
-  | { kind: 'code'; code: string }
-  | { kind: 'none' }
-  | { kind: 'conflict'; reason: string }
+  { kind: 'code'; code: string } | { kind: 'none' } | { kind: 'conflict'; reason: string }
 
 /** Two codes this close together cannot be told apart by which came last. */
 const SAME_MOMENT_MS = 15_000
@@ -190,13 +191,16 @@ export function pickEmailedCode(
   request: { pageUrl: string; requestedAt: number }
 ): CodeDecision {
   const coded = mail
-    .filter((m) => m.receivedAt >= request.requestedAt && senderMatchesSite(m.from, request.pageUrl))
+    .filter(
+      (m) => m.receivedAt >= request.requestedAt && senderMatchesSite(m.from, request.pageUrl)
+    )
     .map((m) => ({ mail: m, codes: extractOneTimeCodes(m.subject, m.text) }))
     .filter((m) => m.codes.length > 0)
     .sort((a, b) => b.mail.receivedAt - a.mail.receivedAt)
   const newest = coded[0]
   if (!newest) return { kind: 'none' }
-  if (newest.codes.length > 1) return { kind: 'conflict', reason: 'the email holds more than one code' }
+  if (newest.codes.length > 1)
+    return { kind: 'conflict', reason: 'the email holds more than one code' }
   const code = newest.codes[0]!
   const rival = coded.find(
     (m) =>

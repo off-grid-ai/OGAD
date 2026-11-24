@@ -37,16 +37,18 @@ describe('findCodeField', () => {
   it('takes a plain "code" field only when the page says a code was sent', () => {
     const fields = [input(0, { hint: 'code Code' })]
     expect(findCodeField(fields, 'Welcome back')).toBeNull()
-    expect(findCodeField(fields, 'We emailed a 6-digit code to a••••@example.com')?.indexes).toEqual(
-      [0]
-    )
+    expect(
+      findCodeField(fields, 'We emailed a 6-digit code to a••••@example.com')?.indexes
+    ).toEqual([0])
   })
 
   it('ignores promo, postal and card codes', () => {
     const page = 'We sent you a code'
     expect(findCodeField([input(0, { hint: 'promo Promo code' })], page)).toBeNull()
     expect(findCodeField([input(0, { hint: 'zip Postal code' })], page)).toBeNull()
-    expect(findCodeField([input(0, { autocomplete: 'cc-csc', hint: 'Security code' })], page)).toBeNull()
+    expect(
+      findCodeField([input(0, { autocomplete: 'cc-csc', hint: 'Security code' })], page)
+    ).toBeNull()
   })
 
   it('never treats a password field as a code field', () => {
@@ -61,17 +63,25 @@ describe('findCodeField', () => {
   })
 
   it('reports a field that already holds a value', () => {
-    expect(findCodeField([input(0, { autocomplete: 'one-time-code', hasValue: true })], '')?.filled).toBe(
-      true
-    )
+    expect(
+      findCodeField([input(0, { autocomplete: 'one-time-code', hasValue: true })], '')?.filled
+    ).toBe(true)
   })
 })
 
 describe('extractOneTimeCodes', () => {
   it.each([
-    ['Your Harbour Bank code', 'Your verification code is 482913. It expires in 10 minutes.', '482913'],
+    [
+      'Your Harbour Bank code',
+      'Your verification code is 482913. It expires in 10 minutes.',
+      '482913'
+    ],
     ['Sign in', 'Use code 482913 to sign in.', '482913'],
-    ['Atlantic Air', 'Your sign-in code:\n\n  731 044\n\nIf this was not you, ignore it.', '731044'],
+    [
+      'Atlantic Air',
+      'Your sign-in code:\n\n  731 044\n\nIf this was not you, ignore it.',
+      '731044'
+    ],
     ['482913 is your Harbour Bank verification code', '', '482913'],
     ['Security alert', 'Your one-time passcode for Harbour Bank is: 5521', '5521'],
     ['Confirm it is you', 'Enter this code below:\n\nK7Q2PX\n', 'K7Q2PX'],
@@ -91,10 +101,9 @@ describe('extractOneTimeCodes', () => {
   })
 
   it('returns both when one email holds two codes', () => {
-    expect(extractOneTimeCodes('Codes', 'Your code is 111111. Backup code: 222222').sort()).toEqual([
-      '111111',
-      '222222'
-    ])
+    expect(extractOneTimeCodes('Codes', 'Your code is 111111. Backup code: 222222').sort()).toEqual(
+      ['111111', '222222']
+    )
   })
 })
 
@@ -106,9 +115,9 @@ describe('sender matching', () => {
   })
 
   it('matches the page site by registrable domain', () => {
-    expect(senderMatchesSite('no-reply@offgrid-bank.test', 'https://offgrid-bank.test/verify')).toBe(
-      true
-    )
+    expect(
+      senderMatchesSite('no-reply@offgrid-bank.test', 'https://offgrid-bank.test/verify')
+    ).toBe(true)
     expect(senderMatchesSite('codes@mail.bank.co.uk', 'https://login.bank.co.uk/otp')).toBe(true)
   })
 

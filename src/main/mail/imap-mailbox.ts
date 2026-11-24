@@ -50,7 +50,10 @@ function accountFor(connectorId: number): ImapAccount {
   return { ...parseImapServer(server), user, pass }
 }
 
-async function withInbox<T>(account: ImapAccount, fn: (client: ImapFlow) => Promise<T>): Promise<T> {
+async function withInbox<T>(
+  account: ImapAccount,
+  fn: (client: ImapFlow) => Promise<T>
+): Promise<T> {
   const { ImapFlow } = await import('imapflow')
   const client = new ImapFlow({
     host: account.host,
@@ -130,7 +133,12 @@ export async function readImapCodeMail(
     fromDomain: query.domain,
     max: 20
   })
-  return messages.map(({ from, subject, text, receivedAt }) => ({ from, subject, text, receivedAt }))
+  return messages.map(({ from, subject, text, receivedAt }) => ({
+    from,
+    subject,
+    text,
+    receivedAt
+  }))
 }
 
 /** A snippet for the chat and memory: a one-time code inside it is masked. */
