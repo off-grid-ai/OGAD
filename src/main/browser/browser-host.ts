@@ -54,6 +54,7 @@ import { PERSONAL_BROWSER_PARTITION, prepareBrowserPartition } from './browser-p
 import { attachPageMenu } from './browser-page-input'
 import { browserShortcut, type BrowserShortcut } from './browser-shortcuts'
 import { fillVaultLogin, hasLoginForm, vaultStateFor } from './browser-vault-fill'
+import { emailedCodeNote, fillEmailedCode, readCodeField } from './browser-emailed-code'
 import { READ_PASSWORD_VALUES_SCRIPT, scrubSecretValues } from './browser-secret-scrub'
 import {
   sandboxAllows,
@@ -106,6 +107,9 @@ import {
   activeModelProjectionIdentity,
   getWebUseActiveModelProjection
 } from '../vision/vision-task-model-strategy'
+
+/** A code email is sent as the page that asks for it opens, sometimes just before. */
+const EMAILED_CODE_GRACE_MS = 30_000
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -1078,15 +1082,34 @@ class BrowserHost implements BrowserRailHost {
    * The agent's sign-in: when the page shows a login form and the Vault holds exactly one login
    * for the site, fill it. Several logins are the person's choice, so the agent is told to ask.
    */
-  private async agentAutofill(journeyId: string): Promise<string | null> {
+  private async agentAutofill(
+    journeyId: string,
+    onNote?: (note: string) => void,
+    signal?: AbortSignal
+  ): Promise<string | null> {
     const page = this.sessions.findJourney(journeyId)
     const contents = page?.resource.webContents
     if (!page || !contents || contents.isDestroyed()) return null
     const url = contents.getURL()
     const tried = this.autofillTried.get(journeyId) ?? new Set<string>()
     this.autofillTried.set(journeyId, tried)
-    if (tried.has(url) || !(await hasLoginForm(contents))) return null
-    tried.add(url)
+    const notes: string[] = []
+    if (!tried.has(url) && (await hasLoginForm(contents))) {
+      tried.add(url)
+      const note = await this.agentVaultLogin(journeyId, contents, url)
+      if (note) notes.push(note)
+    }
+    // After the Vault, which fills an authenticator code itself when the login has one.
+    const code = await this.agentEmailedCode(journeyId, contents, tried, onNote, signal)
+    if (code) notes.push(code)
+    return notes.length ? notes.join('; ') : null
+  }
+
+  private async agentVaultLogin(
+    journeyId: string,
+    contents: WebContents,
+    url: string
+  ): Promise<string | null> {
     const state = await vaultStateFor(url)
     const host = new URL(url).host
     if (state.state === 'locked') return `the Vault is locked, so it could not sign in on ${host}`
@@ -1099,6 +1122,33 @@ class BrowserHost implements BrowserRailHost {
       this.rememberSecret(journeyId, secret)
     )
     return outcome.ok ? `the Vault filled the login for ${host} as ${outcome.username}` : null
+  }
+
+  /**
+   * A page asking for a code the site emailed: wait for that email in the person's connected
+   * mailbox and fill the code, masked like a password. Once per address; no code, and the agent
+   * asks the person as before.
+   */
+  private async agentEmailedCode(
+    journeyId: string,
+    contents: WebContents,
+    tried: Set<string>,
+    onNote?: (note: string) => void,
+    signal?: AbortSignal
+  ): Promise<string | null> {
+    const key = `code:${contents.getURL()}`
+    if (tried.has(key)) return null
+    const field = await readCodeField(contents)
+    if (!field || field.filled) return null
+    tried.add(key)
+    const outcome = await fillEmailedCode(contents, field, {
+      // The code was asked for by the step that opened this page, moments ago.
+      requestedAt: Date.now() - EMAILED_CODE_GRACE_MS,
+      onSecret: (secret) => this.rememberSecret(journeyId, secret),
+      onWaiting: (site) => onNote?.(`waiting for the sign-in code from ${site} in your email`),
+      signal
+    })
+    return emailedCodeNote(outcome)
   }
 
   /** Files the agent may upload: the task uploads folder only, never the rest of the disk. */
@@ -1599,7 +1649,8 @@ class BrowserHost implements BrowserRailHost {
                 models: webUse.agentModels,
                 screenshot: () => captureBrowserAgentFrame(activePage().view, activePage().driver),
                 browser: {
-                  autofill: () => this.agentAutofill(journeyId),
+                  autofill: () =>
+                    this.agentAutofill(journeyId, recordStep, owner.controller.signal),
                   visits: (address) =>
                     this.visits.taskTrail(taskId).filter((visit) => visit.url === address).length,
                   showTab: (index) => {

@@ -19,7 +19,7 @@ import type {
 
 const KINDS = { kinds: ['login', 'authenticator'] as const }
 /** One isolated world for the fill, apart from the page's scripts and Electron's own. */
-const FILL_WORLD = 1_847
+export const FILL_WORLD = 1_847
 
 type VaultReply =
   | { type: 'matches'; entries: { uuid: string; title: string; username: string }[] }

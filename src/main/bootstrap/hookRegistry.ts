@@ -110,6 +110,12 @@ export const HOOKS = {
    */
   extensionChatRequest: 'chat.extensionRequest',
   extensionVaultRequest: 'vault.extensionRequest',
+  /**
+   * (query: { domain: string; sinceMs: number }) => Promise<CodeMail[]> - fresh mail from one site
+   * in the person's Gmail and Outlook accounts, read live, for the web agent's emailed sign-in
+   * codes (browser-emailed-code.ts). Pro; IMAP accounts are read by core.
+   */
+  browserCodeMail: 'browser:codeMail',
   /** (request: unknown, browser: { deviceName: string; deviceId: string }) => Promise<unknown> -
    * one Scribe request (grammar, rewrite, tone, review, feedback) from a paired browser
    * extension. Pro registers it; free builds report writing as unavailable (pro_required). */
