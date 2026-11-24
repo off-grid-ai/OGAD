@@ -2,7 +2,7 @@
 """Stage pinned Windows ONNX CUDA files for the optional performance pack."""
 
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from zipfile import ZipFile
 import hashlib
 import json
@@ -71,7 +71,8 @@ def ort_from_pack(packs_json: Path, output: Path) -> None:
     wanted[f"{ORT_PACK_FOLDER}LICENSE-onnxruntime"] = "LICENSE-onnxruntime"
     staging = output / ".ort-from-pack"
     staging.mkdir(parents=True, exist_ok=True)
-    with urlopen(pack["url"]) as response:
+    # The store's CDN refuses Python's default User-Agent.
+    with urlopen(Request(pack["url"], headers={"User-Agent": "offgrid-pack-builder"})) as response:
         reader = HashingReader(response)
         with tarfile.open(fileobj=reader, mode="r|gz") as archive:
             for member in archive:
