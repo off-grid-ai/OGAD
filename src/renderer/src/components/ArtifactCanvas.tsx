@@ -15,7 +15,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 // Renders a model-generated artifact (HTML / SVG / Mermaid / React) in a SANDBOXED
 // iframe with sandbox="allow-scripts" only and no same-origin access, so generated
 // code cannot touch the app or filesystem. Its response CSP blocks every external
-// origin except the exact esm.sh host used when a React artifact imports a package.
+// origin except esm.sh and the public script CDNs (cdnjs, jsDelivr, unpkg).
 // Bundled React/Babel/Mermaid keep artifacts without extra packages fully offline.
 
 // 'text'/'image' are catalogued inputs (uploaded file / pasted block / image) —
@@ -39,6 +39,22 @@ function escapeForHtml(s: string): string {
  * sat on a bright block filling the rest of the canvas. The page takes the component's background.
  */
 const REACT_PAGE_FILL = `<script>(function(){var root=document.getElementById('root');function fill(){var c=root&&root.firstElementChild;if(!c)return;var bg=getComputedStyle(c).backgroundColor;if(!bg||bg==='transparent'||bg==='rgba(0, 0, 0, 0)')return;document.documentElement.style.background=bg;document.body.style.background=bg}new MutationObserver(fill).observe(root,{childList:true});})();</script>`
+
+/**
+ * A generated page that throws, or loads a script that is not there, drew nothing: the canvas
+ * showed a blank frame with no reason. The page now shows each error over itself, as React
+ * artifacts already do. Resource errors (a 404 script) only reach a capturing listener.
+ */
+const HTML_ERROR_OVERLAY = `<script>(function(){var box=null,seen={};function show(msg){msg=String(msg);if(seen[msg])return;seen[msg]=1;if(!document.body){document.addEventListener('DOMContentLoaded',function(){seen[msg]=0;show(msg)});return}if(!box){box=document.createElement('pre');box.setAttribute('data-og-artifact-error','');box.style.cssText='position:fixed;left:12px;right:12px;bottom:12px;z-index:2147483647;margin:0;max-height:40%;overflow:auto;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap';document.body.appendChild(box)}box.textContent+=(box.textContent?'\\n':'')+msg;try{parent.postMessage({__ogArtifactError:msg},'*')}catch(e){}}window.addEventListener('error',function(e){var t=e.target;if(t&&t!==window&&(t.src||t.href)){show('Could not load '+(t.src||t.href));return}show(e.error&&e.error.stack||e.message)},true);window.addEventListener('unhandledrejection',function(e){show(e.reason&&e.reason.stack||e.reason)})})();</script>`
+
+/** Puts the error overlay first in the page, before any script of its own can fail. */
+export function withHtmlErrorOverlay(html: string): string {
+  const head = /<head(\s[^>]*)?>/i.exec(html)
+  if (head) return html.replace(head[0], head[0] + HTML_ERROR_OVERLAY)
+  const root = /<html(\s[^>]*)?>/i.exec(html)
+  if (root) return html.replace(root[0], root[0] + HTML_ERROR_OVERLAY)
+  return HTML_ERROR_OVERLAY + html
+}
 
 function revokePreview(url: string): void {
   void window.api.revokeArtifactPreview(url).catch(() => {})
@@ -183,9 +199,11 @@ export function ArtifactCanvas({
     const base =
       '<meta charset="utf-8"><style>html,body{margin:0;background:#fff;color:#111;font-family:system-ui,sans-serif}</style>'
     if (kind === 'html') {
-      return /<html|<!doctype/i.test(code)
-        ? code
-        : `<!doctype html><html><head>${base}</head><body>${code}</body></html>`
+      return withHtmlErrorOverlay(
+        /<html|<!doctype/i.test(code)
+          ? code
+          : `<!doctype html><html><head>${base}</head><body>${code}</body></html>`
+      )
     }
     if (kind === 'svg') {
       return `<!doctype html><html><head>${base}</head><body style="display:flex;justify-content:center;align-items:center;height:100vh">${code}</body></html>`
