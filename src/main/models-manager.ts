@@ -132,6 +132,40 @@ export const BONSAI_2: ModelEntry = {
   ]
 }
 
+// Bonsai 2.5 27B: the agentic release of Bonsai 2 27B (same Qwen 3.8 hybrid architecture), tuned for
+// tool calling and long agent runs. PTQ1_0 is the smallest pack (1.76 bits per weight) and carries the MTP
+// draft head; it needs the bundled Prism engine on every backend.
+export const BONSAI_2_5: ModelEntry = {
+  id: 'prism-ml/Ternary-Bonsai-2.5-27B-GGUF',
+  name: 'Bonsai 2.5 27B',
+  kind: 'vision',
+  org: 'Prism ML',
+  description: 'Compact 27B agent model with tool calling and optional vision; uses the bundled Prism engine.',
+  params: 27,
+  quality: 25,
+  minRamGb: 16,
+  quant: 'PTQ1_0',
+  tags: [],
+  isNew: true,
+  releaseDate: '2026-11-24',
+  files: [
+    {
+      name: 'Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf',
+      url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF/resolve/f71afa90d5f8f07f0518b6105eaf9b50e2c6d210/Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf',
+      sizeBytes: 6232818944,
+      sha256: 'e0fc5f3d47b9c926d52677d303b19df356a2376614b3e1cb9973865fc04ca431',
+      role: 'primary'
+    },
+    {
+      name: 'Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf',
+      url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF/resolve/f71afa90d5f8f07f0518b6105eaf9b50e2c6d210/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf',
+      sizeBytes: 629246976,
+      sha256: '6807ede61d570bb86ba34b756a0fa109edc33668604de867c6ea6d8f1d631903',
+      role: 'mmproj'
+    }
+  ]
+}
+
 // Bonsai 2 9B: Qwen 3.5 9B in packed ternary weights, 2.4GB, from the same Prism engine as the 27B.
 // The strongest model for an 8GB Mac. Desktop only: phones do not ship PrismML's llama.cpp fork.
 export const BONSAI_2_9B: ModelEntry = {
@@ -566,7 +600,7 @@ export function kevNeedsOnlyRuntime(modelId: string): boolean {
   return Boolean(parts?.modelReady && kevRuntimeToDownload(modelId))
 }
 
-const DESKTOP_CATALOG = [BONSAI_2, BONSAI_2_9B, DECIDER_2B, DECIDER_2B_VISION, ...KEV_MODELS]
+const DESKTOP_CATALOG = [BONSAI_2_5, BONSAI_2, BONSAI_2_9B, DECIDER_2B, DECIDER_2B_VISION, ...KEV_MODELS]
 const DESKTOP_CATALOG_IDS = new Set(DESKTOP_CATALOG.map((model) => model.id))
 
 /** A model only this app's code lists, not the shared catalog or catalog/models.json. It stays
