@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "llama": {
     "repo": "ggml-org/llama.cpp",
-    "ref": "b12415",
+    "ref": "b12676",
     "sha256": {
-      "linux-cuda": "718a1d32aac5a6e9a08d6602ee22b76e9ea49e6f1f6af88e9b4b4a90500409df",
-      "linux-cudart": "a72f54ab11b66de6d0fd0378ddb0ff11717801f174ca2c438de0be1a3e500b1e",
-      "linux-vulkan": "be4413d83d54e062009f162c2a40056175ab291f67e1963402277215b86a0749",
-      "linux-cpu": "02ceef24a039ca8ae7b623d8cebd06e3bce2b5786b7447a2bd1952320a7838d8",
-      "win-cuda": "9a39e335f8068b130364491034f66e11d911b958e3d92db354002404c9c76c9b",
+      "linux-cuda": "f92c568b56fa39afb92ead65a899a618d2ef29cff4ca2b739d51eb777c55b12e",
+      "linux-cudart": "7950380b5b88ce0f7ef082f3a86c23a93a11f39dad9c3a7a0d838ad017d1e4b3",
+      "linux-vulkan": "cd355471644b3e905f7fc678a230ec60f93cb0c39b3947dc696c9a449bbc007e",
+      "linux-cpu": "c65369a8574d096d90c593fef0e77a1ba2abfdfa7e7e9426bbf8939781ef8a07",
+      "win-cuda": "1d5692d90213a39aa01ef7da8d2c662ee815e0c6e4ad63b6f56473cc5b8ddb84",
       "win-cudart": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
-      "win-vulkan": "35a5d47cb1e4aca82b119b2f8630fc8927b2f57a59c588bd9a4cfc7eaa648104",
-      "win-cpu": "83d65aca06314b8fa38378a49c4fb16e08d5547460f7bc916b737204ba6a39c1"
+      "win-vulkan": "4a0732dd3b68ea1d7346fde885253a315c0c5eb7279da897d936892e0f709108",
+      "win-cpu": "fdf78a3924fe92ccfb24af58544a6dccbc1feeb0587e77fca9ec3bef6737086c"
     }
   },
   "prism": {
@@ -28,12 +28,12 @@
   },
   "sd": {
     "repo": "leejet/stable-diffusion.cpp",
-    "ref": "master-1106-532d2c1",
-    "commit": "532d2c15c430a785a712b2d94281f04e733008a4",
+    "ref": "master-1127-79dc7ca",
+    "commit": "79dc7ca9074d79419a46380cdb95a4524db9b74c",
     "sha256": {
-      "win-cuda": "b087219145a382cc1b1e826318289e1f672b9bb6965977734ef0deb85fe2d03a",
-      "win-vulkan": "3e66222c87ca27074e1fd8ce79706eef17a8aaf39949906aa1bee7e060f22ecc",
-      "win-cpu": "abef332cfca7861cc567910e79bedb70bfb2920bb4eedac97fcbb6db477f1596"
+      "win-cuda": "984b6e22803df7cf8ddff968c6e7abbb026b06f326e1d00471b484e59f891f2b",
+      "win-vulkan": "cc504eabda2001367ab21d752b27da60a884e7c5c61f84d79e006b5ea4e5dc9f",
+      "win-cpu": "345d3ab72eec70c23f29cd3414a4403f8ee4d706811cd04b92e3b3ac9c75edbb"
     }
   },
   "whisper": {
@@ -48,11 +48,11 @@
   },
   "sherpa": {
     "repo": "k2-fsa/sherpa-onnx",
-    "ref": "v2.0.1",
+    "ref": "v2.0.3",
     "sha256": {
-      "mac-universal": "bf6718f708e15390f1da133dd888661a68df270791b178aaf765d4e3f0baa9fe",
-      "linux-x64": "2e823376987c3b6960d50726b6560155e2ad92da0b8b3886325773225ec6bdec",
-      "win-x64": "dc703575a68594435f53dec93df775ff4913af851a196c0537163f21d8d2364e"
+      "mac-universal": "563e084981190996f3f5620000b1c62447182ff01ff39dea1158df9dc4fd229c",
+      "linux-x64": "615b1bf0140bf09051c15fde6579e48543696352ebd477217d2e69b49d9aec13",
+      "win-x64": "1d2414ac8921f718ba3188782f80475f525a3d82eeb59cef75ceb9360fbf8182"
     }
   },
   "ffmpeg": {
@@ -89,7 +89,7 @@
   "nvidia": {
     "linux": {
       "nvidia-cuda-runtime": "13.5.37",
-      "nvidia-cublas": "13.10.0.20",
+      "nvidia-cublas": "13.10.1.6",
       "nvidia-curand": "10.4.5.25",
       "nvidia-cudnn-cu13": "9.28.1.4",
       "nvidia-cufft": "12.5.0.14",
@@ -121,16 +121,16 @@
   "archives": {
     "release": "native-deps-2026-09",
     "mac-native": {
-      "name": "ogad-mac-native-20261115-r6.tar.gz",
-      "sha256": "a817c6545c3826f7ed489958956f2ce612e9254890578bd00895655a4b0724d6"
+      "name": "ogad-mac-native-20261124-r43.tar.gz",
+      "sha256": "361ed0607d5f01b797217716c149554370f56dde2130739c6c23bb2b0057d10b"
     },
     "linux-native": {
-      "name": "ogad-linux-native-x64-20261115-r6.tar.gz",
-      "sha256": "5c6498d09b0686aed583c4035afb149e3b23e6a014a4bd93ac705b33be8ced6d"
+      "name": "ogad-linux-native-x64-20261124-r43.tar.gz",
+      "sha256": "699770744989c7a4d63fcf6c6b518fe6748967d75640d6dbc0afe37acb0e8ac9"
     },
     "linux-sd-cuda": {
-      "name": "ogad-sd-master-1104-5dcfa79-linux-x64-cuda12.8-multiarch-20261115-r6.tar.gz",
-      "sha256": "4b73b5b142ca558842afbd87ce83663d525455262addcfca1347b725124a2f2d"
+      "name": "ogad-sd-master-1127-79dc7ca-linux-x64-cuda12.8-multiarch-20261124-r43.tar.gz",
+      "sha256": "44b88c914f2ded68b23a702c1c03e24fc81a0f5489b8987f44ec7fc6f630d0d0"
     },
     "linux-whisper": {
       "name": "ogad-whisper-v1.9.5-linux-x64-cuda12.8-multiarch-v1.tar.gz",

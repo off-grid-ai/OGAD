@@ -1,0 +1,36 @@
+name: Engine floors
+
+# An engine that moves in the same change as app code needs that app: scripts/engine-floors.mjs gives
+# it `minApp` in resources/engine-pins.json, and publish-engine.yml signs that floor into the index so
+# older apps never install it. On the bot's update branch this job writes the floor itself; on any
+# other branch it fails with the command to run.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  floors:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          lfs: false
+          token: ${{ github.head_ref == 'bot/engine-update' && secrets.ENGINE_BOT_TOKEN || github.token }}
+      - name: Check the floors
+        env:
+          BASE: origin/${{ github.base_ref }}
+          BOT_BRANCH: ${{ github.head_ref == 'bot/engine-update' }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if node scripts/engine-floors.mjs --base "$BASE"; then exit 0; fi
+          [ "$BOT_BRANCH" = true ] || exit 1
+          node scripts/engine-floors.mjs --base "$BASE" --write
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add resources/engine-pins.json
+          git commit -m "Engines: floor the engines that moved with app code at this app version"
+          git push origin "HEAD:$HEAD_REF"

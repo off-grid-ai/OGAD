@@ -2,15 +2,20 @@
 """Stage pinned Windows ONNX CUDA files for the optional performance pack."""
 
 from pathlib import Path
+from urllib.request import Request, urlopen
 from zipfile import ZipFile
 import hashlib
 import json
 import shutil
 import sys
+import tarfile
 
-ORT_ARCHIVE_SHA256 = "d4667ea48eb0a10bc9b96b838f7b8975a6bf18de3bc5edd403a22e15c1458b23"
 BINDING_SHA256 = "c658fdb8db34f3dda9c9a19db996858ac127db94999c10be777b93694c275515"
-ORT_PREFIX = "onnxruntime-win-x64-gpu_cuda12-1.30.0/"
+# ONNX Runtime 1.30.0's CUDA 12 build came only from microsoft/onnxruntime's GitHub release
+# (onnxruntime-win-x64-gpu_cuda12-1.30.0.zip, sha256 d4667ea4...), which is gone; NuGet and PyPI carry
+# CUDA 13 builds only. Every Windows pack since holds those files, so they come from the pack
+# resources/performance-packs.json names, checked against its pinned sha256 as it streams.
+ORT_PACK_FOLDER = "bin/onnx-cuda/"
 # NVIDIA wheel versions and hashes live in resources/engine-pins.json (nvidia.win).
 PINS = json.loads((Path(__file__).resolve().parent.parent / "resources" / "engine-pins.json").read_text())
 WHEELS = {
@@ -46,18 +51,59 @@ def extract_file(archive: ZipFile, member: str, destination: Path) -> None:
         shutil.copyfileobj(source, target)
 
 
+class HashingReader:
+    """A stream that hashes everything read through it."""
+
+    def __init__(self, source) -> None:
+        self.source = source
+        self.digest = hashlib.sha256()
+
+    def read(self, size: int = -1) -> bytes:
+        block = self.source.read(size)
+        self.digest.update(block)
+        return block
+
+
+def ort_from_pack(packs_json: Path, output: Path) -> None:
+    """Copy the ONNX Runtime files out of the pinned Windows pack, then check the whole pack's hash."""
+    pack = json.loads(packs_json.read_text())["cuda"]["win32"]
+    wanted = {f"{ORT_PACK_FOLDER}{name}": name for name in ORT_DLLS}
+    wanted[f"{ORT_PACK_FOLDER}LICENSE-onnxruntime"] = "LICENSE-onnxruntime"
+    staging = output / ".ort-from-pack"
+    staging.mkdir(parents=True, exist_ok=True)
+    # The store's CDN refuses Python's default User-Agent.
+    with urlopen(Request(pack["url"], headers={"User-Agent": "offgrid-pack-builder"})) as response:
+        reader = HashingReader(response)
+        with tarfile.open(fileobj=reader, mode="r|gz") as archive:
+            for member in archive:
+                name = wanted.get(member.name)
+                if name and member.isfile():
+                    with archive.extractfile(member) as source, (staging / name).open("wb") as target:
+                        shutil.copyfileobj(source, target)
+        # Read to the end so the hash covers the whole archive.
+        while reader.read(1024 * 1024):
+            pass
+    if reader.digest.hexdigest() != pack["sha256"]:
+        shutil.rmtree(staging)
+        raise ValueError(f"SHA256 mismatch: {pack['url']}")
+    for name in wanted.values():
+        source = staging / name
+        if not source.is_file():
+            raise FileNotFoundError(f"{name} is not in {pack['url']}")
+        shutil.move(source, output / name)
+    staging.rmdir()
+
+
 def main() -> None:
     if len(sys.argv) != 5:
-        raise SystemExit("Usage: stage-win-onnx-cuda-pack.py <ort-zip> <wheel-dir> <binding.node> <output-dir>")
-    ort_zip, wheel_dir, binding, output = map(Path, sys.argv[1:])
-    verify(ort_zip, ORT_ARCHIVE_SHA256)
+        raise SystemExit(
+            "Usage: stage-win-onnx-cuda-pack.py <performance-packs.json> <wheel-dir> <binding.node> <output-dir>"
+        )
+    packs_json, wheel_dir, binding, output = map(Path, sys.argv[1:])
     verify(binding, BINDING_SHA256)
     output.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(binding, output / "onnxruntime_binding.node")
-    with ZipFile(ort_zip) as archive:
-        for name in ORT_DLLS:
-            extract_file(archive, f"{ORT_PREFIX}lib/{name}", output / name)
-        extract_file(archive, f"{ORT_PREFIX}LICENSE", output / "LICENSE-onnxruntime")
+    ort_from_pack(packs_json, output)
 
     for name, sha256 in WHEELS.items():
         wheel = wheel_dir / name

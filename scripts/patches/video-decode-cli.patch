@@ -1,8 +1,8 @@
 diff --git a/examples/cli/main.cpp b/examples/cli/main.cpp
-index a29fd70..625a646 100644
+index 98913f8..ea10755 100644
 --- a/examples/cli/main.cpp
 +++ b/examples/cli/main.cpp
-@@ -51,6 +51,7 @@ struct SDCliParams {
+@@ -49,6 +49,7 @@ struct SDCliParams {
      std::string preview_method = "none";
      int preview_interval       = 1;
      std::string preview_path   = "preview.png";
@@ -10,7 +10,7 @@ index a29fd70..625a646 100644
      int preview_fps            = 16;
      bool preview_noisy         = false;
      bool color                 = false;
-@@ -88,6 +89,11 @@ struct SDCliParams {
+@@ -85,6 +86,11 @@ struct SDCliParams {
               "path to write preview image to (default: ./preview.png). For image generation, the filename can have %03d placeholder for sequential numbering. Multi-frame previews support .avi, .webm, and animated .webp",
               0,
               &preview_path},
@@ -22,7 +22,7 @@ index a29fd70..625a646 100644
              {"",
               "--imat-out",
               "compute the imatrix for this run and save it to the provided path",
-@@ -424,6 +430,28 @@ void step_callback(int step, int frame_count, const sd_tensor_t* const* tensors,
+@@ -374,6 +380,28 @@ void step_callback(int step, int frame_count, const sd_tensor_t* const* tensors,
      }
  }
  
@@ -51,7 +51,7 @@ index a29fd70..625a646 100644
  static fs::path get_video_audio_sidecar_path(const SDCliParams& cli_params) {
      fs::path out_path     = fs::u8path(cli_params.output_path);
      fs::path base_path    = out_path;
-@@ -757,6 +785,10 @@ int main(int argc, const char* argv[]) {
+@@ -599,6 +627,10 @@ int main(int argc, const char* argv[]) {
          return 1;
      }
  

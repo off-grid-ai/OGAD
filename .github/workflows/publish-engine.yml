@@ -15,11 +15,14 @@ name: Publish engine update
 # macOS engines are signed with the Developer ID (secrets CSC_LINK, CSC_KEY_PASSWORD) before
 # publishing. The CUDA chat engine is also written to the legacy index.json, the one apps before
 # index-v2.json read.
+#
+# Each engine carries the floor its pin names (`minApp`, set by scripts/engine-floors.mjs when it moved
+# with app code) as minAppVersion, so older apps skip it; min_app_version overrides it for every engine.
 on:
   workflow_dispatch:
     inputs:
       min_app_version:
-        description: 'Oldest app version that may install these engines (optional)'
+        description: 'Oldest app version that may install these engines (optional; overrides each pin''s minApp)'
         required: false
         default: ''
   workflow_call:
@@ -177,7 +180,7 @@ jobs:
           foreach ($name in 'llama', 'llama-cpu', 'llama-prism', 'llama-prism-cpu', 'sd', 'sd-cpu', 'whisper', 'whisper-cpu') {
             Remove-Item -Recurse -Force (Join-Path 'resources/bin' $name) -ErrorAction SilentlyContinue
           }
-          ./scripts/fetch-win-binaries.ps1
+          ./scripts/fetch-win-binaries.ps1 -EnginesOnly
       - name: Publish
         shell: pwsh
         env:

@@ -36,6 +36,14 @@ on:
         description: llama.cpp build gap; empty uses ENGINE_UPDATE_LLAMA_MIN_BUILDS
         type: string
         default: ''
+      channel:
+        description: on-merge or nightly for this run; empty uses ENGINE_UPDATE_CHANNEL
+        type: string
+        default: ''
+      base:
+        description: Branch to update and open the PR against for this run; empty uses ENGINE_UPDATE_BASE
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -54,7 +62,7 @@ jobs:
       branch: ${{ steps.update.outputs.branch }}
       version: ${{ steps.update.outputs.version }}
     env:
-      BASE: ${{ vars.ENGINE_UPDATE_BASE || 'main' }}
+      BASE: ${{ inputs.base || vars.ENGINE_UPDATE_BASE || 'main' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -103,6 +111,7 @@ jobs:
     uses: ./.github/workflows/build-native-engines.yml
     with:
       ref: ${{ needs.check.outputs.branch }}
+      base: ${{ inputs.base }}
     secrets:
       PUSH_TOKEN: ${{ secrets.ENGINE_BOT_TOKEN }}
 
@@ -156,7 +165,7 @@ jobs:
   # nightly: publish to every app now, then move main's pins forward.
   publish:
     needs: [check, pin-packs]
-    if: vars.ENGINE_UPDATE_CHANNEL == 'nightly'
+    if: (inputs.channel || vars.ENGINE_UPDATE_CHANNEL) == 'nightly'
     uses: ./.github/workflows/publish-engine.yml
     with:
       ref: ${{ needs.check.outputs.branch }}
@@ -179,7 +188,7 @@ jobs:
           token: ${{ secrets.ENGINE_BOT_TOKEN || github.token }}
       - name: Move main's pins forward
         env:
-          BASE: ${{ vars.ENGINE_UPDATE_BASE || 'main' }}
+          BASE: ${{ inputs.base || vars.ENGINE_UPDATE_BASE || 'main' }}
         run: |
           # The update branch started from the base, so this is a fast-forward unless the base
           # moved meanwhile; then the update rebases onto it (it only touches pin files).
@@ -193,7 +202,7 @@ jobs:
   # on-merge: a person merges the PR; publish-engine.yml then runs from main.
   pull-request:
     needs: [check, pin-packs]
-    if: vars.ENGINE_UPDATE_CHANNEL != 'nightly'
+    if: (inputs.channel || vars.ENGINE_UPDATE_CHANNEL) != 'nightly'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -208,7 +217,7 @@ jobs:
       - name: Open or refresh the PR
         env:
           GH_TOKEN: ${{ secrets.ENGINE_BOT_TOKEN || github.token }}
-          BASE: ${{ vars.ENGINE_UPDATE_BASE || 'main' }}
+          BASE: ${{ inputs.base || vars.ENGINE_UPDATE_BASE || 'main' }}
           BRANCH: ${{ needs.check.outputs.branch }}
         run: |
           {

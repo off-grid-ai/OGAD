@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Stage a platform's engine folders as updatable engines (see src/shared/engine-updates.ts).
 //
-//   node scripts/stage-engines.mjs --platform darwin|linux|win32 --bin <bin root> --out <dir>
+//   node scripts/stage-engines.mjs --platform darwin|linux|win32 --bin <bin root> --out <dir> [--pins <file>]
 //
 // Each engine folder under the bin root (for example `llama/` or `sd-cuda/`) becomes
 // `<out>/<id>/<id>/...` with an engine.json beside it, versioned from resources/engine-pins.json,
@@ -12,15 +12,22 @@ import path from 'node:path'
 import { parseArgs } from 'node:util'
 
 const { values } = parseArgs({
-  options: { platform: { type: 'string' }, bin: { type: 'string' }, out: { type: 'string' } }
+  options: {
+    platform: { type: 'string' },
+    bin: { type: 'string' },
+    out: { type: 'string' },
+    pins: { type: 'string' }
+  }
 })
 const { platform } = values
 if (!['darwin', 'linux', 'win32'].includes(platform) || !values.bin || !values.out) {
-  console.error('Usage: stage-engines.mjs --platform darwin|linux|win32 --bin <bin root> --out <dir>')
+  console.error(
+    'Usage: stage-engines.mjs --platform darwin|linux|win32 --bin <bin root> --out <dir>'
+  )
   process.exit(1)
 }
 const pins = JSON.parse(
-  fs.readFileSync(new URL('../resources/engine-pins.json', import.meta.url), 'utf8')
+  fs.readFileSync(values.pins ?? new URL('../resources/engine-pins.json', import.meta.url), 'utf8')
 )
 const exe = (name) => (platform === 'win32' ? `${name}.exe` : name)
 
@@ -73,6 +80,8 @@ for (const [id, [engine, executable, nvidia]] of Object.entries(ENGINES)) {
   const release = {
     id,
     version: pins[engine].ref,
+    // The oldest app that can run this version (scripts/engine-floors.mjs); publish signs it into the index.
+    ...(pins[engine].minApp ? { minApp: pins[engine].minApp } : {}),
     smokeTest: `${id}/${exe(executable)}`,
     ...(nvidia ? { requires: 'nvidia' } : {})
   }

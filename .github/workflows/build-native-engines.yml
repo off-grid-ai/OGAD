@@ -25,6 +25,10 @@ on:
         description: Branch to build from and commit the new archive pins to
         type: string
         required: true
+      base:
+        description: Branch the update started from; empty uses ENGINE_UPDATE_BASE
+        type: string
+        default: ''
     secrets:
       PUSH_TOKEN:
         required: false
@@ -74,7 +78,7 @@ jobs:
       - id: base
         name: Record the base branch's commit
         env:
-          BASE: ${{ vars.ENGINE_UPDATE_BASE || github.event.repository.default_branch || 'main' }}
+          BASE: ${{ inputs.base || vars.ENGINE_UPDATE_BASE || github.event.repository.default_branch || 'main' }}
         run: |
           echo "base=$BASE" >> "$GITHUB_OUTPUT"
           echo "sha=$(git ls-remote origin "refs/heads/$BASE" | cut -f1)" >> "$GITHUB_OUTPUT"
@@ -477,10 +481,10 @@ jobs:
             const base = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
             const branch = (ref) => ref.replace(/^refs\/heads\//, "");
             const onBase = branch(process.argv[3]) === branch(process.argv[4]);
-            // The held engines' binaries came from the archive this branch names; their pins come from the
+            // Held engines ship binaries from the archive this branch names; their pins come from the
             // base snapshot. Both must describe the same archive, or the pin would label other binaries.
             if (JSON.stringify(pins.archives) !== JSON.stringify(base.archives)) {
-              console.error("this branch's archive differs from the base snapshot's; held pins would not match the restored binaries");
+              console.error("the archive on this branch differs from the base snapshot archive; held pins would not match the restored binaries");
               process.exit(1);
             }
             for (const engine of process.argv[2].split(" ")) {

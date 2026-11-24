@@ -6,7 +6,7 @@
 //   node scripts/publish-engine.mjs --platform linux|win32 --pack resources/performance-packs.json
 //
 // The folder comes from scripts/stage-engines.mjs or scripts/stage-llama-engine.mjs and holds
-// engine.json ({id, version, smokeTest, requires?}) beside the files the engine runs. `--index v2`
+// engine.json ({id, version, minApp?, smokeTest, requires?}) beside the files the engine runs. `--index v2`
 // (the default) writes index-v2.json, which current apps read; `--index legacy` writes index.json,
 // which apps before every engine was updatable read and which should only ever list llama-cuda. Each file is uploaded once under its SHA-256 and never changes;
 // the index for the platform is rewritten with this release in place of the engine's previous one,
@@ -208,7 +208,12 @@ if (packMode) {
     asset.bytes <= 0
   )
     throw new Error(`${values.pack} has no valid ${platform} CUDA pack`)
-  const performancePack = { url: asset.url, sha256: asset.sha256, bytes: asset.bytes, version: asset.version }
+  const performancePack = {
+    url: asset.url,
+    sha256: asset.sha256,
+    bytes: asset.bytes,
+    version: asset.version
+  }
   if (dryRun) {
     console.log(JSON.stringify(performancePack, null, 2))
     process.exit(0)
@@ -235,7 +240,10 @@ console.log(
 const release = {
   id: engine.id,
   version: engine.version,
-  ...(values['min-app'] ? { minAppVersion: values['min-app'] } : {}),
+  // --min-app overrides the floor the pins gave the engine (engine.json minApp, scripts/engine-floors.mjs).
+  ...(values['min-app'] || engine.minApp
+    ? { minAppVersion: values['min-app'] || engine.minApp }
+    : {}),
   ...(engine.requires ? { requires: engine.requires } : {}),
   smokeTest: engine.smokeTest,
   files: files.map(({ full: _full, ...file }) => file),
