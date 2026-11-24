@@ -103,6 +103,23 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     ready: false
   },
   {
+    id: 'imap',
+    name: 'Email (IMAP)',
+    blurb: 'Any mailbox: Fastmail, iCloud, work mail',
+    category: 'Communication',
+    color: '#3B6E5A',
+    letter: '@',
+    transport: 'http',
+    url: 'imap://',
+    auth: 'token',
+    secrets: [
+      { key: 'IMAP_SERVER', label: 'IMAP server', placeholder: 'imap.fastmail.com' },
+      { key: 'IMAP_USER', label: 'Email', placeholder: 'you@example.com' },
+      { key: 'IMAP_PASSWORD', label: 'App password', placeholder: 'App password' }
+    ],
+    ready: true
+  },
+  {
     id: 'slack',
     name: 'Slack',
     blurb: 'Channels, DMs, search',
