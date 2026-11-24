@@ -429,6 +429,8 @@ interface RendererAPIOverrides {
   openScreenRecordingSettings: () => Promise<boolean>
   relaunchForPermissions: () => Promise<boolean>
   openMicrophoneSettings: () => Promise<boolean>
+  /** In a strict snap, the `snap connect` command a disconnected plug needs; null otherwise. */
+  snapPlugFix: (plug: 'audio-record' | 'camera') => Promise<string | null>
   openLocalNetworkSettings: () => Promise<boolean>
   openFilesAndFoldersSettings: () => Promise<boolean>
 }

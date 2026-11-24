@@ -70,6 +70,8 @@ interface ChatVoiceTurns {
   phase: ChatVoicePhase
   suspended: boolean
   microphoneDenied: boolean
+  /** In a strict snap with the microphone plug off: the one command that turns it on. */
+  microphoneFix: string | null
   error: string | null
   transcriptionLabel: string
   start: () => void
@@ -130,6 +132,15 @@ function initialCapturePhase(mode: VoiceTurnMode): ChatVoicePhase {
   return 'recording'
 }
 
+/** In a strict snap with the microphone plug off, the command that connects it; else null. */
+async function snapMicrophoneFix(): Promise<string | null> {
+  try {
+    return await window.api.snapPlugFix('audio-record')
+  } catch {
+    return null
+  }
+}
+
 function microphoneFailure(cause: unknown): { denied: boolean; message: string } {
   const name =
     typeof cause === 'object' && cause !== null && 'name' in cause ? String(cause.name) : ''
@@ -167,6 +178,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
   const suspendedRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [microphoneDenied, setMicrophoneDenied] = useState(false)
+  const [microphoneFix, setMicrophoneFix] = useState<string | null>(null)
   const [transcriptionLabel, setTranscriptionLabel] = useState('Speech-to-text')
   const [awaitingReply, setAwaitingReply] = useState(false)
   const [rearmReady, setRearmReady] = useState(true)
@@ -404,10 +416,23 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       if (userInitiated) updateSuspended(false)
       setError(null)
       setMicrophoneDenied(false)
+      setMicrophoneFix(null)
       const sequence = ++sequenceRef.current
       const owner = current.ownerId ?? null
       updatePhase('starting')
       void refreshTranscriptionLabel(sequence)
+
+      // A snap with its microphone plug off records silence, so say so before recording.
+      const snapFix = await snapMicrophoneFix()
+      if (snapFix) {
+        if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
+        setError('The microphone is off for this app. Run this once in a terminal, then try again.')
+        setMicrophoneFix(snapFix)
+        setMicrophoneDenied(true)
+        updateSuspended(current.mode === 'handsfree')
+        updatePhase('idle')
+        return
+      }
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -714,6 +739,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
     phase,
     suspended,
     microphoneDenied,
+    microphoneFix,
     error,
     transcriptionLabel,
     start,
