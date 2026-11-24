@@ -1,8 +1,8 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index c5a25c6..42f1be5 100644
+index 92a7fba..4bcc1d2 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
-@@ -250,6 +250,13 @@ typedef void (*sd_generation_progress_cb_t)(const sd_generation_progress_t* prog
+@@ -302,6 +302,13 @@ typedef void (*sd_generation_progress_cb_t)(const sd_generation_progress_t* prog
  // total == 0 means unknown; sample_pass counts from 1 since callback registration.
  // Register/clear only while the context is idle. Passing NULL clears the callback.
  SD_API void sd_set_generation_progress_callback(sd_ctx_t* ctx, sd_generation_progress_cb_t cb, void* data);
@@ -17,7 +17,7 @@ index c5a25c6..42f1be5 100644
  typedef struct {
      int sample_pass;
 diff --git a/src/core/util.cpp b/src/core/util.cpp
-index 220134f..c7b5bb4 100644
+index 00b0a31..e1a3e7f 100644
 --- a/src/core/util.cpp
 +++ b/src/core/util.cpp
 @@ -374,6 +374,37 @@ int32_t sd_get_num_physical_cores() {
@@ -67,20 +67,20 @@ index 220134f..c7b5bb4 100644
      if (sd_progress_cb) {
          sd_progress_cb(step, steps, time, sd_progress_cb_data);
          return;
-@@ -625,6 +658,8 @@ void pretty_progress(int step, int steps, float time) {
- }
- 
- void pretty_bytes_progress(int step, int steps, uint64_t bytes_processed, float elapsed_seconds) {
+@@ -654,6 +687,8 @@ void pretty_bytes_progress(int step, int steps, uint64_t bytes_processed, float
+         if (!byte_progress_console)
+             return;
+     }
 +    // Loading counts are not sampling steps, even when their totals happen to match.
 +    if (sd_decode_progress_cb) return;
      if (sd_progress_cb) {
          float time = elapsed_seconds / (step + 1e-6f);
          sd_progress_cb(step, steps, time, sd_progress_cb_data);
 diff --git a/src/core/util.h b/src/core/util.h
-index 082565a..cb50f99 100644
+index 1274e64..8814794 100644
 --- a/src/core/util.h
 +++ b/src/core/util.h
-@@ -102,6 +102,18 @@ std::vector<std::pair<std::string, float>> parse_prompt_attention(const std::str
+@@ -100,6 +100,18 @@ std::vector<std::pair<std::string, float>> parse_prompt_attention(const std::str
  std::vector<std::pair<std::string, float>> split_quotation_attention(
      const std::vector<std::pair<std::string, float>>& parsed_attention);
  
@@ -99,31 +99,42 @@ index 082565a..cb50f99 100644
  sd_progress_cb_t sd_get_progress_callback();
  void* sd_get_progress_callback_data();
  
-diff --git a/src/pipeline/video.cpp b/src/pipeline/video.cpp
-index 529bbb6..e128769 100644
---- a/src/pipeline/video.cpp
-+++ b/src/pipeline/video.cpp
-@@ -1289,7 +1289,11 @@ namespace sd::pipeline {
-                     (int)video_latent.shape()[3]);
-         // auto z = sd::load_tensor_from_file_as_tensor<float>("ltx_vae_z.bin");
-         int64_t t4            = ggml_time_ms();
--        sd::Tensor<float> vid = sd->decode_first_stage(video_latent, true);
-+        sd::Tensor<float> vid;
-+        {
+diff --git a/src/dgl/bindings/components.cpp b/src/dgl/bindings/components.cpp
+index 7d840d5..5f0588c 100644
+--- a/src/dgl/bindings/components.cpp
++++ b/src/dgl/bindings/components.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include "conditioning/conditioner.hpp"
+ #include "core/rng.hpp"
++#include "core/util.h"
+ #include "dgl/bindings/arguments.h"
+ #include "dgl/bindings/audio.h"
+ #include "dgl/bindings/condition.h"
+@@ -182,8 +183,21 @@ namespace sd::dgl {
+     }
+ 
+     Value vae_decode(Values& args, RunState&) {
+-        auto& engine = *object<VAE>(args, "vae");
+-        auto output  = ops::decode_vae(engine, float_tensor(args, "latent"), vae_options(args));
++        auto& engine        = *object<VAE>(args, "vae");
++        const auto& latent  = float_tensor(args, "latent");
++        // A video latent is [W, H, T, C, N]; its decode reports sections and its first frame.
++        const bool video    = latent.dim() == 5 && latent.shape()[2] > 1;
++        auto output         = [&] {
++            if (!video)
++                return ops::decode_vae(engine, latent, vae_options(args));
 +            SDVideoDecodeScope decode_scope;
-+            vid = sd->decode_first_stage(video_latent, true);
++            return ops::decode_vae(engine, latent, vae_options(args));
++        }();
++        if (video && output.dim() == 5) {
++            sd::Image first = tensor_to_sd_image(output, 0);
++            sd_video_decoded_frame(&first);
++            free(first.data);
 +        }
-         int64_t t5            = ggml_time_ms();
-         LOG_INFO("decode_first_stage completed, taking %.2fs", (t5 - t4) * 1.0f / 1000);
-         if (vid.empty()) {
-@@ -1316,6 +1320,7 @@ namespace sd::pipeline {
+         return get_string(args, "dtype") == "f32" ? tensor_value(std::move(output)) : image_to_u8(output);
+     }
  
-         for (int64_t i = 0; i < vid.shape()[2]; i++) {
-             result_images[i] = tensor_to_sd_image(vid, static_cast<int>(i));
-+            if (i == 0) sd_video_decoded_frame(&result_images[i]);
-         }
- 
-         return result_images;
 diff --git a/src/runtime/tiling.cpp b/src/runtime/tiling.cpp
 index 95bcc22..1404524 100644
 --- a/src/runtime/tiling.cpp
