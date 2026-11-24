@@ -327,11 +327,14 @@ async function documents(page: Page): Promise<Row[]> {
   const file = loadCases('documents')
   const docs = file.documents as Record<string, { name: string; url: string; sha256: string }>
   const ready = new Map<string, { documentId?: string; name: string; kind: string; path: string }>()
+  // A document that did not finish indexing: its cases fail instead of being asked without it.
+  const notReady = new Map<string, string>()
   const rows: Row[] = []
   for (const c of file.cases) {
     const doc = docs[c.doc!]!
     let ref = ready.get(c.doc!)
-    if (!ref) {
+    const unindexed = notReady.get(c.doc!)
+    if (!ref && !unindexed) {
       const local = cachedDocument(doc)
       // Attach the file as the chat does, then wait for its indexing to finish (OCR included).
       const attached = await page.evaluate(
@@ -364,13 +367,33 @@ async function documents(page: Page): Promise<Row[]> {
         [local, doc.name] as const
       )
       log('documents', doc.name, attached.phase)
-      ref = {
-        documentId: attached.res.documentId,
-        name: doc.name,
-        kind: attached.res.kind,
-        path: attached.res.path
+      if (attached.phase !== 'ready') notReady.set(c.doc!, attached.phase)
+      else {
+        ref = {
+          documentId: attached.res.documentId,
+          name: doc.name,
+          kind: attached.res.kind,
+          path: attached.res.path
+        }
+        ready.set(c.doc!, ref)
       }
-      ready.set(c.doc!, ref)
+    }
+    if (!ref) {
+      const reason = `document not indexed: ${notReady.get(c.doc!)}`
+      rows.push({
+        suite: 'documents',
+        id: c.id,
+        q: c.q,
+        answer: '',
+        pass: false,
+        reasons: [reason],
+        turns: 0,
+        promptTokens: 0,
+        ms: 0,
+        error: reason
+      })
+      log('documents', c.id, 'fail', reason)
+      continue
     }
     const turn = await ask(page, c.q, {
       conversationId: crypto.randomUUID(),
@@ -470,6 +493,11 @@ async function judge(rows: Row[]): Promise<string> {
       const r = open.find((o) => o.id === v.id)!
       r.pass = v.verdict === 'pass'
       if (!r.pass) r.reasons.push(`judge: ${v.reason}`)
+      // The judge sees no citations: a Brain answer that cites no gold source still fails.
+      else if (r.suite === 'brain' && r.cited === false) {
+        r.pass = false
+        r.reasons.push('no citation of a gold source')
+      }
     }
     return name
   } finally {
@@ -526,7 +554,7 @@ async function main(): Promise<void> {
   const modelFile = flag('model-file')
   if (modelFile) {
     const link = path.join(MODELS_DIR, path.basename(modelFile))
-    if (!fs.existsSync(link)) fs.symlinkSync(modelFile, link)
+    if (!fs.existsSync(link)) fs.symlinkSync(path.resolve(modelFile), link)
     fs.writeFileSync(
       path.join(MODELS_DIR, 'active-model.json'),
       JSON.stringify({
@@ -570,8 +598,11 @@ async function main(): Promise<void> {
   if (suites.includes('chat')) rows.push(...(await chat(page)))
   await app.close()
 
+  const resultsFile = path.join(runDir, 'results.json')
+  // Saved before judging, so a failed judge keeps every answer and metric.
+  fs.writeFileSync(resultsFile, JSON.stringify({ keys, rows }, null, 1))
   const judgeName = await judge(rows)
-  fs.writeFileSync(path.join(runDir, 'results.json'), JSON.stringify({ keys, rows }, null, 1))
+  fs.writeFileSync(resultsFile, JSON.stringify({ keys, rows }, null, 1))
 
   const card: Record<string, unknown> = {}
   for (const suite of CASE_SUITES) {
