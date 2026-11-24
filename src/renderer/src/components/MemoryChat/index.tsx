@@ -50,7 +50,7 @@ import {
 } from '@offgrid/sync'
 import type { VoiceTurnMode } from '@offgrid/speech'
 import { isImageRequest, isVideoRequest, modelDisplayName } from '@offgrid/models'
-import { getSlot, SLOTS } from '@/bootstrap/slotRegistry'
+import { getSlot, SLOTS, useSlotRevision } from '@/bootstrap/slotRegistry'
 import { callHook } from '@/bootstrap/hookRegistry'
 import { useRendererEntitlement } from '@/bootstrap/useRendererEntitlement'
 import {
@@ -997,6 +997,8 @@ export function MemoryChat({
   )
   // Pro registers this slot after the core renderer starts. Resolve it on each render so an
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
+  // Subscribing redraws this screen when a slot registers late (the task overlay included).
+  useSlotRevision()
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
   // Web Use and Computer Use are free: the task overlay registers without Pro (registerTaskUseSlots).
   const TaskSupervisorOverlay = getSlot(SLOTS.taskSupervisorOverlay)
