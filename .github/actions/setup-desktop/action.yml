@@ -189,6 +189,9 @@ runs:
         # notes before notes-editor). A package this shared commit lacks is skipped.
         consumed=$(node -e 'const fs=require("fs");const names=[];for(const f of ["package.json","pro/package.json"]){if(!fs.existsSync(f))continue;const p=JSON.parse(fs.readFileSync(f,"utf8"));for(const v of Object.values({...p.dependencies,...p.devDependencies,...p.optionalDependencies})){const m=/^file:(?:\.\.\/)+shared\/packages\/(.+)$/.exec(v);if(m)names.push(m[1])}}console.log([...new Set(names)].sort().join(" "))')
         echo "shared_packages=$consumed" >> "$GITHUB_OUTPUT"
+        # In the shared cache key: a package the app starts consuming rebuilds instead of restoring a
+        # cache that never built it.
+        echo "shared_packages_hash=$(printf '%s' "$consumed" | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
     - name: Restore npm downloads
       if: ${{ inputs.workspace == 'true' }}
       id: npm_cache
@@ -223,7 +226,7 @@ runs:
           ${{ steps.caches.outputs.shared_dir }}/node_modules
           ${{ steps.caches.outputs.shared_dir }}/packages/*/node_modules
           ${{ steps.caches.outputs.shared_dir }}/packages/*/dist
-        key: shared-${{ runner.os }}-${{ runner.arch }}-node22-${{ steps.caches.outputs.shared_sha }}-${{ hashFiles('.github/actions/setup-desktop/action.yml') }}
+        key: shared-${{ runner.os }}-${{ runner.arch }}-node22-${{ steps.caches.outputs.shared_sha }}-${{ steps.caches.outputs.shared_packages_hash }}-${{ hashFiles('.github/actions/setup-desktop/action.yml') }}
     - name: Build shared
       if: ${{ inputs.workspace == 'true' && steps.shared_cache.outputs.cache-hit != 'true' }}
       shell: bash
