@@ -40,11 +40,11 @@ export function Preview(): React.JSX.Element {
       setVersion((v) => v + 1)
     }
     // Strings the editor sends are newer than the ?lang= file, so they win if they arrive first.
-    let fromEditor = false
+    let superseded = false
     const lang = params.get('lang')
     if (lang)
       void loadCatalog(lang).then((strings) => {
-        if (!fromEditor) apply(lang, strings)
+        if (!superseded) apply(lang, strings)
       })
     const onMessage = (event: MessageEvent): void => {
       // The editor serves this preview from its own address, so only that origin may send a catalog.
@@ -53,7 +53,7 @@ export function Preview(): React.JSX.Element {
         event.source === window.parent &&
         isCatalogMessage(event.data)
       ) {
-        fromEditor = true
+        superseded = true
         apply(event.data.locale, event.data.strings)
       }
     }
@@ -62,7 +62,11 @@ export function Preview(): React.JSX.Element {
       { type: 'offgrid-i18n:ready', app: 'desktop' },
       window.location.origin
     )
-    return () => window.removeEventListener('message', onMessage)
+    return () => {
+      // A load still pending after unmount must not apply.
+      superseded = true
+      window.removeEventListener('message', onMessage)
+    }
   }, [])
   return (
     <TooltipProvider delayDuration={300}>
