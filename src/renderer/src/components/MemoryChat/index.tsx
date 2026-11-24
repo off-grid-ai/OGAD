@@ -3860,16 +3860,27 @@ export function MemoryChat({
   const followedContent = followedArtifactMessage?.content ?? null
   const followedStreaming = Boolean(followedArtifactMessage?.streaming)
   const [liveCanvasArtifact, setLiveCanvasArtifact] = useState<Artifact | null>(null)
+  const lastFollowedContentRef = useRef<string | null>(null)
   useEffect(() => {
-    if (followedContent === null) {
+    if (canvasMessageId === null) {
+      lastFollowedContentRef.current = null
       setLiveCanvasArtifact(null)
       return
     }
+    if (followedContent === null) {
+      // A finished reply replaces its streaming message with the saved copy under a new id. The
+      // last streamed content holds the whole artifact, so the canvas renders that, not the partial
+      // artifact it opened with.
+      const last = lastFollowedContentRef.current
+      if (last !== null) setLiveCanvasArtifact(parseArtifact(last))
+      return
+    }
+    lastFollowedContentRef.current = followedContent
     // Every new artifact document reloads the preview frame, so re-reading while the reply streams
     // made the canvas flicker. The canvas keeps what it shows and renders the finished artifact once.
     if (followedStreaming) return
     setLiveCanvasArtifact(parseArtifact(followedContent))
-  }, [followedContent, followedStreaming])
+  }, [canvasMessageId, followedContent, followedStreaming])
   const shownCanvasArtifact = liveCanvasArtifact ?? canvasArtifact
 
   const openGallery = useCallback(() => {
