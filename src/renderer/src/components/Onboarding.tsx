@@ -92,6 +92,8 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
   }
 
   const finish = (open?: ViewMode): void => {
+    // The picks shown are the picks kept, defaults included, so the app opens what Settings shows.
+    savePicks(picks)
     localStorage.removeItem(ONBOARDING_STEP_KEY)
     localStorage.setItem('onboarding_completed', 'true')
     if (open) localStorage.setItem(ONBOARDING_OPEN_KEY, open)
