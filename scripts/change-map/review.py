@@ -84,7 +84,8 @@ def principle_calls(concepts):
     return calls
 
 
-GROUP = {'writing': ('scribe', 'writing', 'in a web text box', 'editor'), 'notes': ('notes',), 'vault': ('vault',)}
+GROUP = {'writing': ('scribe', 'writing', 'in a web text box', 'editor'), 'notes': ('notes',), 'vault': ('vault',),
+         'onboarding': ('onboarding', 'desktop onboarding', 'desktop after onboarding', 'mobile onboarding')}
 PLAT_OF = {'desktop': ['Mac', 'Windows', 'Linux'], 'desktop-pro': ['Mac', 'Windows', 'Linux'], 'mobile': ['iPhone', 'Android'], 'mobile-pro': ['iPhone', 'Android'],
            'extension': ['Chrome', 'Firefox'], 'shared': ['Mac', 'iPhone', 'Android', 'Chrome', 'Firefox']}
 LAYERS = ('owner', 'engine', 'logic', 'view', 'data', 'copy')
