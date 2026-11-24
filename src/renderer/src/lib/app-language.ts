@@ -45,7 +45,7 @@ export function applyAppLanguage(): Promise<Locale> {
   const load =
     CATALOGS[`../../../../node_modules/@offgrid/i18n/catalogs/${locale.code}/desktop.json`]!
   const run: Promise<Locale> = load().then((strings) => {
-    if (latestApply !== run && latestApply) return latestApply
+    if (latestApply !== null && latestApply !== run) return latestApply
     setCatalog(locale.code, strings)
     document.documentElement.lang = locale.tag
     return locale
