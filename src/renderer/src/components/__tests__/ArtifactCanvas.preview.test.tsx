@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ArtifactCanvas, artifactSpeechModelName } from '../ArtifactCanvas'
+import { ArtifactCanvas, artifactSpeechModelName, type Artifact } from '../ArtifactCanvas'
 import { withHtmlErrorOverlay } from '@renderer/lib/artifact-error-overlay'
 
 afterEach(cleanup)
@@ -72,6 +72,40 @@ describe('ArtifactCanvas isolated preview', () => {
       expect(createArtifactPreview).toHaveBeenCalledWith(
         expect.stringContaining('data-og-artifact-error')
       )
+    )
+  })
+
+  it('keeps the preview while a streaming artifact grows and rebuilds it once complete', async () => {
+    const createArtifactPreview = vi.fn(async () => 'ogartifact://preview/2')
+    ;(window as unknown as { api: unknown }).api = {
+      artifactRuntime: vi.fn(async () => ({})),
+      createArtifactPreview,
+      revokeArtifactPreview: vi.fn(async () => true)
+    }
+    const page = (body: string, partial: boolean): Artifact => ({
+      kind: 'html',
+      code: `<!doctype html><html><body>${body}`,
+      ...(partial ? { partial: true } : {})
+    })
+    const { rerender } = render(
+      <ArtifactCanvas artifact={page('<p>one', true)} onClose={() => {}} />
+    )
+    await waitFor(() => expect(createArtifactPreview).toHaveBeenCalledTimes(1))
+    rerender(<ArtifactCanvas artifact={page('<p>one</p><p>two', true)} onClose={() => {}} />)
+    rerender(
+      <ArtifactCanvas artifact={page('<p>one</p><p>two</p><p>three', true)} onClose={() => {}} />
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(createArtifactPreview).toHaveBeenCalledTimes(1)
+    rerender(
+      <ArtifactCanvas
+        artifact={page('<p>one</p><p>two</p><p>three</p></body></html>', false)}
+        onClose={() => {}}
+      />
+    )
+    await waitFor(() => expect(createArtifactPreview).toHaveBeenCalledTimes(2))
+    expect(createArtifactPreview).toHaveBeenLastCalledWith(
+      expect.stringContaining('three</p></body>')
     )
   })
 })

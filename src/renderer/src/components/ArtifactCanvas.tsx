@@ -177,9 +177,22 @@ export function ArtifactCanvas({
     }
   }, [artifact.kind])
 
+  // The preview is built from the last complete artifact: every new document reloads the frame,
+  // so following a streaming reply redrew the page twice a second. A partial artifact that starts
+  // with what is shown only grows it; any other artifact (another message) is shown at once.
+  const [previewSource, setPreviewSource] = useState<Artifact>(artifact)
+  if (
+    previewSource !== artifact &&
+    (!artifact.partial ||
+      previewSource.kind !== artifact.kind ||
+      !artifact.code.startsWith(previewSource.code))
+  ) {
+    setPreviewSource(artifact)
+  }
+
   const documentHtml = useMemo(() => {
     if (!runtime) return ''
-    const { code, kind } = artifact
+    const { code, kind } = previewSource
     if (kind === 'text' || kind === 'image') return ''
     const base =
       '<meta charset="utf-8"><style>html,body{margin:0;background:#fff;color:#111;font-family:system-ui,sans-serif}</style>'
@@ -252,7 +265,7 @@ const _Comp = (typeof __ogDefault !== 'undefined' && __ogDefault) || (typeof App
 if (_Comp) { ReactDOM.createRoot(_root).render(React.createElement(_Comp)); }
 else { __ogShow('No React component found — define a component named App or a default export.'); }
 </script></body></html>`
-  }, [artifact, runtime])
+  }, [previewSource, runtime])
   const previewUrl = preview?.html === documentHtml ? preview.url : ''
 
   useEffect(() => {
@@ -601,7 +614,9 @@ else { __ogShow('No React component found — define a component named App or a 
       <div className="flex min-h-0 flex-1 flex-col p-3">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
-            key={`${artifact.kind}:${artifact.title ?? ''}`}
+            // Keyed by kind only: a title that arrives or changes mid-reply must not fade the
+            // whole frame out and back in.
+            key={artifact.kind}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
