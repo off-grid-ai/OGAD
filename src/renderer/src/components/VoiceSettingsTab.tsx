@@ -12,9 +12,11 @@ import {
   runtimeVoiceLanguage,
   runtimeVoicesForLanguage,
   secondsLabel,
+  voiceForAppLanguage,
   type RuntimeSpeechVoice,
   type VoiceTurnMode
 } from '@offgrid/speech'
+import { activeLocale } from '@offgrid/i18n'
 import {
   DEFAULT_VOICE_PREFERENCES,
   VOICE_PREFERENCES_CHANGED_EVENT,
@@ -110,6 +112,10 @@ function VoiceSettingsTabBody(): React.JSX.Element {
   const [preferences, setPreferences] = useState(DEFAULT_VOICE_PREFERENCES)
   const testAudioRef = useRef<HTMLAudioElement | null>(null)
   const requestedVoiceRef = useRef('af_heart')
+  // Until the person picks a voice, the shown voice is the one main speaks with: the app language's.
+  const [voicePicked, setVoicePicked] = useState(false)
+  const followedVoice =
+    !voicePicked && !remoteVoice ? voiceForAppLanguage(voices, activeLocale().code)?.id : undefined
 
   const loadVoices = useCallback((): void => {
     setAssetsState('loading')
@@ -166,6 +172,7 @@ function VoiceSettingsTabBody(): React.JSX.Element {
         const savedVoice = typeof settings.ttsVoice === 'string' ? settings.ttsVoice : null
         if (savedVoice) {
           setVoice(savedVoice)
+          setVoicePicked(true)
         }
         setPreferences(readVoicePreferences(settings))
       })
@@ -178,7 +185,13 @@ function VoiceSettingsTabBody(): React.JSX.Element {
   }, [loadVoices])
 
   useEffect(() => {
+    if (settingsLoaded && followedVoice && followedVoice !== voice) setVoice(followedVoice)
+  }, [followedVoice, settingsLoaded, voice])
+
+  useEffect(() => {
     if (remoteVoice || !settingsLoaded || !voices.some(({ id }) => id === voice)) return
+    // Not the voice main speaks with yet: the effect above switches to it first.
+    if (followedVoice && followedVoice !== voice) return
     requestedVoiceRef.current = voice
     setAssetsState('checking')
     setProgress({ percentage: 0 })
@@ -193,7 +206,7 @@ function VoiceSettingsTabBody(): React.JSX.Element {
       .catch(() => {
         if (requestedVoiceRef.current === voice) setAssetsState('error')
       })
-  }, [remoteVoice, settingsLoaded, voice, voices])
+  }, [followedVoice, remoteVoice, settingsLoaded, voice, voices])
 
   // Every progress report restarts the clock, so only a download that has gone quiet times out,
   // for example one that sits at 100% with 0 MB of 0 MB.
@@ -283,6 +296,7 @@ function VoiceSettingsTabBody(): React.JSX.Element {
         ? language
         : (runtimeVoiceLanguage(runtimeVoice)?.code ?? language)
     )
+    setVoicePicked(true)
     void Promise.resolve(window.api.saveSetting('ttsVoice', nextVoice)).catch(() => {
       setVoice(previous.voice)
       setLanguage(previous.language)

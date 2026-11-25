@@ -16,6 +16,7 @@ import {
   joinPcmWavs,
   speechChunks,
   spokenText,
+  voiceForAppLanguage,
   type RuntimeSpeechVoice
 } from '@offgrid/speech'
 import fs from 'fs'
@@ -212,6 +213,14 @@ export async function listVoiceCatalog(
     }))
   onProgress?.(100)
   return voices
+}
+
+/**
+ * The voice for the app language, for a person who has not picked one: the first local voice that speaks
+ * it (English, or a language this machine cannot voice, keeps the default).
+ */
+export async function appLanguageVoice(appLanguage: string): Promise<string | undefined> {
+  return voiceForAppLanguage(await listVoiceCatalog(undefined, { local: true }), appLanguage)?.id
 }
 
 export async function listVoices(

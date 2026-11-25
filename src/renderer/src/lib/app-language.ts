@@ -35,6 +35,15 @@ export function currentLanguage(): Locale {
   return resolveLocale(systemLanguages(), pickedLanguage())
 }
 
+/**
+ * Main reads the app language from settings: dictation, spoken replies and the reply-language line follow
+ * it. Only this window knows the computer's language, so it saves the resolved code on every apply.
+ */
+function shareWithMain(code: string): void {
+  const save = (window as { api?: Partial<Pick<Window['api'], 'saveSetting'>> }).api?.saveSetting
+  void Promise.resolve(save?.('appLanguage', code)).catch(() => {})
+}
+
 // The newest load: a slower load for an earlier pick never replaces it.
 let latestApply: Promise<Locale> | null = null
 
@@ -48,6 +57,7 @@ export function applyAppLanguage(): Promise<Locale> {
     if (latestApply !== null && latestApply !== run) return latestApply
     setCatalog(locale.code, strings)
     document.documentElement.lang = locale.tag
+    shareWithMain(locale.code)
     return locale
   })
   latestApply = run

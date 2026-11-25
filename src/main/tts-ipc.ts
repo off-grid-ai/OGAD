@@ -61,13 +61,16 @@ export function setupTtsIpc(): void {
   // `passKey`: the renderer wants each finished pass of a long reply as it is ready
   // ('tts:speech-pass'), so it can start playing before the whole clip is made.
   ipcMain.handle('tts:speak', async (event, text: string, voice?: string, passKey?: string) => {
-    const { synthesize } = await import('./tts')
+    const { synthesize, appLanguageVoice } = await import('./tts')
     const { getActiveRemoteVisionServerForModality } = await import('./vision/remote-vision-server')
     const remote = getActiveRemoteVisionServerForModality('voice')
     let chosenVoice = voice
     if (!chosenVoice && !remote) {
       try {
-        chosenVoice = getSetting<string>('ttsVoice', '') || undefined
+        // The person's pick, else a voice in the app language.
+        chosenVoice =
+          getSetting<string>('ttsVoice', '') ||
+          (await appLanguageVoice(getSetting<string>('appLanguage', 'en')))
       } catch {
         /* synthesize owns the default voice when settings are unavailable */
       }

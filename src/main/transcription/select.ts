@@ -18,7 +18,7 @@ import { whisperServerTranscription as whisperResident } from './whisper-server-
 import { getActiveModal } from '../active-models'
 import { modelDisplayName } from '@offgrid/models'
 import { catalogModelsByKind } from '../models/remote-catalog'
-import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
+import { needsMultilingualSpeech, transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
 import type { ManagedRuntime } from '../runtime-manager'
 import { getSetting } from '../database'
 import { getActiveRemoteVisionServerForModality } from '../vision/remote-vision-server'
@@ -152,6 +152,17 @@ export function engineForActiveModel(
 export type TranscriptionSettingReader = (key: string, fallback: string) => string
 
 /**
+ * The dictation language before the model's limits: the person's pick (Settings → Transcription), else
+ * the app language. An English app keeps auto-detect, as before speech followed the app language.
+ */
+export function sttLanguageSetting(readSetting: TranscriptionSettingReader = getSetting): string {
+  const picked = readSetting('sttLanguage', '')
+  if (picked) return picked
+  const app = readSetting('appLanguage', 'en')
+  return needsMultilingualSpeech(app) ? app : 'auto'
+}
+
+/**
  * Resolve the transcription service implied by the active model choice, honoring the
  * whisper fallback when Parakeet isn't installed. This is what core, engine-agnostic
  * paths (generic mic transcription, file/RAG ingestion) call so a Parakeet selection is
@@ -184,7 +195,7 @@ export function getActiveTranscription(
             return transcribeRemoteAudio(
               remote,
               input.path,
-              options?.language ?? readSetting('sttLanguage', 'auto'),
+              options?.language ?? sttLanguageSetting(readSetting),
               options?.signal
             )
           }
@@ -204,7 +215,7 @@ export function getLocalTranscription(
   const active = getActiveModal('transcription')
   const engine = engineForActiveModel(active, catalogModelsByKind('transcription'))
   const language = resolveConfiguredTranscriptionLanguage(
-    readSetting('sttLanguage', 'auto'),
+    sttLanguageSetting(readSetting),
     transcriptionLanguages(engine, active)
   )
   return withConfiguredTranscriptionLanguage(getTranscription(engine), language)
@@ -224,7 +235,7 @@ export function getTeamLaneTranscription(
   const engine = engineForActiveModel(active, catalogModelsByKind('transcription'))
   if (engine !== 'whisper' || !lane.isAvailable()) return null
   const language = resolveConfiguredTranscriptionLanguage(
-    readSetting('sttLanguage', 'auto'),
+    sttLanguageSetting(readSetting),
     transcriptionLanguages(engine, active)
   )
   return withConfiguredTranscriptionLanguage(lane, language)
@@ -473,7 +484,7 @@ export async function readTranscriptionInfo(): Promise<
       name: model.name,
       files: model.files ?? []
     })),
-    getSetting('sttLanguage', 'auto')
+    sttLanguageSetting(getSetting)
   )
   // The built-in Whisper entry is always listed; whether speech can become text depends on a model
   // file being there (or a remote server doing it).
