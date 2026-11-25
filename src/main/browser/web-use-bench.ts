@@ -15,6 +15,8 @@ import { benchTrace, type BenchRecord } from './web-use-bench-trace'
  *   OFFGRID_WEBUSE_BENCH_MODELS=<json>       the four endpoints (WebUseAgentModels), for this run only
  *   OFFGRID_WEBUSE_BENCH_ONLY=<id,id>        optional: only these tasks
  *   OFFGRID_WEBUSE_BENCH_LIMIT_MS=<ms>       optional: time limit per task (default 6 minutes)
+ *   OFFGRID_WEBUSE_BENCH_STRATEGY=same_as_chat  optional: one model, the chat model, runs the whole
+ *                                            task (the harness for a large general model)
  */
 
 export { benchTrace, type BenchRecord }
@@ -55,8 +57,12 @@ export async function startWebUseBench(browser?: BenchBrowser): Promise<void> {
   const models = process.env.OFFGRID_WEBUSE_BENCH_MODELS
     ? (JSON.parse(process.env.OFFGRID_WEBUSE_BENCH_MODELS) as WebUseAgentModels)
     : undefined
+  const strategy =
+    process.env.OFFGRID_WEBUSE_BENCH_STRATEGY === 'same_as_chat'
+      ? 'same_as_chat'
+      : 'planner_actor_evaluator'
   setWebUseSettingsOverride({
-    modelStrategy: 'planner_actor_evaluator',
+    modelStrategy: strategy,
     browserTarget: 'in_app',
     ...(models ? { agentModels: models } : {})
   })
@@ -65,7 +71,7 @@ export async function startWebUseBench(browser?: BenchBrowser): Promise<void> {
     (task) => !task.id.startsWith('clone-') && (!only || only.includes(task.id))
   )
   const pane = browser ?? (await appBrowser())
-  console.log(`[web-use][bench] ${tasks.length} tasks -> ${out}`)
+  console.log(`[web-use][bench] ${tasks.length} tasks (${strategy}) -> ${out}`)
   const results: Record<string, unknown>[] = []
   for (const task of tasks) {
     const record: BenchRecord = {
