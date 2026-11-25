@@ -479,7 +479,9 @@ export class BrowserDriver {
   /** Move the watched-page pointer to a Playwright accessibility reference.
    * Playwright boxes and CDP input share viewport CSS coordinates, so this is
    * presentation only: Playwright remains the single semantic actuator. */
-  async projectSemanticTarget(ref: string, snapshot: string): Promise<boolean> {
+  /** Move the pointer to a ref's center before Playwright acts on it. marks: the action presses
+   * there, so the click ring moves too (it stayed on the last coordinate click, looking off-target). */
+  async projectSemanticTarget(ref: string, snapshot: string, marks = false): Promise<boolean> {
     const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const line = snapshot
       .split('\n')
@@ -495,6 +497,10 @@ export class BrowserDriver {
     if (![x, y, width, height].every(Number.isFinite)) return false
     await this.ensurePointer(true)
     await this.movePointerTo(x + width / 2, y + height / 2)
+    if (marks) {
+      this.lastClick = { x: x + width / 2, y: y + height / 2 }
+      await this.showPointer(this.pointer)
+    }
     return true
   }
 
