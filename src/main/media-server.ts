@@ -69,18 +69,41 @@ export class LoopbackMediaServer {
   }
 
   private async listenOnFreePort(): Promise<void> {
+    // Free when checked can be taken before listen: the local API scans the same ports at the same
+    // startup (25 Nov: both picked 7880, the API bound first, media playback failed). Take the next.
+    let from = this.requestedPort
+    try {
+      for (;;) {
+        try {
+          await this.listenFrom(from)
+          return
+        } catch (error) {
+          const taken = (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
+          const next = this.lastTarget + 1
+          if (!taken || from === 0 || next >= this.requestedPort + MEDIA_PORT_RANGE) throw error
+          from = next
+        }
+      }
+    } finally {
+      this.startPromise = null
+    }
+  }
+
+  private lastTarget = 0
+
+  private async listenFrom(from: number): Promise<void> {
     // The preferred media port (MEDIA_PORT) may be taken by another Off Grid AI Desktop instance; scan upward
     // for a free one. requestedPort 0 = let the OS assign (tests) — inherently free. urlFor() serves
     // the LIVE boundPort, so downstream links follow wherever it bound.
-    const target = this.requestedPort > 0
+    const target = from > 0
       ? await pickFreePort(
-          this.requestedPort,
+          from,
           (port) => isPortFree(port, '127.0.0.1'),
-          MEDIA_PORT_RANGE
+          this.requestedPort + MEDIA_PORT_RANGE - from
         )
       : 0
+    this.lastTarget = target ?? 0
     if (target === null) {
-      this.startPromise = null
       throw new Error('No free loopback media port.')
     }
     const candidate = http.createServer((req, res) => this.handle(req, res))
@@ -91,7 +114,6 @@ export class LoopbackMediaServer {
           this.server = null
           this.boundPort = 0
         }
-        this.startPromise = null
         reject(error)
       }
       candidate.once('error', fail)
@@ -105,7 +127,6 @@ export class LoopbackMediaServer {
           return
         }
         this.boundPort = address.port
-        this.startPromise = null
         resolve()
       })
     })
