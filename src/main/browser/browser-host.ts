@@ -1586,6 +1586,8 @@ class BrowserHost implements BrowserRailHost {
               handoffs: 0
             }
           }
+          const autofill = (): Promise<string | null> =>
+            this.agentAutofill(journeyId, recordStep, owner.controller.signal)
           const semanticInput: Parameters<typeof runBrowserPlaywrightTask>[0] = {
             goal,
             plan,
@@ -1636,6 +1638,7 @@ class BrowserHost implements BrowserRailHost {
               return llm.hasVision() ? semanticScreen.capture() : undefined
             },
             onObservation: recordSemanticEvidence,
+            autofill,
             sandboxProfile: Boolean(profile),
             signal: owner.controller.signal
           }
@@ -1649,8 +1652,7 @@ class BrowserHost implements BrowserRailHost {
                 models: webUse.agentModels,
                 screenshot: () => captureBrowserAgentFrame(activePage().view, activePage().driver),
                 browser: {
-                  autofill: () =>
-                    this.agentAutofill(journeyId, recordStep, owner.controller.signal),
+                  autofill,
                   visits: (address) =>
                     this.visits.taskTrail(taskId).filter((visit) => visit.url === address).length,
                   showTab: (index) => {

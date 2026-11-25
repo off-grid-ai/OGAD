@@ -218,6 +218,7 @@ async function runSemanticStep(
   if (input.guard.snapshot().observationRequired) {
     state.observation = await observeWithCurrentLease(input)
   }
+  await vaultSignIn(context)
   input.onProgress(step, 'thinking', 'Deciding the next step')
   const modelLease = input.guard.currentActionLease()
   let decision: SemanticDecision
@@ -393,6 +394,18 @@ async function terminalDecision(
   return decision.action === 'fallback'
     ? fallback(decision.reason || 'The page needs visual control.', state.handoffs)
     : undefined
+}
+
+/**
+ * The Vault signs in, as it does for the agent: the model sees the filled username, never the
+ * password, so a sign-in form is not handed to the person when the Vault holds the login.
+ */
+async function vaultSignIn({ input, state }: SemanticLoopContext): Promise<void> {
+  const filled = await input.autofill?.().catch(() => null)
+  if (!filled) return
+  input.onStep(filled)
+  remember(state, filled)
+  state.observation = await observeWithCurrentLease(input)
 }
 
 async function performHumanHandoff(
