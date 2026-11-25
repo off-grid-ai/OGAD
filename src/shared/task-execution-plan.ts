@@ -192,22 +192,34 @@ export function isTaskPlanControlStep(step: string): boolean {
 export function taskExecutionPlanProgress(
   steps: readonly string[]
 ): { plan: TaskExecutionPlan; activePhaseIndex: number } | null {
-  const plan = steps.map(decodeTaskExecutionPlan).find(Boolean)
+  // The newest plan is the one running: a re-plan, or the task's plan after a reading phase,
+  // replaces the earlier one, and only phases recorded after it count (25 Nov: the stages still
+  // showed the email-reading plan while the agent was booking the flight).
+  let at = -1
+  let plan: TaskExecutionPlan | null = null
+  steps.forEach((step, index) => {
+    const decoded = decodeTaskExecutionPlan(step)
+    if (decoded) {
+      plan = decoded
+      at = index
+    }
+  })
   if (!plan) return null
+  const current: TaskExecutionPlan = plan
   let activePhaseIndex = 0
-  for (const step of steps) {
+  for (const step of steps.slice(at + 1)) {
     const resumedPhaseId = decodeTaskPhaseResume(step)
     if (resumedPhaseId) {
-      const index = plan.phases.findIndex((phase) => phase.id === resumedPhaseId)
+      const index = current.phases.findIndex((phase) => phase.id === resumedPhaseId)
       if (index >= 0) activePhaseIndex = index
       continue
     }
     const phaseId = decodeTaskPhase(step)
     if (!phaseId) continue
-    const index = plan.phases.findIndex((phase) => phase.id === phaseId)
+    const index = current.phases.findIndex((phase) => phase.id === phaseId)
     if (index >= 0) activePhaseIndex = Math.max(activePhaseIndex, index)
   }
-  return { plan, activePhaseIndex }
+  return { plan: current, activePhaseIndex }
 }
 
 export function countTaskTraceSteps(steps: readonly string[]): number {
