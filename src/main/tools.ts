@@ -8,6 +8,7 @@
 import { track } from './analytics'
 import { offgridGuideTool } from './tools/offgrid-guide-tool'
 import { llm } from './llm'
+import { replyLanguageLine } from '@offgrid/i18n'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import type { ResponseCutoffContract } from '../shared/ipc-contracts'
 import { SEARCH_KB_TOOL } from '@offgrid/rag'
@@ -901,6 +902,15 @@ function earlyImageRequest(
   }
 }
 
+/** "Reply in my language", when the person turned it on for a non-English app (opt-in, never forced). */
+function replyLanguagePart(): string {
+  const line = replyLanguageLine(
+    getSetting<string>('appLanguage', 'en'),
+    getSetting<boolean>('replyInAppLanguage', false) === true
+  )
+  return line ? `\n\n${line}` : ''
+}
+
 export async function toolChat(
   query: string,
   history: { role: string; content: string }[] = [],
@@ -1072,7 +1082,8 @@ export async function toolChat(
         ? '\nThis request comes from a paired browser tab. Use web_use for requested work on that website, including opening notifications. It will use that tab and its current login. Prefer visible page controls; do not invent URL paths or supply a guessed starting URL.'
         : ''
     ],
-    ['standingRules', standingRules(opts.rules)]
+    ['standingRules', standingRules(opts.rules)],
+    ['replyLanguage', replyLanguagePart()]
   ]
   const sys = systemParts.map(([, text]) => text).join('')
   // Estimated tokens of each system-prompt addition, by source (the base is what remains).
