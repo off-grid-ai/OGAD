@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { translate } from '@offgrid/i18n'
 import { Button } from './ui/button'
 import { openModelSettingsPanel, type ModelSettingsPanelTab } from '@renderer/lib/model-settings-panel'
 import { FEATURE_NAMES } from '@offgrid/features'
@@ -73,6 +74,18 @@ const SETTINGS_TITLE_IDS = Object.fromEntries(
     .filter(([id]) => id !== 'permissions')
     .map(([id, title]) => [title, id])
 ) as Record<string, string>
+
+// A card receives its title in the app language (the i18n runtime translates the title prop), so the
+// group's open id is the shown title: map section ids to it and back through the same translation.
+function shownSectionTitle(id: string): string | null {
+  const title = SETTINGS_SECTION_TITLES[id]
+  return title ? translate(title) : null
+}
+
+function sectionIdOf(shownTitle: string): string | null {
+  const english = Object.keys(SETTINGS_TITLE_IDS).find((title) => translate(title) === shownTitle)
+  return english ? SETTINGS_TITLE_IDS[english]! : null
+}
 
 export const SETTINGS_DESTINATIONS = Object.entries(SETTINGS_TITLE_IDS).map(
   ([label, subroute]) => ({ label, view: 'settings', subroute })
@@ -186,17 +199,15 @@ export function Settings({
           {/* Grid of section cards; clicking one opens it as a full-width L2 detail
               (single-open) and hides the rest — one seam via SettingsCardsGroup. */}
           <SettingsCardsGroup
-            initialOpenId={selectedSection ? SETTINGS_SECTION_TITLES[selectedSection] : null}
+            initialOpenId={selectedSection ? shownSectionTitle(selectedSection) : null}
             openId={
               onSectionChange
                 ? selectedSection
-                  ? (SETTINGS_SECTION_TITLES[selectedSection] ?? null)
+                  ? shownSectionTitle(selectedSection)
                   : null
                 : undefined
             }
-            onOpenIdChange={(title) =>
-              onSectionChange?.(title ? (SETTINGS_TITLE_IDS[title] ?? null) : null)
-            }
+            onOpenIdChange={(title) => onSectionChange?.(title ? sectionIdOf(title) : null)}
           >
             {/* Each section is a collapsed-by-default accordion (SettingsCard). */}
             <SettingsCard
