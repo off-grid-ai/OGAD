@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs'
 export interface SandboxProfile {
   id: string
   label: string
-  /** The paid-agent job family it practises (docs/agent-browser/training-tasks.json). */
+  /** The paid-agent job family it practises. */
   category: 'email' | 'calendar' | 'shop' | 'travel' | 'bank' | 'docs' | 'forms'
   /** Hosts the profile may open. Subresources (scripts, images) are not limited. */
   hosts: string[]

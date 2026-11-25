@@ -1,6 +1,6 @@
-# Agent browser: sandbox test accounts and training tasks
+# Agent browser: sandbox test accounts
 
-For the LFM3 pipeline owner. The built-in browser is the web agent's local sandbox. Signed-in jobs
+The built-in browser is the web agent's local sandbox. Signed-in jobs
 run on test accounts only, never on a person's real accounts or data.
 
 ## What the browser gives the harness
@@ -25,7 +25,7 @@ run on test accounts only, never on a person's real accounts or data.
 - **Logins come from the Vault.** The harness fills the page; the model never sees the password.
   Passwords are also masked in every snapshot and tool result (`browser-secret-scrub.ts`).
 - **Send / pay / delete.** On real sites the harness stops and asks the person first. Inside a
-  sandbox profile it goes ahead, so training runs unattended.
+  sandbox profile it goes ahead, so bench runs go unattended.
 - **Visits.** Each bench record has `visits` (the task's page trail). When a page was opened 3+
   times, the prompt gets one line saying so. On by default (Mac, 22 Nov);
   `OFFGRID_AGENT_VISIT_HINT=0` turns it off for the with/without A/B.
@@ -69,8 +69,8 @@ Point the names at the proxy on the machine that runs OGAD (`/etc/hosts`):
 127.0.0.1 offgrid-mail.test offgrid-cloud.test offgrid-shop.test offgrid-air.test offgrid-bank.test offgrid-forms.test
 ```
 
-Seed each app with fake people, mail, events, orders and transactions that match the goals in
-`training-tasks.json` (names such as Priya Shah, Northwind Supplies, booking ABC123).
+Seed each app with fake people, mail, events, orders and transactions that match the bench goals
+(names such as Priya Shah, Northwind Supplies, booking ABC123).
 
 ## Save the test logins
 
@@ -82,32 +82,15 @@ Seed each app with fake people, mail, events, orders and transactions that match
 
 ## The task list
 
-`python3 scripts/agent-browser/build-training-tasks.py` writes:
-
-- `training-tasks.json`: everything, with labels: `part`, `category`, `stage`, `split`, `read_only`.
-- `bench-train.json` and `bench-holdout.json`: plain bench lists (`{id, goal, url?, profile?}`).
-
-What is in it:
-
-- **Part 1, the 12 paid-agent jobs** (email, calendar, forms, travel, appointments, returns,
-  research-then-buy, lower a bill, government errands, summarise docs, sort saved items, work
-  reports): 57 tasks on the sandbox profiles. Stage 2.
-- **Part 2, 25 common web jobs x 10 sites x 10 tasks**: read-only tasks on public sites. Stage 1
-  for read-only categories; categories that need a sign-in to do the real job (email, social,
-  messaging, bank, docs, calendar) stay on public help and pricing pages and are stage 2.
-- **Holdout:** the one holdout shared with the LFM3 new-site set (`tasks-newsites-*`): 25 sites,
-  one per category. Tasks on them are labelled `holdout`: harness benches only, never LFM3 training.
-- **Excluded everywhere:** WebVoyager's 15 sites and the Mind2Web-Live test sites we had listed.
-  `--check` fails the build if one slips in.
-
-Suggested order: stage 1 first, then part 1 on the sandboxes, then the stage-2 public tasks.
+`bench-holdout.json` is a plain bench list (`{id, goal, url?, profile?}`): 25 sites, one per
+category, for harness benches.
 
 ## The workstation sandbox (running)
 
 Set up on the Linux workstation on 22 Nov. The files are in `scripts/agent-browser/sandbox/`, and a
 working copy runs from `~/agent-sandbox/`. Everything binds to `127.0.0.1` and nothing is reachable
-from outside the box. Containers use CPUs 0-7 only and have small CPU and memory limits, so LFM3
-training keeps its headroom.
+from outside the box. Containers use CPUs 0-7 only and have small CPU and memory limits, so other
+work on the box keeps its headroom.
 
 | profile    | host                  | app                                             | direct port      | test user                |
 | ---------- | --------------------- | ----------------------------------------------- | ---------------- | ------------------------ |
@@ -130,7 +113,7 @@ training keeps its headroom.
   subscriptions with "last used", plan switching, disputes, fines, plates and clinic slots. Those
   demos do not have these features. Data lives in memory and is seeded relative to today, so a
   restart gives a clean state.
-- **Seed data** (`seed/seed.py` for mail and Nextcloud) matches `training-tasks.json`: Priya Shah's
+- **Seed data** (`seed/seed.py` for mail and Nextcloud) matches the bench goals: Priya Shah's
   Thursday 3pm ask, the Northwind Supplies invoice NW-2291, the Q3 offsite thread, newsletters
   older and newer than 7 days, tracking number PW-7731-4402-9918, Standup tomorrow, Lunch with
   Sam on Wednesday, Sprint planning, the busy and free parts of Friday afternoon, `Q3 plan.docx`,
@@ -149,7 +132,6 @@ Commands (on the workstation):
 ~/agent-sandbox/sandbox.sh reset    # clean shop/airline/bank/forms, re-seed mail + cloud (do this before a run)
 ~/agent-sandbox/sandbox.sh down     # stop (data kept in docker volumes)
 ~/agent-sandbox/ogad/run-ogad.sh    # OGAD dev app on :99, sandbox profile, CDP on 9333
-~/agent-sandbox/ogad/serve-cpu.sh start|stop   # LFM3 r16 roles on the CPU (cores 0-7), 127.0.0.1:8471-8473
 ~/agent-sandbox/ogad/bench.sh [tasks.json] [out]  # sign out, reset, start OGAD, unlock the Vault, run the bench
 ```
 
@@ -169,9 +151,9 @@ opens each profile, fills its login from the Vault and checks the sign-in.
   In the app it is Connections → Email (IMAP), server `imap://127.0.0.1:1143`.
 - `OTP=1 ./bench.sh ogad/bench-otp.json` turns the codes on and runs the OTP tasks:
   `otp-bank-balance`, `otp-bank-dispute`, `otp-airline-next-trip`, `otp-airline-bag`,
-  `otp-airline-cancel` (format of `bench-train.json`: `{id, goal, profile}`).
+  `otp-airline-cancel` (format `{id, goal, profile}`).
 - Every task on `bank` or `airline` meets the code page while OTP is on, so with `OTP=1` the
-  existing bank and airline tasks also train the step.
+  existing bank and airline tasks also exercise the step.
 
 Not yet set up: office editing in Nextcloud (Collabora). Four `calendar` tasks edit `.docx` or
 `.xlsx` files or make charts (`paid-summarise_docs-02`, `paid-work_reports-02/03/04`), and they
@@ -200,11 +182,11 @@ fill, secret scrub, commit gate. All six profiles pass:
   httpbin pizza form, then asked to click "Submit order". The click never ran. The task waited on
   the ask until the time limit, and the final page was still the filled form.
 
-**LFM3 r16 on the CPU** (`serve-cpu.sh`). The real model ends all six tasks without success:
+**A small local model.** It ended all six tasks without success:
 
-- mail, airline: it tries to type into the password field. The harness blocks this
+- mail, airline: it tried to type into the password field. The harness blocks this
   (`sensitive_field`). It should click Sign in after the Vault fill.
-- calendar: it keeps pressing Enter.
+- calendar: it kept pressing Enter.
 - shop, bank: stale refs.
 - forms: it clicked the same submit 183 times until the time limit. That run found a form bug,
   now fixed.

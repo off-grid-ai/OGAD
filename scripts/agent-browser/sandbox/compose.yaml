@@ -1,5 +1,5 @@
 # Off Grid web-agent sandbox sites. Everything binds to 127.0.0.1; CPUs 0-7 only, small limits,
-# so LFM3 training on this box keeps its headroom. Start/stop with ./sandbox.sh.
+# so other work on this box keeps its headroom. Start/stop with ./sandbox.sh.
 x-limits: &limits
   cpuset: "0-7"
   restart: unless-stopped
