@@ -1,4 +1,3 @@
-import { translate } from '@offgrid/i18n'
 import { track } from '@renderer/lib/analytics'
 import { openModelsTab } from '@/lib/readiness-actions'
 import { CHAT_IMAGE_MODE_EVENT, takeImageModeRequest } from '@/lib/chat-image-mode'
@@ -3861,16 +3860,38 @@ export function MemoryChat({
   const followedContent = followedArtifactMessage?.content ?? null
   const followedStreaming = Boolean(followedArtifactMessage?.streaming)
   const [liveCanvasArtifact, setLiveCanvasArtifact] = useState<Artifact | null>(null)
+  const lastFollowedContentRef = useRef<string | null>(null)
+  const lastCanvasReadRef = useRef(0)
   useEffect(() => {
-    if (followedContent === null) {
+    if (canvasMessageId === null) {
+      lastFollowedContentRef.current = null
       setLiveCanvasArtifact(null)
       return
     }
-    // Every new artifact document reloads the preview frame, so re-reading while the reply streams
-    // made the canvas flicker. The canvas keeps what it shows and renders the finished artifact once.
-    if (followedStreaming) return
-    setLiveCanvasArtifact(parseArtifact(followedContent))
-  }, [followedContent, followedStreaming])
+    if (followedContent === null) {
+      // A finished reply replaces its streaming message with the saved copy under a new id. The
+      // last streamed content holds the whole artifact, so the canvas renders that, not the partial
+      // artifact it opened with.
+      const last = lastFollowedContentRef.current
+      if (last !== null) setLiveCanvasArtifact(parseArtifact(last))
+      return
+    }
+    lastFollowedContentRef.current = followedContent
+    const read = (): void => {
+      lastCanvasReadRef.current = Date.now()
+      setLiveCanvasArtifact(parseArtifact(followedContent))
+    }
+    // The code pane follows the reply as it streams; the canvas rebuilds its preview only from a
+    // complete artifact (ArtifactCanvas), so this no longer reloads the frame.
+    const wait = followedStreaming ? 150 - (Date.now() - lastCanvasReadRef.current) : 0
+    if (wait <= 0) {
+      read()
+      return
+    }
+    // A throttle, not a debounce: a new token reschedules for the same moment, never later.
+    const timer = window.setTimeout(read, wait)
+    return () => window.clearTimeout(timer)
+  }, [canvasMessageId, followedContent, followedStreaming])
   const shownCanvasArtifact = liveCanvasArtifact ?? canvasArtifact
 
   const openGallery = useCallback(() => {
@@ -4920,7 +4941,7 @@ export function MemoryChat({
               <span className="truncate">In {activeProjectName}</span>
             </button>
           ) : (
-            translate('Private and on this device. Chat, generate, and build.')
+            'Private and on this device. Chat, generate, and build.'
           )
         }
         actions={

@@ -4,6 +4,8 @@ import { AnimatePresence, motion } from 'motion/react'
 import AIArtifact from '@offgrid/operator-ui/operator/ai-artifact'
 import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { ARTIFACT_KIND_LABELS, type ArtifactKind } from '@renderer/lib/artifact-labels'
+import { withHtmlErrorOverlay } from '@renderer/lib/artifact-error-overlay'
+import { useFollowScrollBottom } from '@renderer/lib/use-follow-scroll-bottom'
 import { artifactTitle } from '../../../shared/artifact-title'
 import { modelDisplayName } from '@offgrid/models'
 import { capturePathFromUrl } from '../../../shared/ogcapture-url'
@@ -15,7 +17,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 // Renders a model-generated artifact (HTML / SVG / Mermaid / React) in a SANDBOXED
 // iframe with sandbox="allow-scripts" only and no same-origin access, so generated
 // code cannot touch the app or filesystem. Its response CSP blocks every external
-// origin except the exact esm.sh host used when a React artifact imports a package.
+// origin except esm.sh and the public script CDNs (cdnjs, jsDelivr, unpkg).
 // Bundled React/Babel/Mermaid keep artifacts without extra packages fully offline.
 
 // 'text'/'image' are catalogued inputs (uploaded file / pasted block / image) —
@@ -118,6 +120,9 @@ export function ArtifactCanvas({
   // preview is never shown while the new one is being registered.
   const [preview, setPreview] = useState<{ html: string; url: string } | null>(null)
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null)
+  // The code tab follows new code as it streams while it is scrolled to the end.
+  const artifactFrameRef = useRef<HTMLDivElement | null>(null)
+  useFollowScrollBottom(artifactFrameRef, 'pre', artifact.code)
   const artifactAudioRef = useRef<HTMLAudioElement | null>(null)
   // Holds the active drag's teardown so we can force it on unmount — otherwise
   // closing the canvas mid-drag (e.g. switching chats) leaks the window listeners
@@ -176,16 +181,31 @@ export function ArtifactCanvas({
     }
   }, [artifact.kind])
 
+  // The preview is built from the last complete artifact: every new document reloads the frame,
+  // so following a streaming reply redrew the page twice a second. A partial artifact that starts
+  // with what is shown only grows it; any other artifact (another message) is shown at once.
+  const [previewSource, setPreviewSource] = useState<Artifact>(artifact)
+  if (
+    previewSource !== artifact &&
+    (!artifact.partial ||
+      previewSource.kind !== artifact.kind ||
+      !artifact.code.startsWith(previewSource.code))
+  ) {
+    setPreviewSource(artifact)
+  }
+
   const documentHtml = useMemo(() => {
     if (!runtime) return ''
-    const { code, kind } = artifact
+    const { code, kind } = previewSource
     if (kind === 'text' || kind === 'image') return ''
     const base =
       '<meta charset="utf-8"><style>html,body{margin:0;background:#fff;color:#111;font-family:system-ui,sans-serif}</style>'
     if (kind === 'html') {
-      return /<html|<!doctype/i.test(code)
-        ? code
-        : `<!doctype html><html><head>${base}</head><body>${code}</body></html>`
+      return withHtmlErrorOverlay(
+        /<html|<!doctype/i.test(code)
+          ? code
+          : `<!doctype html><html><head>${base}</head><body>${code}</body></html>`
+      )
     }
     if (kind === 'svg') {
       return `<!doctype html><html><head>${base}</head><body style="display:flex;justify-content:center;align-items:center;height:100vh">${code}</body></html>`
@@ -249,7 +269,7 @@ const _Comp = (typeof __ogDefault !== 'undefined' && __ogDefault) || (typeof App
 if (_Comp) { ReactDOM.createRoot(_root).render(React.createElement(_Comp)); }
 else { __ogShow('No React component found — define a component named App or a default export.'); }
 </script></body></html>`
-  }, [artifact, runtime])
+  }, [previewSource, runtime])
   const previewUrl = preview?.html === documentHtml ? preview.url : ''
 
   useEffect(() => {
@@ -598,7 +618,10 @@ else { __ogShow('No React component found — define a component named App or a 
       <div className="flex min-h-0 flex-1 flex-col p-3">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
-            key={`${artifact.kind}:${artifact.title ?? ''}`}
+            // Keyed by kind only: a title that arrives or changes mid-reply must not fade the
+            // whole frame out and back in.
+            key={artifact.kind}
+            ref={artifactFrameRef}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
