@@ -195,6 +195,8 @@ async function runAgentTask(input: BrowserAgentTaskInput): Promise<BrowserPlaywr
     {
       observe,
       ...(pageView ? { pageView } : {}),
+      // The same ranker picks PAST from the whole run for the models that read the ranked view.
+      ...(pageView ? { historyView: { roles: pageView.roles, score: pageView.score } } : {}),
       planner: (request) => model('planner', request, null),
       actor: (request, image) => model('actor', request, image),
       evaluator: (request, image) => model('evaluator', request, image),
