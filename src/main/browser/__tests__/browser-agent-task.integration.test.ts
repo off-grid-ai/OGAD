@@ -31,6 +31,8 @@ class AccountPage implements SemanticPageSession {
   acceptOnly = false
   /** A ticking line: the page never settles, so wait_idle times out. */
   restless = false
+  /** The name of the form's button: a commit name ("Place order") makes the gate ask. */
+  button = 'Save'
   private ticks = 0
   private last = ''
   readonly calls: string[] = []
@@ -53,7 +55,7 @@ class AccountPage implements SemanticPageSession {
       `- checkbox "Agree to terms"${this.agreed ? ' [checked]' : ''} [ref=e4]`,
       '- textbox "Password" [ref=e7]',
       '- link "Help" [ref=e6]',
-      '- button "Save" [ref=e5]',
+      `- button "${this.button}" [ref=e5]`,
       ...(this.saved ? ['- text: Saved REF-9'] : [])
     ]
     return {
@@ -342,6 +344,32 @@ describe('Web Use with trained planner, actor and evaluator models', () => {
     expect(outcome).toMatchObject({ ok: false, summary: 'The account form is locked' })
     expect(guard.snapshot().status).toBe('failed')
     expect(benchTrace.current).toMatchObject({ end: 'fail', detail: 'The account form is locked' })
+  })
+
+  it('asks before a commit click and notes the question in the task list record', async () => {
+    const page = new AccountPage()
+    page.consent = false
+    page.button = 'Place order'
+    reply = (call) =>
+      call.model === 'planner'
+        ? PLAN
+        : call.model === 'actor'
+          ? 'click(e5)'
+          : page.saved
+            ? 'success("REF-9")'
+            : 'continue(1)'
+    benchTrace.current = {
+      id: 'agent-ask',
+      goal: 'Order',
+      url: page.url,
+      steps: [],
+      timings: { planner: [], actor: [], evaluator: [], answerer: [] }
+    }
+    const { steps, waited, done } = run(page, models(), 'agent-task-ask')
+    await done
+    expect(waited[0]).toBe('Approve "Place order"? Press Continue to let it, or Stop.')
+    expect(steps).toContain('asking before "Place order"')
+    expect(benchTrace.current?.asks?.[0]).toMatchObject({ what: 'Place order', url: page.url })
   })
 
   it('stops with the reason when a model endpoint answers with an error', async () => {

@@ -11,6 +11,7 @@ import { makeOAuthProvider, ensureLoopback, hasOAuthTokens } from './mcp-oauth'
 import { cancelOAuthAuthorization } from './mcp-oauth-cancellation'
 import { callHook, HOOKS } from './bootstrap/hookRegistry'
 import { notifyConnectorsChanged } from './connector-events'
+import { imapConnectorToolSource } from './mail/imap-mailbox'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -255,7 +256,10 @@ function getConnector(id: number): Connector | undefined {
 }
 
 function connectorToolSource(c: Connector): ConnectorToolSource | undefined {
-  return callHook<ConnectorToolSource>(HOOKS.mcpConnectorToolSource, c.id, c.url)
+  return (
+    imapConnectorToolSource(c.id, c.url) ??
+    callHook<ConnectorToolSource>(HOOKS.mcpConnectorToolSource, c.id, c.url)
+  )
 }
 
 // Build a connected MCP client for a connector. Caller MUST close().

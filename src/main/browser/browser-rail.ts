@@ -35,6 +35,8 @@ export interface BrowserTaskRequest {
   startTab?: StartTab
   /** Shown as the task's first step: why it runs where it does, when that is not what was chosen. */
   notice?: string
+  /** A sandbox test profile to run in (sandbox-profiles.ts): its own sites, cookies and logins. */
+  profileId?: string
 }
 
 export interface BrowserRailHost {

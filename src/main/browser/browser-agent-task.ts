@@ -35,14 +35,44 @@ import {
   observeWithCurrentLease
 } from './browser-playwright-task-support'
 import { callBrowserAgentModel, type BrowserAgentRole } from './browser-agent-models'
-import { benchTrace } from './web-use-bench-trace'
+import { benchTrace, noteBenchAsk } from './web-use-bench-trace'
 import { scoreWebLines, webRankerInstalled } from './web-ranker'
 import { encodeTaskExecutionPlan, encodeTaskPhase } from '../../shared/task-execution-plan'
+import { commitClick, commitKey } from './browser-commit-gate'
+
+/**
+ * The browser around the page (browser-host.ts): the Vault, the task's own trail, tabs and the
+ * uploads folder. Optional, so the extension and Firefox hosts run without it.
+ */
+export interface AgentBrowserPort {
+  /** Fill the Vault login when the page shows a sign-in form. A step note, never a secret. */
+  autofill(): Promise<string | null>
+  /** How many times this task has opened the address. */
+  visits(url: string): number
+  /** Show the tab Playwright just selected. */
+  showTab(index: number): void
+  /** A file from the task's uploads folder, or null when there is none by that name. */
+  uploadPath(name: string): string | null
+}
 
 export interface BrowserAgentTaskInput extends BrowserPlaywrightTaskInput {
   /** The page as the models see it: a JPEG at the CSS viewport size (training: quality 70). */
   screenshot: () => Promise<Buffer>
   models: WebUseAgentModels
+  browser?: AgentBrowserPort
+}
+
+/**
+ * Tell the models when the task is back on a page it already opened twice, the loop the round-12+
+ * traces get stuck in. On by default (Mac, 22 Nov); OFFGRID_AGENT_VISIT_HINT=0 turns it off, for
+ * the with/without A/B against models trained before the line existed.
+ */
+function withVisitHint(snapshot: string, count: number): string {
+  if (process.env.OFFGRID_AGENT_VISIT_HINT === '0' || count < 3) return snapshot
+  return snapshot.replace(
+    /^(- Page URL: \S+)$/m,
+    `$1\n- You have opened this page ${count} times in this task`
+  )
 }
 
 /** The snapshot line of one ref: `- textbox "Email" [ref=e15]`. Same pattern as capture.mjs. */
@@ -103,13 +133,21 @@ async function runAgentTask(input: BrowserAgentTaskInput): Promise<BrowserPlaywr
       const after = await observeWithCurrentLease(input)
       if (!after.isError) read = after
     }
+    // The Vault signs in for the agent: the model sees the filled username, never the password.
+    const filled = await input.browser?.autofill().catch(() => null)
+    if (filled) {
+      input.onStep(filled)
+      const after = await observeWithCurrentLease(input)
+      if (!after.isError) read = after
+    }
     const image = await input.screenshot()
     if (benchTrace.current) benchTrace.current.finalPage = read.text
     await publish(input, { step, phase: 'checking', summary: `Step ${step}` })
+    const url = pageUrl(read.text)
     return {
-      snapshot: read.text,
+      snapshot: withVisitHint(read.text, input.browser?.visits(url) ?? 0),
       image,
-      url: pageUrl(read.text),
+      url,
       scrollY: await scrollPosition(input)
     }
   }
@@ -449,6 +487,8 @@ async function executeAgentAction(
   action: AgentAction,
   snapshot: string
 ): Promise<AgentActionOutcome> {
+  // Before the lease: the question pauses the task, and the answer starts a fresh lease.
+  await askBeforeCommit(input, action, snapshot)
   const lease = input.guard.currentActionLease()
   if (!input.guard.canActuate(lease.epoch)) return { isError: true, text: 'the user has control' }
   const signal = combinedSignal(input.signal, lease.signal)
@@ -570,6 +610,53 @@ async function executeAgentAction(
     }
     case 'back':
       return run(null, () => input.session.call('browser_navigate_back', {}, signal))
+    case 'forward':
+    case 'reload':
+      return run(null, () =>
+        input.session.call(
+          'browser_evaluate',
+          {
+            function:
+              action.name === 'forward'
+                ? `() => { history.forward(); return 'forward' }`
+                : `() => { location.reload(); return 'reloaded' }`
+          },
+          signal
+        )
+      )
+    case 'new_tab': {
+      let url: string | undefined
+      if (first) {
+        try {
+          url = safeWebUrl(text(first))
+        } catch (error) {
+          return { isError: true, text: error instanceof Error ? error.message : String(error) }
+        }
+      }
+      return run(null, () =>
+        input.session.call('browser_tabs', { action: 'new', ...(url ? { url } : {}) }, signal)
+      )
+    }
+    case 'switch_tab': {
+      const index = Number(text(first))
+      const outcome = await run(null, () =>
+        input.session.call('browser_tabs', { action: 'select', index }, signal)
+      )
+      if (!outcome.isError) input.browser?.showTab(index)
+      return outcome
+    }
+    case 'close_tab':
+      return run(null, () => input.session.call('browser_tabs', { action: 'close' }, signal))
+    case 'upload': {
+      const file = input.browser?.uploadPath(text(second))
+      if (!file) return { isError: true, text: 'not_found file in the uploads folder' }
+      const decision = semanticDecision('click', target, snapshot)
+      const opened = await run(decision, () =>
+        clickWithFallback(input.session, ref(decision), signal)
+      )
+      if (opened.isError) return opened
+      return run(null, () => input.session.call('browser_file_upload', { paths: [file] }, signal))
+    }
     case 'scroll_down':
     case 'scroll_up': {
       // Same as capture.mjs: 80% of the viewport, so the next screen overlaps the last.
@@ -595,6 +682,32 @@ async function executeAgentAction(
     default:
       return { isError: true, text: `unsupported ${action.name}` }
   }
+}
+
+/**
+ * Send, pay and delete ask first (browser-commit-gate.ts). The task waits on the person's
+ * Continue; Stop ends it. A sandbox test profile goes straight on.
+ */
+async function askBeforeCommit(
+  input: BrowserAgentTaskInput,
+  action: AgentAction,
+  snapshot: string
+): Promise<void> {
+  if (input.sandboxProfile) return
+  const [first] = action.args
+  let what: string | null = null
+  if (action.name === 'click' || action.name === 'dblclick') {
+    const ref = resolveValue(first, snapshot)
+    what = ref ? commitClick(refLine(snapshot, ref)) : null
+  } else if (action.name === 'press' && first && 'value' in first) {
+    what = commitKey(playwrightKey(String(first.value))) ? 'Send' : null
+  }
+  if (!what) return
+  const why = `Approve "${what}"? Press Continue to let it, or Stop.`
+  input.onStep(`asking before "${what}"`)
+  noteBenchAsk(what, pageUrl(snapshot))
+  await input.waitForUser(why, input.signal)
+  input.signal?.throwIfAborted()
 }
 
 /** Screen and network stop changing: two snapshot reads in a row match. */

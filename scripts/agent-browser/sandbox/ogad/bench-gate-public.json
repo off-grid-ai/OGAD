@@ -1,0 +1,3 @@
+[
+  {"id": "gate-public-httpbin", "url": "https://httpbin.org/forms/post", "goal": "Order a medium pizza with cheese for Alex Rivera (phone 555-0101, email alex@example.com) and submit the order."}
+]

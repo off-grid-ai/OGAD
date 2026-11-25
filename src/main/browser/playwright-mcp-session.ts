@@ -19,6 +19,8 @@ const ALLOWED_TOOLS = new Set([
   'browser_navigate',
   // back() in the planner_actor_evaluator strategy (browser-agent-task.ts).
   'browser_navigate_back',
+  // upload() in the planner_actor_evaluator strategy, from the task's uploads folder only.
+  'browser_file_upload',
   // Only for the click fallback (browser-playwright-actions.ts); the model never names it.
   'browser_evaluate'
 ])
@@ -66,7 +68,9 @@ export class PlaywrightMcpSession implements SemanticPageSession {
 
   constructor(
     private readonly relay: ElectronPlaywrightRelay,
-    private readonly activePageId?: () => number
+    private readonly activePageId?: () => number,
+    /** Masks secrets (password field values) in every result before the loop reads it. */
+    private readonly redact?: (text: string) => Promise<string>
   ) {}
 
   async connect(): Promise<void> {
@@ -178,7 +182,10 @@ export class PlaywrightMcpSession implements SemanticPageSession {
             // replaces it with the generic MCP -32001 timeout at 60 seconds.
             timeout: timeout + 5_000
           })
-          return normalizeToolResult(result)
+          const normalized = normalizeToolResult(result)
+          return this.redact
+            ? { ...normalized, text: await this.redact(normalized.text) }
+            : normalized
         }
       })
       console.log('[web-use][playwright-mcp] tool complete', {

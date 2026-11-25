@@ -3,6 +3,7 @@ import net from 'net'
 import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { configureRuntime } from '../../runtime-env'
 import { WhisperServerService } from '../whisper-server'
 import { WhisperServerTranscription } from '../whisper-server-transcription'
 
@@ -92,6 +93,7 @@ function inferencePids(trace: string): number[] {
 }
 
 afterEach(() => {
+  configureRuntime({ dataDir: undefined })
   if (previousBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
   else process.env.OFFGRID_BIN_DIR = previousBinDir
   if (previousTrace === undefined) delete process.env.OFFGRID_WHISPER_TEST_TRACE
@@ -105,6 +107,8 @@ afterEach(() => {
 describe('resident Whisper request cancellation', () => {
   it('stops active native inference and keeps the shared service usable', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-whisper-cancel-'))
+    // Its own settings database: the backend preference read must never meet another test's file.
+    configureRuntime({ dataDir: path.join(root, 'data') })
     const { trace } = installWhisperBoundary(root)
     const model = path.join(root, 'ggml-base.bin')
     const wav = path.join(root, 'voice.wav')

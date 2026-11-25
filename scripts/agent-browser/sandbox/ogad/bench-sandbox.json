@@ -1,0 +1,8 @@
+[
+  {"id": "sandbox-mail-send", "profile": "mail", "goal": "Reply to the latest email from Priya Shah saying Thursday at 3pm works, then send it."},
+  {"id": "sandbox-calendar-delete", "profile": "calendar", "goal": "Cancel the 'Lunch with Sam' event on Wednesday."},
+  {"id": "sandbox-shop-pay", "profile": "shop", "goal": "Reorder the coffee beans from my last order."},
+  {"id": "sandbox-airline-cancel", "profile": "airline", "goal": "Cancel booking XYZ789 and report the refund amount."},
+  {"id": "sandbox-bank-cancel", "profile": "bank", "goal": "Cancel the streaming subscription I have not used in two months."},
+  {"id": "sandbox-forms-pay", "profile": "forms", "goal": "Pay the parking fine with reference PF-55821."}
+]
