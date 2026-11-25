@@ -306,7 +306,8 @@ describe('Web Use with trained planner, actor and evaluator models', () => {
     )
     expect(page.calls.join('\n')).not.toContain('hunter2')
     expect(page.calls.join('\n')).not.toContain('file:///etc/passwd')
-    expect(steps).toContain('type(e7,"hunter2"): blocked sensitive_field')
+    // The loop holds a password before it reaches the page: the Vault or the person types it.
+    expect(steps).toContain('password typing held')
     expect(steps.some((step) => step.startsWith('verified: Saved REF-9'))).toBe(true)
     // The planner is a general model here: it gets its role instructions first. The actor and
     // evaluator get the screenshot between the two halves of their request.
