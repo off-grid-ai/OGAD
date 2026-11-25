@@ -52,7 +52,18 @@ beforeEach(() => {
       askGuide: () => Promise.resolve({ error: 'no-model' }),
       analytics: { optIn, dismissPrompt },
       // The main-process quick start (the IPC boundary): it downloads the starter chat model.
-      setupQuickStart: quickStart
+      setupQuickStart: quickStart,
+      // Back and Forward (the IPC boundary): main owns Cmd+[ and Cmd+] (the menu on the Mac, the
+      // input hook elsewhere) and sends 'navigate:history', so the page never sees the keydown.
+      onHistoryNavigate: (cb: (direction: 'back' | 'forward') => void): (() => void) => {
+        const onKey = (event: KeyboardEvent): void => {
+          if (!(event.metaKey || event.ctrlKey)) return
+          if (event.key === '[') cb('back')
+          else if (event.key === ']') cb('forward')
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+      }
     },
     matchMedia: (query: string) => ({
       matches: true,

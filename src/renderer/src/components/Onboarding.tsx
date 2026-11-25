@@ -142,20 +142,16 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
   }
 
   // Every step is a route: Cmd+[ goes back, Cmd+] goes forward to a step already reached.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (!(e.metaKey || e.ctrlKey)) return
-      if (e.key === '[' && currentStep > 0) {
-        e.preventDefault()
-        goTo(currentStep - 1)
-      } else if (e.key === ']' && currentStep < reached) {
-        e.preventDefault()
-        goTo(currentStep + 1)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [currentStep, reached, goTo])
+  // The keys reach the app as Back and Forward from the main process (the menu accelerator on the
+  // Mac, the input hook on Linux and Windows), which never hands them to the page as a keydown.
+  useEffect(
+    () =>
+      window.api.onHistoryNavigate((direction) => {
+        if (direction === 'back' && currentStep > 0) goTo(currentStep - 1)
+        else if (direction === 'forward' && currentStep < reached) goTo(currentStep + 1)
+      }),
+    [currentStep, reached, goTo]
+  )
 
   const nextLabel =
     stepId === 'features'
