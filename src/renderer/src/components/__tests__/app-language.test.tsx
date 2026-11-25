@@ -22,7 +22,21 @@ function computerSpeaks(languages: string[]): void {
   vi.spyOn(navigator, 'language', 'get').mockReturnValue(languages[0] ?? '')
 }
 
-beforeEach(() => localStorage.clear())
+// The app's settings store is the other boundary: Settings → Language reads and saves "Reply in my
+// language" there, as the real preload does.
+let savedSettings: Record<string, unknown> = {}
+beforeEach(() => {
+  localStorage.clear()
+  savedSettings = {}
+  Object.assign(window, {
+    api: {
+      getSettings: async () => ({ ...savedSettings }),
+      saveSetting: async (key: string, value: unknown) => {
+        savedSettings[key] = value
+      }
+    }
+  })
+})
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
