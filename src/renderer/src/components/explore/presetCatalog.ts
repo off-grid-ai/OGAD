@@ -125,39 +125,44 @@ ${EXECUTION_RULES}`,
           fields: [
             {
               id: 'brief',
-              label: 'Story brief',
-              help: 'Include the premise, characters, setting, tone, audience, and ending you want.',
+              label: msg('Story brief'),
+              help: msg(
+                'Include the premise, characters, setting, tone, audience, and ending you want.'
+              ),
               kind: 'textarea',
               required: true,
-              placeholder:
+              placeholder: msg(
                 'A retired lunar courier must cross a flooded city to return one last undelivered letter.'
+              )
             },
             {
               id: 'style',
-              label: 'Comic art style',
-              help: 'The selected treatment is repeated in every page prompt.',
+              label: msg('Comic art style'),
+              help: msg('The selected treatment is repeated in every page prompt.'),
               kind: 'style',
               required: true,
               defaultValue: 'American superhero',
               options: [
-                { value: 'American superhero', label: 'American superhero' },
-                { value: 'Manga', label: 'Manga' },
-                { value: 'Ligne claire', label: 'Ligne claire' },
-                { value: 'Noir', label: 'Noir' },
-                { value: 'Indie risograph', label: 'Indie risograph' },
-                { value: 'Painterly fantasy', label: 'Painterly fantasy' }
+                { value: 'American superhero', label: msg('American superhero') },
+                { value: 'Manga', label: msg('Manga') },
+                { value: 'Ligne claire', label: msg('Ligne claire') },
+                { value: 'Noir', label: msg('Noir') },
+                { value: 'Indie risograph', label: msg('Indie risograph') },
+                { value: 'Painterly fantasy', label: msg('Painterly fantasy') }
               ]
             },
             {
               id: 'heroReference',
-              label: 'Hero reference image',
-              help: 'Optional. Choose a clear local photo of one person. Image-to-image models use it privately on your device to keep that person as the hero.',
+              label: msg('Hero reference image'),
+              help: msg(
+                'Optional. Choose a clear local photo of one person. Image-to-image models use it privately on your device to keep that person as the hero.'
+              ),
               kind: 'image'
             },
             {
               id: 'pages',
-              label: 'Story length',
-              help: 'One generated image per page. Enter any whole number from 10 to 100.',
+              label: msg('Story length'),
+              help: msg('One generated image per page. Enter any whole number from 10 to 100.'),
               kind: 'number',
               required: true,
               defaultValue: '10',
@@ -167,24 +172,29 @@ ${EXECUTION_RULES}`,
             },
             {
               id: 'format',
-              label: 'Page format',
-              help: 'Choose how each page should be composed.',
+              label: msg('Page format'),
+              help: msg('Choose how each page should be composed.'),
               kind: 'select',
               required: true,
               defaultValue: 'Portrait page, 3 to 5 panels',
               options: [
-                { value: 'Portrait page, 3 to 5 panels', label: 'Portrait, 3 to 5 panels' },
-                { value: 'Portrait page, 1 full-page panel', label: 'Portrait, full-page art' },
-                { value: 'Landscape page, 3 to 5 panels', label: 'Landscape, 3 to 5 panels' },
-                { value: 'Square page, 2 to 4 panels', label: 'Square, 2 to 4 panels' }
+                { value: 'Portrait page, 3 to 5 panels', label: msg('Portrait, 3 to 5 panels') },
+                {
+                  value: 'Portrait page, 1 full-page panel',
+                  label: msg('Portrait, full-page art')
+                },
+                { value: 'Landscape page, 3 to 5 panels', label: msg('Landscape, 3 to 5 panels') },
+                { value: 'Square page, 2 to 4 panels', label: msg('Square, 2 to 4 panels') }
               ]
             },
             {
               id: 'constraints',
-              label: 'Content and continuity rules',
-              help: 'Add rating, topics to avoid, required scenes, dialogue tone, or visual rules.',
+              label: msg('Content and continuity rules'),
+              help: msg(
+                'Add rating, topics to avoid, required scenes, dialogue tone, or visual rules.'
+              ),
               kind: 'textarea',
-              placeholder: 'All ages. No gore. The red scarf must appear on every page.'
+              placeholder: msg('All ages. No gore. The red scarf must appear on every page.')
             }
           ]
         }
@@ -222,64 +232,64 @@ ${EXECUTION_RULES}`,
           fields: [
             {
               id: 'origin',
-              label: 'From',
-              help: 'City or airport.',
+              label: msg('From'),
+              help: msg('City or airport.'),
               kind: 'text',
               required: true,
-              placeholder: 'San Francisco or SFO'
+              placeholder: msg('San Francisco or SFO')
             },
             {
               id: 'destination',
-              label: 'To',
-              help: 'City or airport.',
+              label: msg('To'),
+              help: msg('City or airport.'),
               kind: 'text',
               required: true,
-              placeholder: 'Tokyo or HND'
+              placeholder: msg('Tokyo or HND')
             },
             {
               id: 'dates',
-              label: 'Travel dates',
-              help: 'Include whether the dates are flexible.',
+              label: msg('Travel dates'),
+              help: msg('Include whether the dates are flexible.'),
               kind: 'text',
               required: true,
-              placeholder: 'Oct 12-20, flexible by 1 day'
+              placeholder: msg('Oct 12-20, flexible by 1 day')
             },
             {
               id: 'travelers',
-              label: 'Travelers and cabin',
-              help: 'Adults, children, and cabin class.',
+              label: msg('Travelers and cabin'),
+              help: msg('Adults, children, and cabin class.'),
               kind: 'text',
               required: true,
               defaultValue: '1 adult, economy'
             },
             {
               id: 'budget',
-              label: 'Budget',
-              help: 'Maximum total and currency.',
+              label: msg('Budget'),
+              help: msg('Maximum total and currency.'),
               kind: 'text',
               required: true,
-              placeholder: 'USD 1,200 total'
+              placeholder: msg('USD 1,200 total')
             },
             {
               id: 'priority',
-              label: 'Top priority',
-              help: 'What should decide the ranking?',
+              label: msg('Top priority'),
+              help: msg('What should decide the ranking?'),
               kind: 'select',
               required: true,
               defaultValue: 'lowest-total-price',
               options: [
-                { value: 'lowest-total-price', label: 'Lowest total price' },
-                { value: 'shortest-duration', label: 'Shortest duration' },
-                { value: 'fewest-stops', label: 'Fewest stops' },
-                { value: 'best-schedule', label: 'Best schedule' }
+                { value: 'lowest-total-price', label: msg('Lowest total price') },
+                { value: 'shortest-duration', label: msg('Shortest duration') },
+                { value: 'fewest-stops', label: msg('Fewest stops') },
+                { value: 'best-schedule', label: msg('Best schedule') }
               ]
             },
             {
               id: 'constraints',
-              label: 'Other constraints',
-              help: 'Bags, stops, times, airlines, airports, or accessibility needs.',
+              label: msg('Other constraints'),
+              help: msg('Bags, stops, times, airlines, airports, or accessibility needs.'),
               kind: 'textarea',
-              placeholder: 'One checked bag. No overnight layover.'
+              placeholder: msg('One checked bag. No overnight layover.')
             }
           ]
         }
@@ -307,48 +317,50 @@ ${EXECUTION_RULES}`,
           fields: [
             {
               id: 'location',
-              label: 'Starting location',
-              help: 'City, address, neighborhood, or landmark. Exact coordinates are not required.',
+              label: msg('Starting location'),
+              help: msg(
+                'City, address, neighborhood, or landmark. Exact coordinates are not required.'
+              ),
               kind: 'text',
               required: true,
               defaultValue: 'San Francisco',
-              placeholder: 'Pune or Union Square, San Francisco'
+              placeholder: msg('Pune or Union Square, San Francisco')
             },
             {
               id: 'category',
-              label: 'What are you looking for?',
-              help: 'Cuisine, service, or place type.',
+              label: msg('What are you looking for?'),
+              help: msg('Cuisine, service, or place type.'),
               kind: 'text',
               required: true,
-              placeholder: 'Quiet Japanese restaurant'
+              placeholder: msg('Quiet Japanese restaurant')
             },
             {
               id: 'when',
-              label: 'When',
-              help: 'Date and local time.',
+              label: msg('When'),
+              help: msg('Date and local time.'),
               kind: 'text',
               required: true,
               defaultValue: 'Open now'
             },
             {
               id: 'range',
-              label: 'Travel range',
-              help: 'Maximum distance or travel time and mode.',
+              label: msg('Travel range'),
+              help: msg('Maximum distance or travel time and mode.'),
               kind: 'text',
               required: true,
               defaultValue: 'Within 20 minutes by car'
             },
             {
               id: 'party',
-              label: 'Party and price',
-              help: 'Group size and preferred price range.',
+              label: msg('Party and price'),
+              help: msg('Group size and preferred price range.'),
               kind: 'text',
-              placeholder: '2 people, $$'
+              placeholder: msg('2 people, $$')
             },
             {
               id: 'constraints',
-              label: 'Preferences or access needs',
-              help: 'Diet, noise, parking, accessibility, or reservation needs.',
+              label: msg('Preferences or access needs'),
+              help: msg('Diet, noise, parking, accessibility, or reservation needs.'),
               kind: 'textarea'
             }
           ]
@@ -376,46 +388,46 @@ ${EXECUTION_RULES}`,
           fields: [
             {
               id: 'product',
-              label: 'Exact product',
-              help: 'Brand, model, size, color, or SKU.',
+              label: msg('Exact product'),
+              help: msg('Brand, model, size, color, or SKU.'),
               kind: 'textarea',
               required: true,
-              placeholder: 'Sony WH-1000XM5, black, new'
+              placeholder: msg('Sony WH-1000XM5, black, new')
             },
             {
               id: 'delivery',
-              label: 'Delivery location',
-              help: 'Country and postal code for shipping and availability.',
+              label: msg('Delivery location'),
+              help: msg('Country and postal code for shipping and availability.'),
               kind: 'text',
               required: true,
-              placeholder: '94107, United States'
+              placeholder: msg('94107, United States')
             },
             {
               id: 'currency',
-              label: 'Currency',
-              help: 'Currency for the final comparison.',
+              label: msg('Currency'),
+              help: msg('Currency for the final comparison.'),
               kind: 'text',
               required: true,
               defaultValue: 'USD'
             },
             {
               id: 'condition',
-              label: 'Condition and seller rules',
-              help: 'New, refurbished, marketplace, or first-party only.',
+              label: msg('Condition and seller rules'),
+              help: msg('New, refurbished, marketplace, or first-party only.'),
               kind: 'text',
               required: true,
               defaultValue: 'New, reputable sellers only'
             },
             {
               id: 'retailers',
-              label: 'Stores to include or avoid',
-              help: 'Optional retailer list.',
+              label: msg('Stores to include or avoid'),
+              help: msg('Optional retailer list.'),
               kind: 'text'
             },
             {
               id: 'constraints',
-              label: 'Other buying constraints',
-              help: 'Delivery deadline, warranty, returns, quantity, or maximum total.',
+              label: msg('Other buying constraints'),
+              help: msg('Delivery deadline, warranty, returns, quantity, or maximum total.'),
               kind: 'textarea'
             }
           ]
@@ -445,92 +457,94 @@ ${EXECUTION_RULES}`,
           fields: [
             {
               id: 'site',
-              label: 'Social platform',
-              help: 'The site to open in your default browser.',
+              label: msg('Social platform'),
+              help: msg('The site to open in your default browser.'),
               kind: 'select',
               required: true,
               defaultValue: 'Instagram',
               options: [
-                { value: 'X', label: 'X' },
-                { value: 'LinkedIn', label: 'LinkedIn' },
-                { value: 'Instagram', label: 'Instagram' },
-                { value: 'TikTok', label: 'TikTok' },
-                { value: 'YouTube', label: 'YouTube' }
+                { value: 'X', label: msg('X') },
+                { value: 'LinkedIn', label: msg('LinkedIn') },
+                { value: 'Instagram', label: msg('Instagram') },
+                { value: 'TikTok', label: msg('TikTok') },
+                { value: 'YouTube', label: msg('YouTube') }
               ]
             },
             {
               id: 'topic',
-              label: 'Learning goal',
-              help: 'What should your feed teach you?',
+              label: msg('Learning goal'),
+              help: msg('What should your feed teach you?'),
               kind: 'textarea',
               required: true,
               defaultValue:
                 'Local and on-device AI models, multimodal LLMs, and private AI assistants serving as an AI chief of staff.',
-              placeholder: 'Local AI models'
+              placeholder: msg('Local AI models')
             },
             {
               id: 'allowedActions',
-              label: 'Actions you allow',
-              help: 'Checked actions are allowed for this session. Everything else stays blocked.',
+              label: msg('Actions you allow'),
+              help: msg(
+                'Checked actions are allowed for this session. Everything else stays blocked.'
+              ),
               kind: 'checkboxes',
               required: true,
               defaultValue:
                 'Search for topics; Watch or read relevant content; Like useful content; Bookmark useful posts; Save videos for later; Mark irrelevant recommendations Not interested',
               options: [
-                { value: 'Search for topics', label: 'Search for topics' },
+                { value: 'Search for topics', label: msg('Search for topics') },
                 {
                   value: 'Watch or read relevant content',
-                  label: 'Watch or read relevant content'
+                  label: msg('Watch or read relevant content')
                 },
-                { value: 'Follow or subscribe to creators', label: 'Follow or subscribe' },
-                { value: 'Like useful content', label: 'Like useful content' },
-                { value: 'Bookmark useful posts', label: 'Bookmark useful posts' },
-                { value: 'Save videos for later', label: 'Save videos for later' },
+                { value: 'Follow or subscribe to creators', label: msg('Follow or subscribe') },
+                { value: 'Like useful content', label: msg('Like useful content') },
+                { value: 'Bookmark useful posts', label: msg('Bookmark useful posts') },
+                { value: 'Save videos for later', label: msg('Save videos for later') },
                 {
                   value: 'Mark irrelevant recommendations Not interested',
-                  label: 'Mark irrelevant items Not interested'
+                  label: msg('Mark irrelevant items Not interested')
                 }
               ]
             },
             {
               id: 'sessionLength',
-              label: 'Session length',
-              help: 'The run stops at this limit.',
+              label: msg('Session length'),
+              help: msg('The run stops at this limit.'),
               kind: 'select',
               required: true,
               defaultValue: '30 minutes',
               options: [
-                { value: '30 minutes', label: '30 minutes' },
-                { value: '45 minutes', label: '45 minutes' },
-                { value: '60 minutes', label: '60 minutes' }
+                { value: '30 minutes', label: msg('30 minutes') },
+                { value: '45 minutes', label: msg('45 minutes') },
+                { value: '60 minutes', label: msg('60 minutes') }
               ]
             },
             {
               id: 'followLimit',
-              label: 'Creator follow limit',
-              help: 'Maximum creators to follow after approval.',
+              label: msg('Creator follow limit'),
+              help: msg('Maximum creators to follow after approval.'),
               kind: 'select',
               required: true,
               defaultValue: 'Do not follow creators',
               options: [
-                { value: 'Do not follow creators', label: 'Do not follow' },
-                { value: 'Up to 3 creators', label: 'Up to 3' },
-                { value: 'Up to 5 creators', label: 'Up to 5' }
+                { value: 'Do not follow creators', label: msg('Do not follow') },
+                { value: 'Up to 3 creators', label: msg('Up to 3') },
+                { value: 'Up to 5 creators', label: msg('Up to 5') }
               ]
             },
             {
               id: 'relatedTopics',
-              label: 'Related concepts',
-              help: 'Adjacent subjects that belong in the learning plan.',
+              label: msg('Related concepts'),
+              help: msg('Adjacent subjects that belong in the learning plan.'),
               kind: 'textarea',
               defaultValue:
                 'Edge AI, small language models, local inference, autonomous AI agents, privacy-preserving AI',
-              placeholder: 'Quantization, inference, model serving, and hardware'
+              placeholder: msg('Quantization, inference, model serving, and hardware')
             },
             {
               id: 'avoid',
-              label: 'Avoid',
-              help: 'Topics, creators, formats, or sources to exclude.',
+              label: msg('Avoid'),
+              help: msg('Topics, creators, formats, or sources to exclude.'),
               kind: 'textarea',
               defaultValue:
                 'Generic AI hype, clickbait reels, get-rich-quick tutorials, lifestyle vlogs, low-effort promotional content, non-private cloud tools, memes'
@@ -569,29 +583,29 @@ ${EXECUTION_RULES}`,
           fields: [
             {
               id: 'music',
-              label: 'Music request',
-              help: 'Song, artist, album, playlist, genre, or mood.',
+              label: msg('Music request'),
+              help: msg('Song, artist, album, playlist, genre, or mood.'),
               kind: 'textarea',
               required: true,
-              placeholder: 'The album Kind of Blue by Miles Davis'
+              placeholder: msg('The album Kind of Blue by Miles Davis')
             },
             {
               id: 'playback',
-              label: 'Playback options',
-              help: 'Shuffle, repeat, or a starting track.',
+              label: msg('Playback options'),
+              help: msg('Shuffle, repeat, or a starting track.'),
               kind: 'text',
               defaultValue: 'Play from the beginning, shuffle off'
             },
             {
               id: 'device',
-              label: 'Output device',
-              help: 'Optional Spotify Connect device.',
+              label: msg('Output device'),
+              help: msg('Optional Spotify Connect device.'),
               kind: 'text'
             },
             {
               id: 'avoid',
-              label: 'Avoid',
-              help: 'Versions, artists, or content to exclude.',
+              label: msg('Avoid'),
+              help: msg('Versions, artists, or content to exclude.'),
               kind: 'text'
             }
           ]
@@ -622,45 +636,45 @@ ${EXECUTION_RULES}`,
           fields: [
             {
               id: 'source',
-              label: 'Source screenshot',
-              help: 'Full file path or a precise selection rule.',
+              label: msg('Source screenshot'),
+              help: msg('Full file path or a precise selection rule.'),
               kind: 'text',
               required: true,
               defaultValue: 'The most recent screenshot in my Screenshots folder'
             },
             {
               id: 'edit',
-              label: 'Crop and edit instructions',
-              help: 'State what must remain in frame and any other edit.',
+              label: msg('Crop and edit instructions'),
+              help: msg('State what must remain in frame and any other edit.'),
               kind: 'textarea',
               required: true,
-              placeholder: 'Keep the top half. Include the full menu bar.'
+              placeholder: msg('Keep the top half. Include the full menu bar.')
             },
             {
               id: 'output',
-              label: 'Save result',
-              help: 'Output path or naming rule.',
+              label: msg('Save result'),
+              help: msg('Output path or naming rule.'),
               kind: 'text',
               required: true,
               defaultValue: 'Save a new copy beside the source with -edited in the filename'
             },
             {
               id: 'app',
-              label: 'Editing app',
-              help: 'Installed app to use.',
+              label: msg('Editing app'),
+              help: msg('Installed app to use.'),
               kind: 'text',
               defaultValue: 'Preview'
             },
             {
               id: 'overwrite',
-              label: 'Source file rule',
-              help: 'Choose whether the source may change.',
+              label: msg('Source file rule'),
+              help: msg('Choose whether the source may change.'),
               kind: 'select',
               required: true,
               defaultValue: 'preserve',
               options: [
-                { value: 'preserve', label: 'Preserve the source' },
-                { value: 'overwrite-approved', label: 'Overwrite is approved' }
+                { value: 'preserve', label: msg('Preserve the source') },
+                { value: 'overwrite-approved', label: msg('Overwrite is approved') }
               ]
             }
           ]
@@ -690,46 +704,46 @@ ${EXECUTION_RULES}`,
           fields: [
             {
               id: 'thread',
-              label: 'Thread to find',
-              help: 'Sender, subject, date, and mailbox clues.',
+              label: msg('Thread to find'),
+              help: msg('Sender, subject, date, and mailbox clues.'),
               kind: 'textarea',
               required: true,
-              placeholder: 'Latest email from Alex Chen about the Q4 launch in my Work account'
+              placeholder: msg('Latest email from Alex Chen about the Q4 launch in my Work account')
             },
             {
               id: 'outcome',
-              label: 'Reply outcome',
-              help: 'What should the recipient understand or do?',
+              label: msg('Reply outcome'),
+              help: msg('What should the recipient understand or do?'),
               kind: 'textarea',
               required: true,
-              placeholder: 'Confirm I will send the revised plan by Monday.'
+              placeholder: msg('Confirm I will send the revised plan by Monday.')
             },
             {
               id: 'points',
-              label: 'Required points',
-              help: 'Facts, dates, questions, or commitments to include.',
+              label: msg('Required points'),
+              help: msg('Facts, dates, questions, or commitments to include.'),
               kind: 'textarea',
               required: true
             },
             {
               id: 'tone',
-              label: 'Tone and length',
-              help: 'Voice and approximate length.',
+              label: msg('Tone and length'),
+              help: msg('Voice and approximate length.'),
               kind: 'text',
               required: true,
               defaultValue: 'Direct and warm, under 150 words'
             },
             {
               id: 'mailApp',
-              label: 'Mail app',
-              help: 'Installed app to use.',
+              label: msg('Mail app'),
+              help: msg('Installed app to use.'),
               kind: 'text',
               defaultValue: 'Mail'
             },
             {
               id: 'avoid',
-              label: 'Do not say',
-              help: 'Optional wording or commitments to avoid.',
+              label: msg('Do not say'),
+              help: msg('Optional wording or commitments to avoid.'),
               kind: 'textarea'
             }
           ]
@@ -771,43 +785,43 @@ ${EXECUTION_RULES}`,
           fields: [
             {
               id: 'timeWindow',
-              label: 'Time window',
-              help: 'Date and local start/end time.',
+              label: msg('Time window'),
+              help: msg('Date and local start/end time.'),
               kind: 'text',
               required: true,
               defaultValue: 'Today, 9:00 AM to now'
             },
             {
               id: 'focus',
-              label: 'What should the summary answer?',
-              help: 'Project, topic, person, app, or open question.',
+              label: msg('What should the summary answer?'),
+              help: msg('Project, topic, person, app, or open question.'),
               kind: 'textarea',
               required: true,
               defaultValue: 'What did I work on, and what remains unfinished?'
             },
             {
               id: 'detail',
-              label: 'Detail level',
-              help: 'Choose the output depth.',
+              label: msg('Detail level'),
+              help: msg('Choose the output depth.'),
               kind: 'select',
               required: true,
               defaultValue: 'concise',
               options: [
-                { value: 'concise', label: 'Concise timeline' },
-                { value: 'detailed', label: 'Detailed work log' },
-                { value: 'actions', label: 'Decisions and follow-ups' }
+                { value: 'concise', label: msg('Concise timeline') },
+                { value: 'detailed', label: msg('Detailed work log') },
+                { value: 'actions', label: msg('Decisions and follow-ups') }
               ]
             },
             {
               id: 'include',
-              label: 'Include',
-              help: 'Files, links, people, decisions, or other evidence to surface.',
+              label: msg('Include'),
+              help: msg('Files, links, people, decisions, or other evidence to surface.'),
               kind: 'text'
             },
             {
               id: 'exclude',
-              label: 'Exclude',
-              help: 'Private apps, breaks, or topics to leave out.',
+              label: msg('Exclude'),
+              help: msg('Private apps, breaks, or topics to leave out.'),
               kind: 'text'
             }
           ]
@@ -839,42 +853,42 @@ ${EXECUTION_RULES}`,
           fields: [
             {
               id: 'target',
-              label: 'What are you trying to find?',
-              help: 'Article, page, message, file, image, or other item.',
+              label: msg('What are you trying to find?'),
+              help: msg('Article, page, message, file, image, or other item.'),
               kind: 'textarea',
               required: true
             },
             {
               id: 'keywords',
-              label: 'Words or topic clues',
-              help: 'Names, phrases, headline fragments, or subject.',
+              label: msg('Words or topic clues'),
+              help: msg('Names, phrases, headline fragments, or subject.'),
               kind: 'textarea',
               required: true
             },
             {
               id: 'timeWindow',
-              label: 'When you saw it',
-              help: 'Approximate date and time range.',
+              label: msg('When you saw it'),
+              help: msg('Approximate date and time range.'),
               kind: 'text',
               required: true,
-              placeholder: 'Yesterday afternoon'
+              placeholder: msg('Yesterday afternoon')
             },
             {
               id: 'sourceClues',
-              label: 'App or site clues',
-              help: 'Browser, domain, app, file type, or account.',
+              label: msg('App or site clues'),
+              help: msg('Browser, domain, app, file type, or account.'),
               kind: 'text'
             },
             {
               id: 'visualClues',
-              label: 'Visual clues',
-              help: 'Colors, layout, image, logo, or nearby text.',
+              label: msg('Visual clues'),
+              help: msg('Colors, layout, image, logo, or nearby text.'),
               kind: 'textarea'
             },
             {
               id: 'result',
-              label: 'What should be returned?',
-              help: 'Link, file path, excerpt, or a short explanation.',
+              label: msg('What should be returned?'),
+              help: msg('Link, file path, excerpt, or a short explanation.'),
               kind: 'text',
               defaultValue: 'The best match with its link or recoverable source'
             }
@@ -915,51 +929,51 @@ ${EXECUTION_RULES}`,
           fields: [
             {
               id: 'phone',
-              label: 'Paired phone',
-              help: 'Device name shown in Off Grid AI.',
+              label: msg('Paired phone'),
+              help: msg('Device name shown in Off Grid AI.'),
               kind: 'text',
               required: true,
-              placeholder: "Ali's iPhone"
+              placeholder: msg("Ali's iPhone")
             },
             {
               id: 'timeWindow',
-              label: 'Time window',
-              help: 'Date and local start/end time.',
+              label: msg('Time window'),
+              help: msg('Date and local start/end time.'),
               kind: 'text',
               required: true,
               defaultValue: 'Today, 9:00 AM to now'
             },
             {
               id: 'focus',
-              label: 'Summary focus',
-              help: 'What should the phone summary answer?',
+              label: msg('Summary focus'),
+              help: msg('What should the phone summary answer?'),
               kind: 'textarea',
               required: true,
               defaultValue: 'Key work, decisions, and unfinished items'
             },
             {
               id: 'detail',
-              label: 'Phone format',
-              help: 'Choose the result depth.',
+              label: msg('Phone format'),
+              help: msg('Choose the result depth.'),
               kind: 'select',
               required: true,
               defaultValue: 'brief',
               options: [
-                { value: 'brief', label: 'Brief scan' },
-                { value: 'detailed', label: 'Detailed timeline' },
-                { value: 'actions', label: 'Actions and decisions' }
+                { value: 'brief', label: msg('Brief scan') },
+                { value: 'detailed', label: msg('Detailed timeline') },
+                { value: 'actions', label: msg('Actions and decisions') }
               ]
             },
             {
               id: 'include',
-              label: 'Include',
-              help: 'Links, files, people, or evidence to surface.',
+              label: msg('Include'),
+              help: msg('Links, files, people, or evidence to surface.'),
               kind: 'text'
             },
             {
               id: 'exclude',
-              label: 'Exclude',
-              help: 'Private apps, topics, or time ranges to leave out.',
+              label: msg('Exclude'),
+              help: msg('Private apps, topics, or time ranges to leave out.'),
               kind: 'text'
             }
           ]

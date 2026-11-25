@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { t, translate } from '@offgrid/i18n'
 import {
   ArrowLeft,
   CheckCircle,
@@ -46,6 +47,12 @@ const inputClass =
   'mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground outline-none transition-[border-color,box-shadow] duration-300 focus:border-primary focus:ring-[3px] focus:ring-primary/15'
 const FIELD_LABEL = 'text-[10px] uppercase tracking-widest text-muted-foreground'
 const EASE = [0.16, 1, 0.3, 1] as const
+
+/** A field's name inside a sentence: lower-case in English, the translation as it is in other languages. */
+function fieldName(label: string): string {
+  const shown = translate(label)
+  return shown === label ? label.toLowerCase() : shown
+}
 
 function IntakeField({
   field,
@@ -112,7 +119,7 @@ function IntakeField({
               disabled={enhancing}
               variant="ghost"
               size="icon-xs"
-              aria-label={`Enhance ${field.label.toLowerCase()} with AI`}
+              aria-label={t('Enhance {0} with AI', fieldName(field.label))}
               title="Enhance with local AI"
               className="absolute bottom-2 right-2 text-muted-foreground hover:text-primary disabled:cursor-wait"
             >
@@ -203,7 +210,7 @@ function IntakeField({
                 size="icon"
                 variant="outline"
                 onClick={() => void chooseFolder()}
-                aria-label={`Browse for ${field.label.toLowerCase()}`}
+                aria-label={t('Browse for {0}', fieldName(field.label))}
               >
                 <FolderOpen />
               </Button>
@@ -286,7 +293,7 @@ function IntakeField({
             disabled={enhancing}
             variant="ghost"
             size="icon-xs"
-            aria-label={`Enhance ${field.label.toLowerCase()} with AI`}
+            aria-label={t('Enhance {0} with AI', fieldName(field.label))}
             title="Enhance with local AI"
             className="absolute bottom-1.5 right-1.5 text-muted-foreground hover:text-primary disabled:cursor-wait"
           >
