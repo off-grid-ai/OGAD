@@ -1,3 +1,4 @@
+import { msg } from '@offgrid/i18n'
 // The Explore catalog is the single source of truth for every curated run. Each preset owns
 // its card copy, full execution prompt, and intake schema. Explore and Chat read the same data.
 
@@ -20,14 +21,7 @@ export type PresetCapability = 'browser' | 'computer-use' | 'memory' | 'phone' |
 type DemoReadiness = 'robust' | 'needs-setup' | 'needs-data'
 export type PresetRequirement = 'pro' | 'phone-paired' | 'capture-history' | 'image-model'
 type PresetFieldKind =
-  | 'text'
-  | 'textarea'
-  | 'select'
-  | 'checkboxes'
-  | 'folder'
-  | 'number'
-  | 'style'
-  | 'image'
+  'text' | 'textarea' | 'select' | 'checkboxes' | 'folder' | 'number' | 'style' | 'image'
 
 interface PresetFieldOption {
   value: string
@@ -87,13 +81,13 @@ const PRESET_CATALOG: readonly PresetSection[] = [
   {
     id: 'creation',
     capability: 'creation',
-    title: 'Create something new',
-    teaches: 'Set the brief once. Off Grid AI plans, illustrates, and packages the result.',
+    title: msg('Create something new'),
+    teaches: msg('Set the brief once. Off Grid AI plans, illustrates, and packages the result.'),
     presets: [
       {
         id: 'comic-book',
         icon: BookOpenText,
-        title: 'Create a comic book',
+        title: msg('Create a comic book'),
         prompt: `<!-- offgrid-action:comic-book -->
 Create a complete comic book from the approved brief below.
 
@@ -118,14 +112,16 @@ Style treatments:
 - Painterly fantasy: painterly fantasy graphic novel, watercolor and gouache, luminous atmosphere, elegant ink accents, detailed environment.
 
 ${EXECUTION_RULES}`,
-        blurb:
-          'Plans one continuous story, generates every page, and opens it in an offline reader.',
+        blurb: msg(
+          'Plans one continuous story, generates every page, and opens it in an offline reader.'
+        ),
         readiness: 'needs-setup',
         requires: 'image-model',
         intake: {
-          title: 'Plan the comic book',
-          description:
-            'Add the story brief, choose one visual style, and set 10 to 100 pages. Each page is generated on your device, so long books can take hours and use substantial disk space.',
+          title: msg('Plan the comic book'),
+          description: msg(
+            'Add the story brief, choose one visual style, and set 10 to 100 pages. Each page is generated on your device, so long books can take hours and use substantial disk space.'
+          ),
           fields: [
             {
               id: 'brief',
@@ -198,13 +194,13 @@ ${EXECUTION_RULES}`,
   {
     id: 'browser',
     capability: 'browser',
-    title: 'Browse the web for you',
-    teaches: 'Give it the brief once. It researches the web and returns a checked result.',
+    title: msg('Browse the web for you'),
+    teaches: msg('Give it the brief once. It researches the web and returns a checked result.'),
     presets: [
       {
         id: 'find-flight',
         icon: AirplaneTilt,
-        title: 'Find a flight',
+        title: msg('Find a flight'),
         prompt: `Use Web Use to research flights that match the approved brief below.
 
 Required method:
@@ -216,11 +212,13 @@ Required method:
 6. Note fare volatility and the time of the search. Do not book or enter traveler or payment details.
 
 ${EXECUTION_RULES}`,
-        blurb: 'Collects the route, dates, budget, and priorities before it searches.',
+        blurb: msg('Collects the route, dates, budget, and priorities before it searches.'),
         readiness: 'needs-setup',
         intake: {
-          title: 'Plan the flight search',
-          description: 'Add the trip details once. Off Grid AI uses them as the full search brief.',
+          title: msg('Plan the flight search'),
+          description: msg(
+            'Add the trip details once. Off Grid AI uses them as the full search brief.'
+          ),
           fields: [
             {
               id: 'origin',
@@ -289,7 +287,7 @@ ${EXECUTION_RULES}`,
       {
         id: 'best-nearby',
         icon: MapPin,
-        title: 'Best-reviewed spots nearby',
+        title: msg('Best-reviewed spots nearby'),
         prompt: `Use Web Use to find nearby places that match the approved brief.
 
 - Use the starting city, neighborhood, address, or landmark supplied in the brief. A city such as Pune is sufficient; exact coordinates are not required.
@@ -301,11 +299,11 @@ ${EXECUTION_RULES}`,
 - Do not reserve or contact a venue.
 
 ${EXECUTION_RULES}`,
-        blurb: 'Collects the location, time, and preferences before it ranks nearby places.',
+        blurb: msg('Collects the location, time, and preferences before it ranks nearby places.'),
         readiness: 'robust',
         intake: {
-          title: 'Set the nearby search',
-          description: 'Tell Off Grid AI where and what to compare.',
+          title: msg('Set the nearby search'),
+          description: msg('Tell Off Grid AI where and what to compare.'),
           fields: [
             {
               id: 'location',
@@ -359,7 +357,7 @@ ${EXECUTION_RULES}`,
       {
         id: 'price-compare',
         icon: Tag,
-        title: 'Compare prices across stores',
+        title: msg('Compare prices across stores'),
         prompt: `Use Web Use to compare the exact product in the approved brief.
 
 - Match the requested model, variant, quantity, condition, and specifications.
@@ -370,11 +368,11 @@ ${EXECUTION_RULES}`,
 - Do not add anything to a cart or buy it.
 
 ${EXECUTION_RULES}`,
-        blurb: 'Collects the exact product and buying constraints before it compares totals.',
+        blurb: msg('Collects the exact product and buying constraints before it compares totals.'),
         readiness: 'robust',
         intake: {
-          title: 'Define the product comparison',
-          description: 'Use exact product details so the comparison does not mix variants.',
+          title: msg('Define the product comparison'),
+          description: msg('Use exact product details so the comparison does not mix variants.'),
           fields: [
             {
               id: 'product',
@@ -426,7 +424,7 @@ ${EXECUTION_RULES}`,
       {
         id: 'train-my-feed',
         icon: YoutubeLogo,
-        title: 'Train My Feed',
+        title: msg('Train My Feed'),
         prompt: `Train the selected social feed toward the approved topics in the default browser.
 
 - Open the official site with open_url. Then call computer_use once with the full form brief. Do not use Web Use or the in-app browser.
@@ -437,12 +435,13 @@ ${EXECUTION_RULES}`,
 - Verify each action and do not repeat it.
 - Never comment, post, repost, share, message, join, buy, or change the account.
 - At the session limit, complete successfully. Do not make reporting a plan stage. Return only action counts and blockers after the run. Do not summarize content, creators, or what was learned.`,
-        blurb: 'Uses Computer Use in your default browser and only the actions you approve.',
+        blurb: msg('Uses Computer Use in your default browser and only the actions you approve.'),
         readiness: 'needs-setup',
         intake: {
-          title: 'Set the learning goal',
-          description:
-            'Choose a platform, topic, and allowed actions. Off Grid AI opens it in your default browser and stops when the session ends.',
+          title: msg('Set the learning goal'),
+          description: msg(
+            'Choose a platform, topic, and allowed actions. Off Grid AI opens it in your default browser and stops when the session ends.'
+          ),
           fields: [
             {
               id: 'site',
@@ -544,13 +543,13 @@ ${EXECUTION_RULES}`,
   {
     id: 'computer-use',
     capability: 'computer-use',
-    title: 'Drive your device',
-    teaches: 'Give it the target state once. It operates the app and stops at approval gates.',
+    title: msg('Drive your device'),
+    teaches: msg('Give it the target state once. It operates the app and stops at approval gates.'),
     presets: [
       {
         id: 'play-music',
         icon: SpotifyLogo,
-        title: 'Play music on Spotify',
+        title: msg('Play music on Spotify'),
         prompt: `Use Computer Use to start Spotify playback from the approved brief below.
 
 Required method:
@@ -562,11 +561,11 @@ Required method:
 6. Do not follow artists, like content, edit playlists, change the account, or start a paid action.
 
 ${EXECUTION_RULES}`,
-        blurb: 'Collects the music and playback choices before it opens Spotify.',
+        blurb: msg('Collects the music and playback choices before it opens Spotify.'),
         readiness: 'robust',
         intake: {
-          title: 'Choose what Spotify should play',
-          description: 'Name the music and the playback state you want.',
+          title: msg('Choose what Spotify should play'),
+          description: msg('Name the music and the playback state you want.'),
           fields: [
             {
               id: 'music',
@@ -601,7 +600,7 @@ ${EXECUTION_RULES}`,
       {
         id: 'crop-screenshot',
         icon: Crop,
-        title: 'Edit a screenshot',
+        title: msg('Edit a screenshot'),
         prompt: `Use Computer Use to edit the screenshot described in the approved brief below.
 
 Required method:
@@ -613,12 +612,13 @@ Required method:
 6. Confirm the final visible dimensions or crop region and the saved file path.
 
 ${EXECUTION_RULES}`,
-        blurb: 'Collects the source, crop, and save rules before it edits the file.',
+        blurb: msg('Collects the source, crop, and save rules before it edits the file.'),
         readiness: 'robust',
         intake: {
-          title: 'Describe the screenshot edit',
-          description:
-            'Identify the source and exact finished crop before Off Grid AI opens an app.',
+          title: msg('Describe the screenshot edit'),
+          description: msg(
+            'Identify the source and exact finished crop before Off Grid AI opens an app.'
+          ),
           fields: [
             {
               id: 'source',
@@ -669,7 +669,7 @@ ${EXECUTION_RULES}`,
       {
         id: 'draft-reply',
         icon: EnvelopeSimple,
-        title: 'Draft an email reply',
+        title: msg('Draft an email reply'),
         prompt: `Use Computer Use to prepare an email draft from the approved brief below.
 
 Required method:
@@ -681,11 +681,11 @@ Required method:
 6. Confirm the matched thread, summarize the drafted reply, and state that it remains unsent.
 
 ${EXECUTION_RULES}`,
-        blurb: 'Collects the thread clues, outcome, and required points before it drafts.',
+        blurb: msg('Collects the thread clues, outcome, and required points before it drafts.'),
         readiness: 'needs-setup',
         intake: {
-          title: 'Brief the email reply',
-          description: 'Give enough thread detail to find the right message and draft once.',
+          title: msg('Brief the email reply'),
+          description: msg('Give enough thread detail to find the right message and draft once.'),
           recommendedConnector: 'Gmail',
           fields: [
             {
@@ -740,13 +740,15 @@ ${EXECUTION_RULES}`,
   {
     id: 'memory',
     capability: 'memory',
-    title: "Remembers what you've seen",
-    teaches: 'Set the time and question first. It searches only your on-device capture history.',
+    title: msg("Remembers what you've seen"),
+    teaches: msg(
+      'Set the time and question first. It searches only your on-device capture history.'
+    ),
     presets: [
       {
         id: 'work-today',
         icon: ClockCounterClockwise,
-        title: 'Recall your day',
+        title: msg('Recall your day'),
         prompt: `Search the user's on-device capture history and produce the requested work summary from the approved brief below.
 
 Required method:
@@ -758,13 +760,14 @@ Required method:
 6. Say when the capture record has a gap. Do not fill gaps with guesses and do not search the public web.
 
 ${EXECUTION_RULES}`,
-        blurb: 'Collects the time window and focus before it summarizes captured work.',
+        blurb: msg('Collects the time window and focus before it summarizes captured work.'),
         readiness: 'needs-data',
         requires: 'capture-history',
         intake: {
-          title: 'Choose what to recall',
-          description:
-            'Set the time window and the question you want your capture history to answer.',
+          title: msg('Choose what to recall'),
+          description: msg(
+            'Set the time window and the question you want your capture history to answer.'
+          ),
           fields: [
             {
               id: 'timeWindow',
@@ -813,7 +816,7 @@ ${EXECUTION_RULES}`,
       {
         id: 'that-article',
         icon: MagnifyingGlass,
-        title: 'Find something you saw',
+        title: msg('Find something you saw'),
         prompt: `Search the user's on-device capture history for the exact item described in the approved brief below.
 
 Required method:
@@ -825,12 +828,14 @@ Required method:
 6. Do not search the public web unless the user explicitly requests a fresh web search. Report capture gaps plainly.
 
 ${EXECUTION_RULES}`,
-        blurb: 'Collects the topic, clues, and time window before it searches capture history.',
+        blurb: msg(
+          'Collects the topic, clues, and time window before it searches capture history.'
+        ),
         readiness: 'needs-data',
         requires: 'capture-history',
         intake: {
-          title: 'Describe what you saw',
-          description: 'Add every clue you remember. Partial words and visual details help.',
+          title: msg('Describe what you saw'),
+          description: msg('Add every clue you remember. Partial words and visual details help.'),
           fields: [
             {
               id: 'target',
@@ -881,13 +886,13 @@ ${EXECUTION_RULES}`,
   {
     id: 'phone',
     capability: 'phone',
-    title: "Your device's tools, from your phone",
-    teaches: 'Define the result on your device once, then return it to the paired phone.',
+    title: msg("Your device's tools, from your phone"),
+    teaches: msg('Define the result on your device once, then return it to the paired phone.'),
     presets: [
       {
         id: 'phone-summarize',
         icon: PaperPlaneTilt,
-        title: "Get today's summary on your phone",
+        title: msg("Get today's summary on your phone"),
         prompt: `Create the requested summary from this device's on-device capture history and return it to the paired phone named in the approved brief below.
 
 Required method:
@@ -899,13 +904,14 @@ Required method:
 6. Confirm which paired device received the result and whether delivery completed.
 
 ${EXECUTION_RULES}`,
-        blurb: 'Collects the time, focus, and phone target before it builds the summary.',
+        blurb: msg('Collects the time, focus, and phone target before it builds the summary.'),
         readiness: 'needs-setup',
         requires: 'phone-paired',
         intake: {
-          title: 'Set the phone summary',
-          description:
-            'Choose what this device should summarize and which paired phone receives it.',
+          title: msg('Set the phone summary'),
+          description: msg(
+            'Choose what this device should summarize and which paired phone receives it.'
+          ),
           fields: [
             {
               id: 'phone',

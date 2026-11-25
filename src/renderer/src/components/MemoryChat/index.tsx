@@ -1,3 +1,4 @@
+import { translate } from '@offgrid/i18n'
 import { track } from '@renderer/lib/analytics'
 import { openModelsTab } from '@/lib/readiness-actions'
 import { CHAT_IMAGE_MODE_EVENT, takeImageModeRequest } from '@/lib/chat-image-mode'
@@ -4919,7 +4920,7 @@ export function MemoryChat({
               <span className="truncate">In {activeProjectName}</span>
             </button>
           ) : (
-            'Private and on this device. Chat, generate, and build.'
+            translate('Private and on this device. Chat, generate, and build.')
           )
         }
         actions={
