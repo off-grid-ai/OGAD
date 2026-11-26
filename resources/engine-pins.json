@@ -28,12 +28,12 @@
   },
   "sd": {
     "repo": "leejet/stable-diffusion.cpp",
-    "ref": "master-1133-52491bd",
-    "commit": "52491bd9f1fc15281791723bdff13baab7fd6819",
+    "ref": "master-1127-79dc7ca",
+    "commit": "79dc7ca9074d79419a46380cdb95a4524db9b74c",
     "sha256": {
-      "win-cuda": "328d385394e571a6dd3d4e85d3097f9ccad372511f761f3beced83d69fd0a7cd",
-      "win-vulkan": "976ed26dfc06c16b720fdf272d6445cdd7fe42056f2b1f53e4359e25d5a1d1f1",
-      "win-cpu": "7d1c819708f7b922bebda2e1454b6224fa524480cb98bb7b0aea111f3c15678b"
+      "win-cuda": "984b6e22803df7cf8ddff968c6e7abbb026b06f326e1d00471b484e59f891f2b",
+      "win-vulkan": "cc504eabda2001367ab21d752b27da60a884e7c5c61f84d79e006b5ea4e5dc9f",
+      "win-cpu": "345d3ab72eec70c23f29cd3414a4403f8ee4d706811cd04b92e3b3ac9c75edbb"
     }
   },
   "whisper": {
@@ -72,17 +72,17 @@
     }
   },
   "mlx": {
-    "version": "0.32.5",
+    "version": "0.32.4",
     "wheels": {
       "mlx": {
-        "name": "mlx-0.32.5-cp312-cp312-macosx_14_0_arm64.whl",
-        "url": "https://files.pythonhosted.org/packages/e1/54/f82a1fe2a82f105ab97233963a2070b40210cc6e7ffad840fcb70befa1b5/mlx-0.32.5-cp312-cp312-macosx_14_0_arm64.whl",
-        "sha256": "d3564cd8286642ce93d74f7a303899c15a45705278766a09c34fa155da4489c4"
+        "name": "mlx-0.32.4-cp312-cp312-macosx_14_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/69/b0/e726ce51e1b445e4ed08c2d0e036a01c7532f4d1a856328da546a6f883bd/mlx-0.32.4-cp312-cp312-macosx_14_0_arm64.whl",
+        "sha256": "ff1d7be54758ea3a875b8fe54eff13bed17ad9566505e301f5d7851bf869680f"
       },
       "mlx-metal": {
-        "name": "mlx_metal-0.32.5-py3-none-macosx_14_0_arm64.whl",
-        "url": "https://files.pythonhosted.org/packages/82/9f/de0f97f5f59cef6335c5a22ce9f262da0f1743f70e7ab080286f5fb3bdee/mlx_metal-0.32.5-py3-none-macosx_14_0_arm64.whl",
-        "sha256": "c662c3543b9c5da2cbe121269cdf099d14447a48dac2d4d3e96965df3629c787"
+        "name": "mlx_metal-0.32.4-py3-none-macosx_14_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/77/24/7e5b7ed5d28abacab4577c7a8dd1fca6e9058504f5f95ae4333c09420e2e/mlx_metal-0.32.4-py3-none-macosx_14_0_arm64.whl",
+        "sha256": "8019b2db622599267d66cc168b2f0dbf5af929790a6c3b3913e00eabc42a7947"
       }
     }
   },
@@ -121,12 +121,12 @@
   "archives": {
     "release": "native-deps-2026-09",
     "mac-native": {
-      "name": "ogad-mac-native-20261124-r43.tar.gz",
-      "sha256": "361ed0607d5f01b797217716c149554370f56dde2130739c6c23bb2b0057d10b"
+      "name": "ogad-mac-native-20261126-r45.tar.gz",
+      "sha256": "a5843e0361c99665b9135088976f8efa04aad50fe185e861cf471bce33839703"
     },
     "linux-native": {
-      "name": "ogad-linux-native-x64-20261124-r43.tar.gz",
-      "sha256": "699770744989c7a4d63fcf6c6b518fe6748967d75640d6dbc0afe37acb0e8ac9"
+      "name": "ogad-linux-native-x64-20261126-r45.tar.gz",
+      "sha256": "6d7348e4dfc35f5f34c524501503e3b0c3c09c1d4096b276c74d3d63f28f67e8"
     },
     "linux-sd-cuda": {
       "name": "ogad-sd-master-1127-79dc7ca-linux-x64-cuda12.8-multiarch-20261124-r43.tar.gz",
