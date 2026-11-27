@@ -109,6 +109,14 @@ void app.whenReady().then(async () => {
       if (op === 'browser.caps') return { cdp: false }
       if (op === 'tab.adopt')
         return { tabId: args.tabId, url: 'https://synthetic.test/', title: 'Synthetic page' }
+      // The send, pay and delete gate reads the focused form before Enter: a read, not an input.
+      // Nothing is focused on this page, as a page script answers through Playwright MCP.
+      if (op === 'page.call' && args.tool === 'browser_evaluate') {
+        return {
+          text: `### Result\n${JSON.stringify(JSON.stringify({ focused: null, submit: null }))}`,
+          isError: false
+        }
+      }
       if (op === 'page.call' && actionResult && args.tool !== 'browser_snapshot') {
         actions.push(String(args.tool))
         return actionResult
