@@ -31,8 +31,9 @@ export function WebSearchSettings(): React.JSX.Element {
 
   useEffect(() => {
     let live = true
-    void window.api.webSearchState().then((state) => {
-      if (!live) return
+    // A preload without web search (an older build, or a screen's test) keeps the built-in default.
+    void (window.api as Partial<typeof window.api>).webSearchState?.().then((state) => {
+      if (!live || !state) return
       setSettings(state.settings)
       setKeys(state.keys)
       setAddress(state.settings.searxngUrl ?? '')
