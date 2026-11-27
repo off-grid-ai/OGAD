@@ -290,6 +290,15 @@ export async function readUrlText(url: string): Promise<string> {
 }
 
 // --- Built-in tools --------------------------------------------------------
+/** web_search's answer, for a provider-specific search tool whose provider refused. */
+function searchInstead(
+  args: Record<string, unknown>,
+  ctx: ToolContext
+): ReturnType<ToolDef['run']> {
+  const webSearch = TOOLS.find((tool) => tool.name === 'web_search')
+  return webSearch ? webSearch.run(args, ctx) : 'Error: search failed.'
+}
+
 const TOOLS: ToolDef[] = [
   offgridGuideTool,
   {
@@ -361,7 +370,7 @@ const TOOLS: ToolDef[] = [
       properties: { query: { type: 'string', description: 'the search query' } },
       required: ['query']
     },
-    run: async (a) => {
+    run: async (a, ctx) => {
       const q = String(a.query ?? '').trim()
       if (!q) return 'Error: empty query.'
       try {
@@ -376,6 +385,9 @@ const TOOLS: ToolDef[] = [
           }
         )
         const html = await res.text()
+        // Brave answers scripted searches with HTTP 429 and a captcha. Search the way web_search does
+        // instead of telling the model the web had nothing.
+        if (res.status >= 400 || /captcha/i.test(html)) return searchInstead(a, ctx)
         const out: { title: string; url: string }[] = []
         const seen = new Set<string>()
         const re = /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
@@ -388,7 +400,7 @@ const TOOLS: ToolDef[] = [
           seen.add(url)
           out.push({ title, url })
         }
-        if (!out.length) return 'No results found (Brave markup may have changed — try web_search).'
+        if (!out.length) return searchInstead(a, ctx)
         return out.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}`).join('\n')
       } catch (e) {
         return 'Error: brave search failed — ' + (e as Error).message

@@ -981,6 +981,31 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
     expect(r.toolCalls[0]!.result).toContain('Product engineering and design.')
   })
 
+  it('brave_search searches the web_search way when Brave answers with a captcha', async () => {
+    const fetchResponses = [
+      { ok: false, status: 429, text: async () => '<html>Please solve the captcha</html>' },
+      {
+        ok: true,
+        status: 200,
+        text: async () =>
+          '<a class="result__a" href="https://www.wednesday.is/">Wednesday Solutions</a><a class="result__snippet">Product engineering and design.</a>'
+      }
+    ]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => fetchResponses.shift()!)
+    )
+    enqueueReactiveAfterEmptyPlan(
+      { toolCalls: [{ name: 'brave_search', args: { query: 'Wednesday Solutions' } }] },
+      { content: 'Here is what I found.' }
+    )
+
+    const r = await toolChat('search Wednesday Solutions', [])
+
+    expect(r.toolCalls[0]!.result).toContain('https://www.wednesday.is/')
+    expect(r.toolCalls[0]!.result).toContain('Product engineering and design.')
+  })
+
   it('does not leak <tool_call> markup into the visible content stream (still runs the tool)', async () => {
     // Round 1 emits the call as TEXT. The user must NOT see the raw <tool_call>{…}
     // flash in the answer stream, but the tool must still run and the turn answer.
@@ -1043,7 +1068,9 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
 
     expect(r.answer).toBe('I cannot teleport, but here is the answer.')
     expect(r.toolCalls[0]).toMatchObject({ name: 'teleport', status: 'failed' })
-    expect(r.toolCalls[0]!.result).toMatch(/no tool named "teleport"\. Available tools: .*calculator/)
+    expect(r.toolCalls[0]!.result).toMatch(
+      /no tool named "teleport"\. Available tools: .*calculator/
+    )
     expect(JSON.stringify(fake.requests[1])).toContain('no tool named')
   })
 
@@ -1113,7 +1140,9 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
     expect(JSON.stringify(fake.requests[2])).toContain('already called calculator')
     const finalRequest = fake.requests[3] as { tools?: unknown[]; messages?: unknown[] }
     expect(finalRequest.tools ?? []).toHaveLength(0)
-    expect(JSON.stringify(finalRequest.messages)).toContain('kept repeating the same calculator call')
+    expect(JSON.stringify(finalRequest.messages)).toContain(
+      'kept repeating the same calculator call'
+    )
   })
 
   it('elides older bulky tool results once the window fills, keeping the latest two whole', async () => {
@@ -1175,7 +1204,10 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
     const previousContext = service.ctxSize
     service.ctxSize = 4_096
     try {
-      enqueueReactiveAfterEmptyPlan({ content: summary }, { content: 'Added a day trip to Sintra.' })
+      enqueueReactiveAfterEmptyPlan(
+        { content: summary },
+        { content: 'Added a day trip to Sintra.' }
+      )
       const activities: unknown[] = []
       const deltas: string[] = []
       const r = await toolChat('Add a day trip', history, {
