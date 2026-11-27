@@ -195,7 +195,29 @@ jobs:
           # will warn until you add a cert via these secrets).
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: npx electron-builder --win --publish never
+          # Azure Trusted Signing. Windows (Smart App Control, Defender) refuses unsigned programs that run
+          # from the temp folder, which is where an update starts the old uninstaller: "Error launching
+          # installer". With these secrets set, the installer, uninstaller and app are signed.
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+        shell: bash
+        run: |
+          sign=()
+          if [ -n "$AZURE_SIGNING_ACCOUNT" ]; then
+            sign=(
+              -c.win.azureSignOptions.publisherName="Wednesday Solutions Inc"
+              -c.win.azureSignOptions.endpoint="$AZURE_SIGNING_ENDPOINT"
+              -c.win.azureSignOptions.codeSigningAccountName="$AZURE_SIGNING_ACCOUNT"
+              -c.win.azureSignOptions.certificateProfileName="$AZURE_SIGNING_PROFILE"
+            )
+          else
+            echo "::warning::Windows build is unsigned: set the AZURE_* signing secrets."
+          fi
+          npx electron-builder --win --publish never "${sign[@]}"
 
       - name: Verify every Windows binary finds its DLLs on a clean install
         shell: bash

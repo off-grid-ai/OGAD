@@ -72,6 +72,11 @@ win:
         - '!kev-runtime/**'
 nsisWeb:
   artifactName: ${name}-${version}-setup.${ext}
+  # People asked to put the app on another drive. The assisted installer asks for the folder; updates
+  # still run silently into the folder already chosen.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always

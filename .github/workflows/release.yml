@@ -548,8 +548,26 @@ jobs:
           # build still publishes, unsigned; SmartScreen warns until a cert is added).
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          # Azure Trusted Signing, on as soon as its secrets exist (see windows-build.yml for why).
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
         run: |
-          npx electron-builder --win --publish never
+          sign=()
+          if [ -n "$AZURE_SIGNING_ACCOUNT" ]; then
+            sign=(
+              -c.win.azureSignOptions.publisherName="Wednesday Solutions Inc"
+              -c.win.azureSignOptions.endpoint="$AZURE_SIGNING_ENDPOINT"
+              -c.win.azureSignOptions.codeSigningAccountName="$AZURE_SIGNING_ACCOUNT"
+              -c.win.azureSignOptions.certificateProfileName="$AZURE_SIGNING_PROFILE"
+            )
+          else
+            echo "::warning::Windows build is unsigned: set the AZURE_* signing secrets."
+          fi
+          npx electron-builder --win --publish never "${sign[@]}"
       - name: Verify Windows base runtimes
         shell: bash
         run: |
