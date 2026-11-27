@@ -1,6 +1,6 @@
 import type { ImapFlow } from 'imapflow'
 import { getSecret } from '../secrets'
-import type { ConnectorToolSource } from '../mcp'
+import type { ConnectorToolSource } from '../connector-tool-types'
 import { extractOneTimeCodes, type CodeMail } from '../browser/one-time-code'
 
 /**
