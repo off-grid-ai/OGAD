@@ -13,7 +13,7 @@ import {
   isPrivateSemanticTarget,
   projectPlaywrightPointer
 } from './browser-playwright-actions'
-import { commitClick } from './browser-commit-gate'
+import { commitAtRef, commitKeyPress } from './browser-commit-gate'
 import { noteBenchAsk } from './web-use-bench-trace'
 import type {
   BrowserPlaywrightTaskInput,
@@ -288,19 +288,51 @@ async function runSemanticStep(
         )
       : undefined
   }
-  if (decision.action === 'click' && !input.sandboxProfile && decision.ref) {
-    const line = state.observation.text
-      .split('\n')
-      .find((candidate) => candidate.includes(`[ref=${decision.ref}]`))
-    const what = commitClick(line?.replace(/^(\s*- )'(.*)'(:.*)?$/, '$1$2$3'))
-    if (what) {
-      input.onStep(`asking before "${what}"`)
-      noteBenchAsk(what, input.activeUrl())
-      await input.waitForUser(`Approve "${what}"? Press Continue to let it, or Stop.`, input.signal)
-      input.signal?.throwIfAborted()
-    }
-  }
+  if (!(await approveCommit(context, decision))) return undefined
   return performSemanticAction(context, decision, step)
+}
+
+/** The commit this click or key press would make (browser-commit-gate.ts), or null. */
+async function commitOf(
+  input: BrowserPlaywrightTaskInput,
+  decision: SemanticDecision,
+  snapshot: string
+): Promise<string | null> {
+  if (decision.action === 'click') return commitAtRef(snapshot, decision.ref)
+  if (decision.action === 'press_key' && decision.key) {
+    return commitKeyPress(input.session, decision.key, snapshot, input.signal)
+  }
+  return null
+}
+
+/**
+ * Send, pay and delete ask first. True: the action may run now. After Continue the guard wants a
+ * fresh look before it lets the task act, and the page may have changed while the question
+ * waited: the page is read again, and the approved action runs only when it would still make the
+ * same commit. Otherwise it is dropped and the model decides again from the fresh snapshot.
+ */
+async function approveCommit(
+  { input, state }: SemanticLoopContext,
+  decision: SemanticDecision
+): Promise<boolean> {
+  if (input.sandboxProfile) return true
+  const what = await commitOf(input, decision, state.observation.text)
+  if (!what) return true
+  input.onStep(`asking before "${what}"`)
+  noteBenchAsk(what, input.activeUrl())
+  await input.waitForUser(`Approve "${what}"? Press Continue to let it, or Stop.`, input.signal)
+  input.signal?.throwIfAborted()
+  state.observation = await observeWithCurrentLease(input)
+  if (
+    !state.observation.isError &&
+    (await commitOf(input, decision, state.observation.text)) === what
+  ) {
+    return true
+  }
+  state.recoveryNote = `The page changed while the person was asked to approve "${what}", so it was not done. Choose the next action from this fresh snapshot.`
+  input.onStep(`did not ${what}: the page changed while waiting for approval`)
+  remember(state, `${stepLabel(decision)} -> not done: the page changed while waiting for approval`)
+  return false
 }
 
 /** Not reloading the page the task is on: what was filled stays. Counts as no progress. */
