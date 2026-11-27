@@ -50,6 +50,7 @@ import { AutoHeight, SettingRow } from '@offgrid/operator-ui/operator/presence'
 import { BackendPreferencesSection } from './ProcessingControls'
 import { useReplySound } from '../lib/reply-sound'
 import { SettingsSection } from './SettingsSection'
+import { WebSearchSettings } from './WebSearchSettings'
 import { BoostPromo } from './BoostPromo'
 import { groupConnectors } from '../../../shared/connector-groups'
 import type { SpeechLanguage } from '@offgrid/speech'
@@ -1312,6 +1313,7 @@ export function SettingsPanel({
                 />
               }
             />
+            <WebSearchSettings />
             {tools.length === 0 ? (
               <p className="text-xs text-neutral-600">No tools.</p>
             ) : (
