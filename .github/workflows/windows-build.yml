@@ -559,16 +559,7 @@ jobs:
                 | jq -r .flightId)
               echo "Created the Beta package flight $flight."
             fi
-            # A draft left uncommitted (a failed earlier upload) is replaced by this one: a flight
-            # submission holds only packages.
-            pending=$(curl -sS --fail-with-body "${auth[@]}" "$api/flights/$flight" | jq -r '.pendingFlightSubmission.id // empty')
-            if [ -n "$pending" ]; then
-              status=$(curl -sS --fail-with-body "${auth[@]}" "$api/flights/$flight/submissions/$pending" | jq -r .status)
-              if [ "$status" = PendingCommit ]; then
-                echo "Replacing the uncommitted Beta flight draft $pending."
-                curl -sS --fail-with-body -X DELETE "${auth[@]}" "$api/flights/$flight/submissions/$pending" || {
-                  echo "::error::The Store API would not delete Beta draft $pending. A draft started in Partner Center must be deleted there."; exit 1; }
-              fi
-            fi
+            # No draft cleanup here: msstore reuses or replaces a draft the API made, and deleting the
+            # only draft of a flight that never shipped deletes the flight with it.
             msstore publish store-upload/off-grid-ai.msix -id "$MS_STORE_PRODUCT_ID" -f "$flight" -v
           fi
