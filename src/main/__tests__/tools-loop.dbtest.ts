@@ -712,6 +712,33 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     }
   })
 
+  it('says the tools were left out when the conversation leaves no room for them', async () => {
+    const service = llm as unknown as { ctxSize: number }
+    const previousContext = service.ctxSize
+    service.ctxSize = 2_048
+    try {
+      enqueueReactiveAfterEmptyPlan({ content: 'Short.' })
+      const ask = 'search the web for the latest news'
+      const short = await toolChat(ask, [])
+      expect(short.cutoff).toBeUndefined()
+      expect(fake.requests[0]).toHaveProperty('tools')
+      const sent = fake.requests[0] as { messages: { role: string; content: string }[] }
+      // Fill the window to just under the prompt limit (2048 minus the 256-token reply reserve),
+      // so the message fits but no tool schema fits beside it.
+      const room = (2_048 - 256) * 4 - toolPromptChars(sent.messages)
+      fake.reset()
+      enqueueReactiveAfterEmptyPlan({ content: 'I cannot look that up.' })
+
+      const result = await toolChat(`${ask} ${'note '.repeat(Math.floor((room - 64) / 5))}`, [])
+
+      expect(fake.requests[0]).not.toHaveProperty('tools')
+      expect(result.answer).toBe('I cannot look that up.')
+      expect(result.cutoff).toEqual({ reason: 'tools_left_out' })
+    } finally {
+      service.ctxSize = previousContext
+    }
+  })
+
   it('rejects a non-arithmetic calculator expression (real guard branch)', async () => {
     enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'calculator', args: { expression: 'process.exit(1)' } }] },
@@ -948,7 +975,8 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
   // shared/packages/models/test/fixtures/web-search).
   const DDG_LITE = `<table><tr><td><a rel="nofollow" href="https://en.wikipedia.org/wiki/Achilles" class='result-link'>Achilles - Wikipedia</a></td></tr>
     <tr><td class='result-snippet'>A hero of the <b>Trojan War</b>.</td></tr></table>`
-  const DDG_CHALLENGE = '<html><div class="anomaly-modal__title">Unfortunately, bots use DuckDuckGo too.</div></html>'
+  const DDG_CHALLENGE =
+    '<html><div class="anomaly-modal__title">Unfortunately, bots use DuckDuckGo too.</div></html>'
   const BING_RSS = `<?xml version="1.0"?><rss><channel><item>
     <title>Wednesday Solutions</title><link>https://www.wednesday.is/</link>
     <description>Product engineering and design.</description></item></channel></rss>`
@@ -960,7 +988,9 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
       { content: 'Here is what I found.' }
     )
     const r = await toolChat('search achilles', [])
-    expect(r.toolCalls[0]!.result).toContain('[Achilles - Wikipedia](https://en.wikipedia.org/wiki/Achilles)')
+    expect(r.toolCalls[0]!.result).toContain(
+      '[Achilles - Wikipedia](https://en.wikipedia.org/wiki/Achilles)'
+    )
     expect(r.toolCalls[0]!.result).toContain('A hero of the Trojan War.')
     expect(asked.map((u) => new URL(u).origin)).toEqual(['https://lite.duckduckgo.com'])
   })
@@ -988,7 +1018,9 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
         'https://search.home.lan': {
           status: 200,
           body: JSON.stringify({
-            results: [{ title: 'Achilles', url: 'https://example.org/achilles', content: 'Greek hero.' }]
+            results: [
+              { title: 'Achilles', url: 'https://example.org/achilles', content: 'Greek hero.' }
+            ]
           })
         }
       })

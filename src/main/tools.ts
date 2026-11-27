@@ -285,7 +285,7 @@ export async function readUrlText(url: string): Promise<string> {
   const scheme = u.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]
   if (scheme && !/^https?$/i.test(scheme))
     throw new Error(`Invalid URL: unsupported scheme ${scheme}`)
-  if (!/^https?:\/\//i.test(u)) u = 'https://' + u
+  if (!/^https?:\/\//i.test(u)) u = `https://${u}`
   const res = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' } })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return htmlToText(await res.text())
@@ -321,7 +321,7 @@ const TOOLS: ToolDef[] = [
         const { results } = await searchTheWeb(q)
         return formatWebSearchResults(q, results)
       } catch (e) {
-        return 'Error: search failed — ' + (e as Error).message
+        return `Error: search failed — ${(e as Error).message}`
       }
     }
   },
@@ -339,7 +339,7 @@ const TOOLS: ToolDef[] = [
       if (!q) return 'Error: empty query.'
       try {
         const res = await fetch(
-          'https://search.brave.com/search?q=' + encodeURIComponent(q) + '&source=web',
+          `https://search.brave.com/search?q=${encodeURIComponent(q)}&source=web`,
           {
             headers: {
               'User-Agent':
@@ -367,7 +367,7 @@ const TOOLS: ToolDef[] = [
         if (!out.length) return searchInstead(a, ctx)
         return out.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}`).join('\n')
       } catch (e) {
-        return 'Error: brave search failed — ' + (e as Error).message
+        return `Error: brave search failed — ${(e as Error).message}`
       }
     }
   },
@@ -387,7 +387,7 @@ const TOOLS: ToolDef[] = [
         const text = await readUrlText(url)
         return text ? text.slice(0, 6000) : 'No readable text on the page.'
       } catch (e) {
-        return 'Error: could not fetch — ' + (e as Error).message
+        return `Error: could not fetch — ${(e as Error).message}`
       }
     }
   },
@@ -438,7 +438,7 @@ const TOOLS: ToolDef[] = [
           .map((r) => `(${r.surface || r.surface_app || 'screen'} · ${r.ts}) ${r.summary}`)
           .join('\n')
       } catch (e) {
-        return 'Error reading screen: ' + (e as Error).message
+        return `Error reading screen: ${(e as Error).message}`
       }
     }
   },
@@ -524,7 +524,7 @@ const TOOLS: ToolDef[] = [
             : {})
         }
       } catch (e) {
-        return { text: 'Error searching the knowledge base: ' + (e as Error).message }
+        return { text: `Error searching the knowledge base: ${(e as Error).message}` }
       }
     }
   },
@@ -1045,7 +1045,7 @@ export async function toolChat(
         ? ' web_use and computer_use are available when the user asks you to do something on a website or in a desktop app.'
         : ''
     ],
-    ...hints.map((hint, index): [string, string] => [hintSources[index] ?? 'tools', ' ' + hint]),
+    ...hints.map((hint, index): [string, string] => [hintSources[index] ?? 'tools', ` ${hint}`]),
     [
       'userContext',
       typeof opts.context === 'string' && opts.context.trim()
@@ -1256,6 +1256,8 @@ export async function toolChat(
   let videoStoryId: string | undefined
   let finishAfterDeferredImages = false
   const toolRoundAnswers: string[] = []
+  // The last round offered no tools because the conversation left no room for their schemas.
+  let toolsLeftOut = false
   const resultWithImages = (result: {
     answer: string
     toolCalls: ToolCall[]
@@ -1276,6 +1278,8 @@ export async function toolChat(
   } => {
     const finalImageRequest = imageRequests.at(-1)
     noteDocumentPrefill(result.metrics)
+    const cutoff =
+      result.cutoff ?? (toolsLeftOut ? { reason: 'tools_left_out' as const } : undefined)
     const answer = [...toolRoundAnswers, result.answer].filter((text) => text.trim()).join('\n\n')
     return {
       ...result,
@@ -1293,7 +1297,8 @@ export async function toolChat(
       videoRequests,
       ...(videoStoryId ? { videoStoryId } : {}),
       ...(offeredTools.size ? { toolsOffered: [...offeredTools] } : {}),
-      ...(finalImageRequest ? { imageRequest: finalImageRequest } : {})
+      ...(finalImageRequest ? { imageRequest: finalImageRequest } : {}),
+      ...(cutoff ? { cutoff } : {})
     }
   }
 
@@ -1375,9 +1380,8 @@ export async function toolChat(
       typeof settings.maxTokens === 'number' && settings.maxTokens > 0
         ? Math.min(settings.maxTokens, remainingOutputTokens)
         : remainingOutputTokens
-    if (tools.length && !roundTools.length) {
-      console.warn('[tools] no tool schemas fit beside the retained conversation')
-    }
+    toolsLeftOut = !!tools.length && !roundTools.length && !finishAfterDeferredImages
+    if (toolsLeftOut) console.warn('[tools] no tool schemas fit beside the retained conversation')
     for (const tool of roundTools) {
       const name = (tool as { function?: { name?: unknown } }).function?.name
       if (typeof name === 'string' && name) offeredTools.add(name)

@@ -544,7 +544,7 @@ function MessageBubble({
       ) : (
         <MessageMarkdown message={message} navigation={navigation} withoutArtifact={!!artifact} />
       )}
-      <ResponseCutoffNotice cutoff={message.cutoff} />
+      <ResponseCutoffNotice cutoff={message.cutoff} onStartNewChat={actions.startNewChat} />
       <FailedReplyStep message={message} />
       {message.imageMemoryRetry ? (
         <ImageMemoryRetryAction

@@ -4564,6 +4564,7 @@ export function MemoryChat({
       setEditingId(message.id)
     },
     cancelEdit: () => setEditingId(null),
+    startNewChat: startNewConversation,
     saveEdit,
     updateVoiceTranscript,
     retryImageMemory: (retry) => {
@@ -4634,6 +4635,7 @@ export function MemoryChat({
       saveEdit: (...args) => messageActionsRef.current.saveEdit(...args),
       updateVoiceTranscript: (...args) => messageActionsRef.current.updateVoiceTranscript(...args),
       retryImageMemory: (...args) => messageActionsRef.current.retryImageMemory(...args),
+      startNewChat: () => messageActionsRef.current.startNewChat(),
       openArtifact: (...args) => messageActionsRef.current.openArtifact(...args),
       selectAskOption: (...args) => messageActionsRef.current.selectAskOption(...args),
       submitAsk: (...args) => messageActionsRef.current.submitAsk(...args),
