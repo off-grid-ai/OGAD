@@ -527,12 +527,13 @@ jobs:
         run: |
           msstore reconfigure --tenantId "$MS_STORE_TENANT_ID" --sellerId "$MS_STORE_SELLER_ID" \
             --clientId "$MS_STORE_CLIENT_ID" --clientSecret "$MS_STORE_CLIENT_SECRET"
-          # msstore takes a folder holding one .msix with -i (an MSIX is the same format as our .appx); given
-          # the package as its path, it looks for a project to build and stops.
+          # msstore publishes a package directly only when its path ends in .msix (MSIXProjectPublisher);
+          # given a folder (".") it takes it as an Electron project and runs npm install, which fails on
+          # our private git dependency. So the .appx is copied to a .msix name (same format) and passed as the path.
           mkdir -p store-upload
           cp "$(ls dist/*.appx | head -1)" store-upload/off-grid-ai.msix
           if [ "$CHANNEL" = stable ]; then
-            msstore publish . -i store-upload -id "$MS_STORE_PRODUCT_ID" -v
+            msstore publish store-upload/off-grid-ai.msix -id "$MS_STORE_PRODUCT_ID" -v
           else
             flight="$MS_STORE_BETA_FLIGHT_ID"
             if [ -z "$flight" ]; then
@@ -546,5 +547,5 @@ jobs:
                 | jq -r '.value[] | select(.friendlyName == "Beta") | .flightId' | head -1)
             fi
             [ -n "$flight" ] || { echo "::warning::No package flight named Beta: the beta MSIX stays an artifact."; exit 0; }
-            msstore publish . -i store-upload -id "$MS_STORE_PRODUCT_ID" -f "$flight" -v
+            msstore publish store-upload/off-grid-ai.msix -id "$MS_STORE_PRODUCT_ID" -f "$flight" -v
           fi

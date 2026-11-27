@@ -587,6 +587,19 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     docsUrl: 'https://developers.attio.com/',
     ready: true
   },
+  {
+    id: 'right-suite',
+    name: 'Right Suite',
+    blurb: 'Test price, copy and ads on buyers',
+    category: 'CRM & Sales',
+    color: '#1FA67F',
+    letter: 'R',
+    transport: 'http',
+    url: 'https://www.rightsuite.co/api/mcp',
+    auth: 'oauth',
+    docsUrl: 'https://www.rightsuite.co/mcp',
+    ready: true
+  },
 
   // ---------- Files & Storage ----------
   {
