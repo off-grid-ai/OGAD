@@ -189,13 +189,27 @@ jobs:
         run: npm run build
 
       - name: Package Windows web installer and payload
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional Windows code signing (no-op if absent → unsigned; SmartScreen
-          # will warn until you add a cert via these secrets).
+          # Windows code signing, the same as the release (scripts/windows-signing.sh).
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          WIN_SIGNING_ENDPOINT: ${{ vars.WIN_SIGNING_ENDPOINT }}
+          WIN_SIGNING_ACCOUNT: ${{ vars.WIN_SIGNING_ACCOUNT }}
+          WIN_SIGNING_PROFILE: ${{ vars.WIN_SIGNING_PROFILE }}
+          WIN_PUBLISHER_NAME: ${{ vars.WIN_PUBLISHER_NAME }}
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: npx electron-builder --win --publish never
+        run: |
+          source scripts/windows-signing.sh
+          npx electron-builder --win --publish never "${WIN_SIGN_ARGS[@]}"
+
+      - name: Verify every Windows binary is signed
+        if: ${{ env.WIN_SIGNED == 'true' }}
+        shell: pwsh
+        run: ./scripts/verify-windows-signatures.ps1
 
       - name: Verify every Windows binary finds its DLLs on a clean install
         shell: bash
