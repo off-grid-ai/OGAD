@@ -1,14 +1,32 @@
 /**
  * The semantic Web Use loop asks before send, pay and delete (browser-commit-gate.ts), and the
- * person's Continue runs the approved action. The loop, guard, commit gate and action dispatch are
- * real; only the model's decisions and the Playwright page are faked.
+ * person's Continue runs the approved action. The loop, guard, commit gate, action dispatch and the
+ * chat engine owner are real; the model's replies come from this test through the llama-server
+ * executable (harness/fake-llama-engine), and the Playwright page is a boundary.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SemanticDecision } from '../browser-playwright-policy'
+import {
+  installFakeLlamaEngine,
+  processAlive,
+  unusedPort,
+  useModelBrain,
+  writeGguf,
+  type FakeLlamaEngine,
+  type ModelBrain
+} from '../../__tests__/harness/fake-llama-engine'
+
+const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-web-commit-approval-'))
+const previous = { data: process.env.OFFGRID_DATA_DIR, bin: process.env.OFFGRID_BIN_DIR }
+process.env.OFFGRID_DATA_DIR = PROFILE
+process.env.OFFGRID_BIN_DIR = fs.mkdtempSync(path.join(PROFILE, 'no-engines-'))
 
 vi.mock('electron', () => ({
   app: {
-    getPath: () => process.env.OFFGRID_DATA_DIR ?? '/tmp',
+    getPath: () => process.env.OFFGRID_DATA_DIR,
     isPackaged: false,
     getAppPath: () => process.cwd()
   },
@@ -16,22 +34,43 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => [] }
 }))
 
-// The model boundary: each decision takes the next queued one.
-const decisions: Array<Partial<SemanticDecision>> = []
-vi.mock('../browser-playwright-policy', async (actual) => ({
-  ...(await actual<typeof import('../browser-playwright-policy')>()),
-  decideBrowserSemanticAction: async (): Promise<SemanticDecision> => {
-    const next = decisions.shift()
-    if (!next) throw new Error('The model boundary has no queued decision.')
-    return decision(next)
-  }
-}))
-
 import { VisionGuard } from '../../vision/vision-guard'
 import { FOCUSED_SUBMIT_SCRIPT } from '../browser-commit-gate'
 import { runBrowserPlaywrightTask } from '../browser-playwright-task'
 import type { BrowserPlaywrightTaskInput } from '../browser-playwright-task-contract'
 import type { PlaywrightToolResult, SemanticPageSession } from '../playwright-mcp-session'
+import { llm } from '../../llm'
+import { importLocalModel, setActiveModel } from '../../models-manager'
+
+// The model: each step answers with the next queued decision.
+const decisions: Array<Partial<SemanticDecision>> = []
+let engine: FakeLlamaEngine
+let brain: ModelBrain
+
+beforeAll(async () => {
+  const chat = await importLocalModel(writeGguf(path.join(PROFILE, 'fixtures'), 'chat.gguf'))
+  expect(await setActiveModel(chat.id!)).toEqual({ success: true })
+  const bin = path.join(PROFILE, 'bin')
+  process.env.OFFGRID_BIN_DIR = bin
+  engine = installFakeLlamaEngine(bin)
+  brain = await useModelBrain(engine, () => {
+    const next = decisions.shift()
+    if (!next) throw new Error('The model has no queued decision.')
+    return JSON.stringify(decision(next))
+  })
+  ;(llm as unknown as { port: number }).port = await unusedPort()
+})
+
+afterAll(async () => {
+  llm.stop()
+  await brain.close()
+  for (const { pid } of engine.launches()) if (processAlive(pid)) process.kill(pid, 'SIGKILL')
+  fs.rmSync(PROFILE, { recursive: true, force: true })
+  if (previous.data === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previous.data
+  if (previous.bin === undefined) delete process.env.OFFGRID_BIN_DIR
+  else process.env.OFFGRID_BIN_DIR = previous.bin
+})
 
 function decision(overrides: Partial<SemanticDecision>): SemanticDecision {
   return {
