@@ -41,14 +41,31 @@ wait_cloud() {
   echo "nextcloud never finished installing" >&2; return 1
 }
 
+# A Calendar archive is cached only once it is a whole, readable tarball holding the app.
+calendar_ok() { local list; list=$(tar -tzf "$1" 2>/dev/null) && grep -q '^calendar/' <<<"$list"; }
+fetch_calendar() {
+  local archive="cache/$CALENDAR.tar.gz" tmp
+  mkdir -p cache
+  [ -f "$archive" ] && calendar_ok "$archive" && return 0
+  rm -f "$archive"   # a failed earlier download (an error page, a cut-off file) is not kept
+  tmp=$(mktemp "cache/$CALENDAR.XXXXXX")
+  if curl -fsSL -m 600 -o "$tmp" \
+      "https://github.com/nextcloud-releases/calendar/releases/download/${CALENDAR#calendar-}/$CALENDAR.tar.gz" \
+    && calendar_ok "$tmp"; then
+    mv "$tmp" "$archive"
+  else
+    rm -f "$tmp"
+    echo "could not download a valid $CALENDAR.tar.gz" >&2
+    return 1
+  fi
+}
+
 cloud_setup() {
   wait_cloud
   local occ="$DC exec -T -u www-data nextcloud php occ"
   # The app store download stalls here, so Calendar comes straight from its GitHub release.
   if ! $occ app:list 2>/dev/null | grep -q "calendar:"; then
-    mkdir -p cache
-    [ -s cache/$CALENDAR.tar.gz ] || curl -sSL -m 600 -o cache/$CALENDAR.tar.gz \
-      https://github.com/nextcloud-releases/calendar/releases/download/${CALENDAR#calendar-}/$CALENDAR.tar.gz
+    fetch_calendar
     $DC cp cache/$CALENDAR.tar.gz nextcloud:/tmp/cal.tgz
     $DC exec -T nextcloud sh -c 'tar -xzf /tmp/cal.tgz -C /var/www/html/custom_apps && chown -R www-data:www-data /var/www/html/custom_apps/calendar && rm /tmp/cal.tgz'
   fi
