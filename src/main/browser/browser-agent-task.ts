@@ -38,7 +38,7 @@ import { callBrowserAgentModel, type BrowserAgentRole } from './browser-agent-mo
 import { benchTrace, noteBenchAsk } from './web-use-bench-trace'
 import { scoreWebLines, webRankerInstalled } from './web-ranker'
 import { encodeTaskExecutionPlan, encodeTaskPhase } from '../../shared/task-execution-plan'
-import { commitClick, commitKey } from './browser-commit-gate'
+import { commitClick, commitKeyPress } from './browser-commit-gate'
 
 /**
  * The browser around the page (browser-host.ts): the Vault, the task's own trail, tabs and the
@@ -485,10 +485,14 @@ export function playwrightKey(key: string): string {
 async function executeAgentAction(
   input: BrowserAgentTaskInput,
   action: AgentAction,
-  snapshot: string
+  observed: string
 ): Promise<AgentActionOutcome> {
   // Before the lease: the question pauses the task, and the answer starts a fresh lease.
-  await askBeforeCommit(input, action, snapshot)
+  const approved = await askBeforeCommit(input, action, observed)
+  if (approved === null) {
+    return { isError: true, text: 'not done: the page changed while waiting for approval' }
+  }
+  const snapshot = approved
   const lease = input.guard.currentActionLease()
   if (!input.guard.canActuate(lease.epoch)) return { isError: true, text: 'the user has control' }
   const signal = combinedSignal(input.signal, lease.signal)
@@ -684,30 +688,54 @@ async function executeAgentAction(
   }
 }
 
+/** Actions the executor carries out with a click on their target (executeAgentAction). */
+const CLICKING_ACTIONS = new Set(['click', 'focus', 'check', 'uncheck', 'upload'])
+
+/** The commit this action would make (browser-commit-gate.ts), or null. */
+async function commitOf(
+  input: BrowserAgentTaskInput,
+  action: AgentAction,
+  snapshot: string
+): Promise<string | null> {
+  const [first] = action.args
+  if (CLICKING_ACTIONS.has(action.name)) {
+    const ref = resolveValue(first, snapshot)
+    return ref ? commitClick(refLine(snapshot, ref)) : null
+  }
+  if (action.name === 'press' && first && 'value' in first) {
+    return commitKeyPress(input.session, playwrightKey(String(first.value)), snapshot, input.signal)
+  }
+  return null
+}
+
 /**
  * Send, pay and delete ask first (browser-commit-gate.ts). The task waits on the person's
  * Continue; Stop ends it. A sandbox test profile goes straight on.
+ *
+ * Returns the snapshot the action runs against: the same one when nothing was asked, a fresh
+ * read after Continue (the guard wants a fresh look before the task acts again, and the page may
+ * have changed while the question waited), or null when the action would no longer make the
+ * commit the person approved.
  */
 async function askBeforeCommit(
   input: BrowserAgentTaskInput,
   action: AgentAction,
   snapshot: string
-): Promise<void> {
-  if (input.sandboxProfile) return
-  const [first] = action.args
-  let what: string | null = null
-  if (action.name === 'click' || action.name === 'dblclick') {
-    const ref = resolveValue(first, snapshot)
-    what = ref ? commitClick(refLine(snapshot, ref)) : null
-  } else if (action.name === 'press' && first && 'value' in first) {
-    what = commitKey(playwrightKey(String(first.value))) ? 'Send' : null
-  }
-  if (!what) return
+): Promise<string | null> {
+  if (input.sandboxProfile) return snapshot
+  const what = await commitOf(input, action, snapshot)
+  if (!what) return snapshot
   const why = `Approve "${what}"? Press Continue to let it, or Stop.`
   input.onStep(`asking before "${what}"`)
   noteBenchAsk(what, pageUrl(snapshot))
   await input.waitForUser(why, input.signal)
   input.signal?.throwIfAborted()
+  const fresh = await observeWithCurrentLease(input)
+  if (fresh.isError || (await commitOf(input, action, fresh.text)) !== what) {
+    input.onStep(`did not ${what}: the page changed while waiting for approval`)
+    return null
+  }
+  return fresh.text
 }
 
 /** Screen and network stop changing: two snapshot reads in a row match. */
