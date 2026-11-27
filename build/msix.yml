@@ -16,6 +16,10 @@ appx:
   displayName: Off Grid AI
   applicationId: OffGridAI
   backgroundColor: '#0a0a0a'
+  # The Store rejects .msix packages whose MinVersion is 10.0.17134.0 or lower (electron-builder's
+  # default is 10.0.14316.0). 1809 is the oldest Windows 10 the Store takes MSIX for.
+  minVersion: 10.0.17763.0
+  maxVersionTested: 10.0.26100.0
   languages:
     - en-US
   capabilities:
