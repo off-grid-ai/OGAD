@@ -292,6 +292,29 @@ export async function readUrlText(url: string): Promise<string> {
 }
 
 // --- Built-in tools --------------------------------------------------------
+/**
+ * Challenge markup: an element or form whose id, class, name or action names a captcha (Brave's
+ * own, h-captcha, g-recaptcha) or a Turnstile widget. Result titles, snippets and links never
+ * match, since they are text and href values.
+ */
+const CHALLENGE_MARKUP =
+  /<[a-z][^>]*\s(?:id|class|name|action)\s*=\s*["'][^"']*(?:captcha|turnstile)/i
+
+/**
+ * Brave refused the search with a challenge instead of results: an error status, a redirect to
+ * its captcha page, or captcha markup in the page. A results page that merely mentions
+ * "CAPTCHA" (a result titled "How to solve a CAPTCHA") is not a challenge.
+ */
+export function isBraveChallenge(status: number, url: string, html: string): boolean {
+  if (status >= 400) return true
+  try {
+    if (/captcha/i.test(new URL(url).pathname)) return true
+  } catch {
+    // No final URL (a mocked or opaque response): judge by the page alone.
+  }
+  return CHALLENGE_MARKUP.test(html)
+}
+
 /** web_search's answer, for a provider-specific search tool whose provider refused. */
 function searchInstead(
   args: Record<string, unknown>,
@@ -351,7 +374,7 @@ const TOOLS: ToolDef[] = [
         const html = await res.text()
         // Brave answers scripted searches with HTTP 429 and a captcha. Search the way web_search does
         // instead of telling the model the web had nothing.
-        if (res.status >= 400 || /captcha/i.test(html)) return searchInstead(a, ctx)
+        if (isBraveChallenge(res.status, res.url, html)) return searchInstead(a, ctx)
         const out: { title: string; url: string }[] = []
         const seen = new Set<string>()
         const re = /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
