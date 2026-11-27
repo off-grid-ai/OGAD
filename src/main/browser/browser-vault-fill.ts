@@ -20,6 +20,8 @@ import type {
 const KINDS = { kinds: ['login', 'authenticator'] as const }
 /** One isolated world for the fill, apart from the page's scripts and Electron's own. */
 export const FILL_WORLD = 1_847
+/** What the fill script returns when the document it runs in is not on the expected origin. */
+export const FILL_ORIGIN_MISMATCH = 'origin_mismatch'
 
 type VaultReply =
   | { type: 'matches'; entries: { uuid: string; title: string; username: string }[] }
@@ -66,9 +68,19 @@ export async function vaultStateFor(url: string): Promise<BrowserVaultState> {
  * Runs in the page's isolated world. Fills the visible password field and the username field
  * before it, or, on a username-first page (Google, Microsoft), the visible username field alone.
  * Sets values through the native setter and fires input/change so React and Vue forms see them.
+ *
+ * The script runs only after the page stops loading, so a navigation that began while the Vault
+ * answered can put a different site's document under it. It checks the document's own origin
+ * first and fills nothing anywhere else.
  */
-function fillScript(username: string, password: string, totp: string): string {
+export function fillScript(
+  expectedOrigin: string,
+  username: string,
+  password: string,
+  totp: string
+): string {
   return `(() => {
+  if (location.origin !== ${JSON.stringify(expectedOrigin)}) return ${JSON.stringify(FILL_ORIGIN_MISMATCH)}
   const visible = (el) => {
     const r = el.getBoundingClientRect()
     const s = getComputedStyle(el)
@@ -102,6 +114,9 @@ function fillScript(username: string, password: string, totp: string): string {
 })()`
 }
 
+/** What the fill script returns when it filled a field. Anything else filled nothing. */
+const FILLED = new Set(['code', 'login', 'username'])
+
 /** Reveal the login for the page's site and fill it. The caller never sees the secret. */
 export async function fillVaultLogin(
   contents: WebContents,
@@ -130,12 +145,13 @@ export async function fillVaultLogin(
   if (reply.totp) onSecret?.(reply.totp)
   const result = (await contents
     .executeJavaScriptInIsolatedWorld(FILL_WORLD, [
-      { code: fillScript(reply.username, reply.password, reply.totp ?? '') }
+      { code: fillScript(origin, reply.username, reply.password, reply.totp ?? '') }
     ])
-    .catch(() => 'none')) as string
-  return result === 'none'
-    ? { ok: false, reason: 'no_form' }
-    : { ok: true, username: reply.username }
+    .catch(() => 'none')) as unknown
+  if (result === FILL_ORIGIN_MISMATCH) return { ok: false, reason: 'origin_mismatch' }
+  return FILLED.has(result as string)
+    ? { ok: true, username: reply.username }
+    : { ok: false, reason: 'no_form' }
 }
 
 /** Does the page show a sign-in form? Read in the isolated world; reads no values. */
