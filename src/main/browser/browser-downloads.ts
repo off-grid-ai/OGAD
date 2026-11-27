@@ -8,6 +8,12 @@ import type { BrowserDownload } from '../../shared/browser-library'
 export class BrowserDownloads {
   private readonly items = new Map<string, { item: DownloadItem; record: BrowserDownload }>()
   private readonly attached = new WeakSet<Session>()
+  /**
+   * Save paths held by downloads that have not finished, keyed case-insensitively as Chromium
+   * keys its own reservations. A download's file may not exist yet, so the filesystem alone
+   * would hand two same-name downloads one path, and they would overwrite each other.
+   */
+  private readonly reserved = new Map<string, string>()
 
   constructor(
     private readonly directory: () => string,
@@ -58,7 +64,9 @@ export class BrowserDownloads {
   /** Drop finished rows from the list. Files stay on disk. */
   clearFinished(): void {
     for (const [id, { record }] of this.items) {
-      if (record.state !== 'progressing') this.items.delete(id)
+      if (record.state === 'progressing') continue
+      this.items.delete(id)
+      this.release(id)
     }
     this.emit()
   }
@@ -66,7 +74,13 @@ export class BrowserDownloads {
   private track(item: DownloadItem): void {
     const downloadId = randomUUID()
     // Like a normal browser: straight to Downloads, never a save dialog, never overwriting.
-    item.setSavePath(uniquePath(this.directory(), item.getFilename()))
+    const savePath = uniquePath(
+      this.directory(),
+      item.getFilename(),
+      (file) => this.reserved.has(reservationKey(file)) || existsSync(file)
+    )
+    this.reserved.set(reservationKey(savePath), downloadId)
+    item.setSavePath(savePath)
     const record: BrowserDownload = {
       downloadId,
       url: item.getURL(),
@@ -80,7 +94,11 @@ export class BrowserDownloads {
     }
     this.items.set(downloadId, { item, record })
     item.on('updated', () => this.update(downloadId))
-    item.once('done', () => this.update(downloadId))
+    // An interrupted download that can resume keeps its path, and emits done again when it ends.
+    item.on('done', (_event, state) => {
+      if (state !== 'interrupted' || !item.canResume()) this.release(downloadId)
+      this.update(downloadId)
+    })
     this.emit()
   }
 
@@ -97,9 +115,19 @@ export class BrowserDownloads {
     this.emit()
   }
 
+  private release(downloadId: string): void {
+    for (const [key, owner] of this.reserved) {
+      if (owner === downloadId) this.reserved.delete(key)
+    }
+  }
+
   private emit(): void {
     this.onChange(this.list())
   }
+}
+
+function reservationKey(file: string): string {
+  return path.resolve(file).toLowerCase()
 }
 
 /** report.pdf, then report (1).pdf, report (2).pdf - the name Chrome would pick. */
