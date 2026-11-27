@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "cuda": {
     "win32": {
-      "url": "https://runtime.getoffgridai.co/desktop/cuda/win32/2026-11-26-auto-r45.tar.gz",
-      "sha256": "28756a0884c61c8f31508d5492eb770451febdabb2300d4223834e472a0399ab",
-      "bytes": 8149123263,
-      "version": "2026-11-26-auto-r45"
+      "url": "https://runtime.getoffgridai.co/desktop/cuda/win32/2026-11-27-auto-r46.tar.gz",
+      "sha256": "679164f16353a2bd673c1b580a6f7791b42c26e18fb19b41b17292b4131918a6",
+      "bytes": 8161663222,
+      "version": "2026-11-27-auto-r46"
     },
     "linux": {
-      "url": "https://runtime.getoffgridai.co/desktop/cuda/linux/2026-11-26-auto-r45.tar.gz",
-      "sha256": "21f0ee0a3007e13da59d19962b44bae5cdac27a61452bc7ecf0871ba126d2cbf",
-      "bytes": 7382946444,
-      "version": "2026-11-26-auto-r45"
+      "url": "https://runtime.getoffgridai.co/desktop/cuda/linux/2026-11-27-auto-r46.tar.gz",
+      "sha256": "5fa5e1c34c22ac6a7f7026aca0015d9620e6ebe4baa697bc0247cd4391d57556",
+      "bytes": 7389973243,
+      "version": "2026-11-27-auto-r46"
     }
   }
 }
