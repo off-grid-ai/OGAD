@@ -187,3 +187,74 @@ describe('Settings → Tools → Web search', () => {
     expect(getSecret('web-search.tavily.key')).toBeNull()
   })
 })
+
+// brave_search: Brave is the network, like every other origin here; the tool, the settings and the
+// built-in providers it falls back to all run for real.
+const BRAVE = 'https://search.brave.com'
+const DUCKDUCKGO = 'https://lite.duckduckgo.com'
+const BRAVE_SEARCH_URL = `${BRAVE}/search?q=captcha&source=web`
+
+const BRAVE_RESULTS_PAGE = `<!doctype html><html><head><title>how to solve a captcha - Brave Search</title></head>
+<body><div class="snippet"><a href="https://example.com/solve-captcha">How to solve a CAPTCHA</a>
+<p>A CAPTCHA asks you to prove you are human.</p></div>
+<div class="snippet"><a href="https://docs.example.org/recaptcha">reCAPTCHA documentation</a></div></body></html>`
+
+const BRAVE_CHALLENGE_PAGE = `<!doctype html><html><head><title>Brave Search</title></head>
+<body><form id="captcha-form" action="/captcha/verify" method="post">
+<div class="captcha-container"></div><button>Verify</button></form></body></html>`
+
+const DUCKDUCKGO_PAGE = `<table><tr><td><a rel="nofollow" href="https://fallback.example/" class='result-link'>Fallback result</a></td></tr>
+<tr><td class='result-snippet'>Found by the built-in search.</td></tr></table>`
+
+async function braveSearch(): Promise<string> {
+  const { setWebSearchSettings } = await import('../web-search-settings')
+  setWebSearchSettings({ provider: 'builtin' })
+  const { runTool } = await import('../tools')
+  return (await runTool('brave_search', { query: 'how to solve a captcha' }, {}, [])).text
+}
+
+function askedOrigins(): string[] {
+  return net.asked.map((request) => new URL(request.url).origin)
+}
+
+describe('isBraveChallenge', () => {
+  it('is false for a results page that mentions CAPTCHA in its results', async () => {
+    const { isBraveChallenge } = await import('../tools')
+    expect(isBraveChallenge(200, BRAVE_SEARCH_URL, BRAVE_RESULTS_PAGE)).toBe(false)
+  })
+
+  it('is true for a refused status, the captcha page or captcha markup', async () => {
+    const { isBraveChallenge } = await import('../tools')
+    expect(isBraveChallenge(429, BRAVE_SEARCH_URL, '<html></html>')).toBe(true)
+    expect(isBraveChallenge(200, `${BRAVE}/captcha?r=1`, '<html></html>')).toBe(true)
+    expect(isBraveChallenge(200, BRAVE_SEARCH_URL, BRAVE_CHALLENGE_PAGE)).toBe(true)
+    expect(
+      isBraveChallenge(200, BRAVE_SEARCH_URL, '<div class="cf-turnstile" data-sitekey="x"></div>')
+    ).toBe(true)
+  })
+
+  it('judges by the page when the response has no final URL', async () => {
+    const { isBraveChallenge } = await import('../tools')
+    expect(isBraveChallenge(200, '', BRAVE_RESULTS_PAGE)).toBe(false)
+    expect(isBraveChallenge(200, '', BRAVE_CHALLENGE_PAGE)).toBe(true)
+  })
+})
+
+describe('brave_search', () => {
+  it('returns Brave results about captchas instead of falling back', async () => {
+    serve(BRAVE, 200, BRAVE_RESULTS_PAGE)
+    serve(DUCKDUCKGO, 200, DUCKDUCKGO_PAGE)
+    const text = await braveSearch()
+    expect(askedOrigins()).toEqual([BRAVE])
+    expect(text).toContain('How to solve a CAPTCHA')
+    expect(text).toContain('https://example.com/solve-captcha')
+  })
+
+  it('searches the way web_search does when Brave serves a challenge', async () => {
+    serve(BRAVE, 200, BRAVE_CHALLENGE_PAGE)
+    serve(DUCKDUCKGO, 200, DUCKDUCKGO_PAGE)
+    const text = await braveSearch()
+    expect(askedOrigins()).toEqual([BRAVE, DUCKDUCKGO])
+    expect(text).toContain('Fallback result')
+  })
+})
