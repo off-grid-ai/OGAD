@@ -1,9 +1,28 @@
 import { EventEmitter } from 'events'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The secret store and the IMAP server are the boundaries. mailparser and the code rules run for real.
-const secrets: Record<string, string> = {}
-vi.mock('../../secrets', () => ({ getSecret: (key: string) => secrets[key] }))
+// Electron's safeStorage and the IMAP server are the boundaries. The secret store, mailparser and
+// the code rules run for real.
+const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-imap-mailbox-'))
+const previousData = process.env.OFFGRID_DATA_DIR
+process.env.OFFGRID_DATA_DIR = PROFILE
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => process.env.OFFGRID_DATA_DIR,
+    isPackaged: false,
+    getAppPath: () => process.cwd()
+  },
+  safeStorage: {
+    isEncryptionAvailable: () => true,
+    encryptString: (value: string) => Buffer.from(`encrypted:${value}`),
+    decryptString: (value: Buffer) => value.toString().replace(/^encrypted:/, '')
+  },
+  BrowserWindow: { getAllWindows: () => [] }
+}))
 
 interface FakeMail {
   uid: number
@@ -55,6 +74,8 @@ import {
   readImapCodeMail,
   safeMailSummary
 } from '../imap-mailbox'
+import { setSecret } from '../../secrets'
+import { getDB } from '../../database'
 
 const CONNECTOR = 7
 
@@ -77,13 +98,20 @@ async function listRecentMail(): Promise<{ subject: string; snippet: string }[]>
 }
 
 beforeEach(() => {
-  secrets[`connector:${CONNECTOR}:IMAP_SERVER`] = 'imap.example.com'
-  secrets[`connector:${CONNECTOR}:IMAP_USER`] = 'me@example.com'
-  secrets[`connector:${CONNECTOR}:IMAP_PASSWORD`] = 'test-password'
+  setSecret(`connector:${CONNECTOR}:IMAP_SERVER`, 'imap.example.com')
+  setSecret(`connector:${CONNECTOR}:IMAP_USER`, 'me@example.com')
+  setSecret(`connector:${CONNECTOR}:IMAP_PASSWORD`, 'test-password')
   server.mail = []
   server.searches = []
   server.clients = []
   server.connectError = null
+})
+
+afterAll(() => {
+  getDB().close()
+  fs.rmSync(PROFILE, { recursive: true, force: true })
+  if (previousData === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousData
 })
 
 describe('maskOneTimeCodes', () => {
