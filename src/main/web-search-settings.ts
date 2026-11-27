@@ -5,6 +5,7 @@
  * Providers, order, parsing and the Test rule are @offgrid/models', the same as on the phone.
  */
 import {
+  WEB_SEARCH_PROVIDERS,
   DEFAULT_WEB_SEARCH_SETTINGS,
   normalizeSearxngUrl,
   searchWeb,
@@ -21,7 +22,7 @@ import { deleteSecret, getSecret, setSecret } from './secrets'
 
 export const WEB_SEARCH_SETTINGS_KEY = 'webSearch'
 
-const PROVIDERS: readonly WebSearchProviderId[] = ['builtin', 'searxng', 'brave', 'tavily']
+const PROVIDERS: readonly WebSearchProviderId[] = WEB_SEARCH_PROVIDERS.map((p) => p.id)
 
 function normalize(value: unknown): WebSearchSettings {
   const v = (value ?? {}) as Partial<WebSearchSettings>
@@ -50,7 +51,9 @@ function keyFor(provider: WebSearchProviderId): string | null {
 export function webSearchState(): { settings: WebSearchSettings; keys: Record<string, boolean> } {
   return {
     settings: getWebSearchSettings(),
-    keys: { brave: Boolean(keyFor('brave')), tavily: Boolean(keyFor('tavily')) }
+    keys: Object.fromEntries(
+      WEB_SEARCH_PROVIDERS.filter((p) => p.needs === 'key').map((p) => [p.id, Boolean(keyFor(p.id))])
+    )
   }
 }
 
