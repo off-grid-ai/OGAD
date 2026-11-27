@@ -1298,6 +1298,12 @@ const offGridApi = {
   idTrail: () => ipcRenderer.invoke('id:trail'),
 
   // Secrets (values never returned to renderer — only key names)
+  webSearchState: () => ipcRenderer.invoke('web-search:state'),
+  webSearchSave: (value: unknown) => ipcRenderer.invoke('web-search:save', value),
+  webSearchSetKey: (provider: string, key: string) =>
+    ipcRenderer.invoke('web-search:set-key', provider, key),
+  webSearchRemoveKey: (provider: string) => ipcRenderer.invoke('web-search:remove-key', provider),
+  webSearchTest: (value: unknown) => ipcRenderer.invoke('web-search:test', value),
   secretsAvailable: () => ipcRenderer.invoke('secrets:available'),
   secretsSet: (key: string, value: string) => ipcRenderer.invoke('secrets:set', key, value),
   secretsDelete: (key: string) => ipcRenderer.invoke('secrets:delete', key),

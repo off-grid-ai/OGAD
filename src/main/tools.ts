@@ -24,7 +24,7 @@ import {
 import { projectDocumentsMode, type ProjectDocumentsMode } from './documents/project-knowledge-mode'
 import { buildContentParts } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
-import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
+import { stripTags, htmlToText } from './tools-parsers'
 import { evaluateArithmetic } from './calculator'
 import type { SearchKind, SearchResult } from '../shared/search-contract'
 import { selectToolExtensions } from './tools/extension-select'
@@ -51,9 +51,11 @@ import {
   toolLimitFinalAnswerInstruction,
   toolResultCharBudget,
   unknownToolMessage,
+  formatWebSearchResults,
   type PromptBreakdown,
   type ToolCallRecord
 } from '@offgrid/models'
+import { searchTheWeb } from './web-search-settings'
 import { toolPromptChars, toolPromptTokens } from './tools/prompt-budget'
 import { withAIRequestMetrics } from './ai-request-log'
 import { checkCitations } from '@offgrid/rag/documents'
@@ -304,58 +306,20 @@ const TOOLS: ToolDef[] = [
   {
     name: 'web_search',
     description:
-      "Search the web via DuckDuckGo and return the top results (title, URL, snippet). Use for current events or facts not in the user's memory. Requires network.",
+      "Search the web and return the top results (title, URL, snippet). Use for current events or facts not in the user's memory. Requires network.",
     parameters: {
       type: 'object',
       properties: { query: { type: 'string', description: 'the search query' } },
       required: ['query']
     },
+    // Providers, order and parsing are @offgrid/models' (the same on the phone); the person's choice
+    // and key come from Settings → Tools → Web search.
     run: async (a) => {
       const q = String(a.query ?? '').trim()
       if (!q) return 'Error: empty query.'
       try {
-        const res = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), {
-          headers: { 'User-Agent': 'Mozilla/5.0' }
-        })
-        const html = await res.text()
-        const titles: { title: string; url: string }[] = []
-        const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
-        let m: RegExpExecArray | null
-        while ((m = re.exec(html)) && titles.length < 6)
-          titles.push({ url: decodeDdgHref(m[1]!), title: stripTags(m[2]!) })
-        const snippets: string[] = []
-        const sre = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g
-        let s: RegExpExecArray | null
-        while ((s = sre.exec(html)) && snippets.length < 6) snippets.push(stripTags(s[1]!))
-        if (!titles.length) {
-          const fallback = await fetch(
-            'https://www.bing.com/search?format=rss&q=' + encodeURIComponent(q),
-            { headers: { 'User-Agent': 'Mozilla/5.0' } }
-          )
-          if (!fallback.ok) throw new Error(`search providers returned HTTP ${fallback.status}`)
-          const xml = await fallback.text()
-          const items: { title: string; url: string; snippet: string }[] = []
-          const ire = /<item>([\s\S]*?)<\/item>/gi
-          let item: RegExpExecArray | null
-          while ((item = ire.exec(xml)) && items.length < 6) {
-            const title = /<title>([\s\S]*?)<\/title>/i.exec(item[1]!)
-            const link = /<link>([\s\S]*?)<\/link>/i.exec(item[1]!)
-            const description = /<description>([\s\S]*?)<\/description>/i.exec(item[1]!)
-            if (!title || !link) continue
-            items.push({
-              title: stripTags(title[1]!),
-              url: stripTags(link[1]!),
-              snippet: description ? stripTags(description[1]!) : ''
-            })
-          }
-          if (!items.length) throw new Error('search providers returned no usable results')
-          return items
-            .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
-            .join('\n')
-        }
-        return titles
-          .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${snippets[i] || ''}`)
-          .join('\n')
+        const { results } = await searchTheWeb(q)
+        return formatWebSearchResults(q, results)
       } catch (e) {
         return 'Error: search failed — ' + (e as Error).message
       }
