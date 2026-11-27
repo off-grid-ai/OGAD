@@ -209,7 +209,9 @@ export function WebSearchSettings(): React.JSX.Element {
           </span>
         )}
       </div>
-      <p className="mt-2 text-xs text-neutral-500">{WEB_SEARCH_COPY.fallback}</p>
+      {provider !== 'builtin' && (
+        <p className="mt-2 text-xs text-neutral-500">{WEB_SEARCH_COPY.fallback}</p>
+      )}
     </SettingsSection>
   )
 }
