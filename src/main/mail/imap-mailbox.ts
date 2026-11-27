@@ -65,6 +65,10 @@ async function withInbox<T>(
     connectionTimeout: 15_000,
     socketTimeout: 30_000
   })
+  // imapflow reports socket failures (a timeout, a dropped connection) as an 'error' event. With
+  // no listener Node throws it as an uncaught exception in the main process. The failure still
+  // reaches the caller: imapflow rejects the pending connect or command when the socket fails.
+  client.on('error', () => {})
   await client.connect()
   try {
     const lock = await client.getMailboxLock('INBOX', { readOnly: true })
@@ -93,7 +97,9 @@ async function recentMessages(
     const found = await client.search(
       {
         since: new Date(query.sinceMs - 24 * 60 * 60 * 1000),
-        ...(query.fromDomain ? { from: `@${query.fromDomain}` } : {})
+        // FROM is a substring match. The bare domain also finds subdomain senders
+        // (no-reply@mail.bank.com for bank.com); pickEmailedCode keeps only the page's own site.
+        ...(query.fromDomain ? { from: query.fromDomain } : {})
       },
       { uid: true }
     )
@@ -141,13 +147,33 @@ export async function readImapCodeMail(
   }))
 }
 
-/** A snippet for the chat and memory: a one-time code inside it is masked. */
-function safeSnippet(subject: string, text: string): string {
-  let snippet = text.replace(/\s+/g, ' ').trim().slice(0, 300)
-  for (const code of extractOneTimeCodes(subject, text)) {
-    snippet = snippet.split(code).join('••••••')
+const MASK = '••••••'
+
+/**
+ * `text` with each one-time code masked, however the email printed it. Codes come normalized
+ * (`123456`, `AB12CD`), while mail prints `123 456`, `ab-12cd`: each character may be followed
+ * by a space or hyphen, in any case. A normalized code holds only A-Z and 0-9, so it is safe to
+ * build into a pattern.
+ */
+export function maskOneTimeCodes(text: string, codes: readonly string[]): string {
+  let masked = text
+  for (const code of codes) {
+    if (!/^[A-Z0-9]+$/.test(code)) continue
+    const pattern = new RegExp(code.split('').join(String.raw`[\s\u00a0-]?`), 'gi')
+    masked = masked.replace(pattern, MASK)
   }
-  return snippet
+  return masked
+}
+
+/** A message for the chat and memory: one-time codes in its subject and snippet are masked. */
+export function safeMailSummary(
+  subject: string,
+  text: string
+): { subject: string; snippet: string } {
+  const codes = extractOneTimeCodes(subject, text)
+  // Mask before trimming, so a code cut at the 300th character is not left half visible.
+  const snippet = maskOneTimeCodes(text.replace(/\s+/g, ' ').trim(), codes).slice(0, 300)
+  return { subject: maskOneTimeCodes(subject, codes), snippet }
 }
 
 const LIST_TOOL = 'list_recent_mail'
@@ -189,12 +215,10 @@ export function imapConnectorToolSource(
           sinceMs: Date.now() - days * 24 * 60 * 60 * 1000,
           max
         })
-        const items = messages.map((m) => ({
-          from: m.from,
-          subject: m.subject,
-          date: new Date(m.receivedAt).toISOString(),
-          snippet: safeSnippet(m.subject, m.text)
-        }))
+        const items = messages.map((m) => {
+          const { subject, snippet } = safeMailSummary(m.subject, m.text)
+          return { from: m.from, subject, date: new Date(m.receivedAt).toISOString(), snippet }
+        })
         return { ok: true, result: { content: [{ type: 'text', text: JSON.stringify(items) }] } }
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) }
