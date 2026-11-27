@@ -36,6 +36,7 @@ CONCEPTS = {
   'memory':    ('Day memory', 'feature', r'(capture|screen-memory|replay|journal|clipboard|(^|[/-])focus|timeline|day-view|work-block)'),
   'meetings':  ('Meetings', 'feature', r'(meeting)'),
   'todos':     ('To-dos and people', 'feature', r'(todo|(^|[/-])crm|people|entity|briefing|identity|dossier)'),
+  'websearch': ('Web search', 'infra', r'(web-?search|search-provider|searxng|tavily|brave-search|services/tools/handlers|src/main/tools\.ts$)'),
   'browser':   ('Built-in browser', 'feature', r'((^|[/-])browser-(host|library|session|partition|downloads|shortcuts|visits-store|bookmarks-store|open-tabs-store|page-input|user-agent|secret-scrub|commit-gate|vault-fill|chrome|library-panel|everyday)|sandbox-profiles|agent-browser)'),
   'agents':    ('Agents', 'feature', r'(computer-use|web-use|automation|operator|(^|[/-])agent|(^|[/-])use([/-]|$)|action-pipeline)'),
   'sync':      ('Devices and sync', 'feature', r'((^|[/-])sync|pair|mesh|transfer|discovery|companion)'),
@@ -57,6 +58,7 @@ PRODUCTS = ['desktop', 'mobile', 'extension']
 NARROW = {'share': (['mobile'], 'the mark says "on my phone"; desktop and the extension have no share loop'),
           'rating': (['mobile'], 'store review prompts exist only in the phone stores'),
           'models': (['desktop', 'mobile'], 'the extension runs on the computer app\'s models'),
+          'websearch': (['desktop', 'mobile'], 'the extension searches through the computer app\'s tools'),
           'browser': (['desktop'], 'the built-in browser is the computer app\'s own Chromium; phones and the extension use the system browser')}
 
 def expected(k, kind, feats):
@@ -68,8 +70,8 @@ def expected(k, kind, feats):
         return [a for a in PRODUCTS if pl.get(a, 'no') != 'no']
     return [a for a in PRODUCTS if any(f.get('platforms', {}).get(a, 'no') != 'no' for f in feats.values())] or PRODUCTS
 
-SKIP = re.compile(r'(^|/)(docs|outputs|\.artifacts|node_modules|dist|coverage|generated|\.github|scripts|fastlane|patches|vendor|Pods|\.vscode|test-results|marketing|demo-gifs|resources|preview-ui|tools|_includes|_layouts)(/|$)|\.(png|jpe?g|gif|webp|svg|mp4|mov|ttf|otf|woff2?|lock|ico|icns|car|mp3|wav|pdf|zip|bin|onnx|txt|md)$|package(-lock)?\.json$|tsconfig|eslint|vite|vitest|playwright|knip|jest|babel|metro')
-TEST = re.compile(r'(__tests__|\.test\.|\.spec\.|(^|/)e2e/|integration-tests/|swift-tests/|(^|/)test/)')
+SKIP = re.compile(r'(^|/)(docs|outputs|\.artifacts|node_modules|dist|coverage|generated|\.github|scripts|fastlane|patches|vendor|Pods|\.vscode|test-results|marketing|demo-gifs|resources|preview-ui|_includes|_layouts)(/|$)|^tools/|\.(png|jpe?g|gif|webp|svg|mp4|mov|ttf|otf|woff2?|lock|ico|icns|car|mp3|wav|pdf|zip|bin|onnx|txt|md)$|package(-lock)?\.json$|tsconfig|eslint|vite|vitest|playwright|knip|jest|babel|metro')
+TEST = re.compile(r'(__tests__|\.(db)?test\.|\.spec\.|(^|/)e2e/|integration-tests/|swift-tests/|(^|/)test/)')
 
 def norm(p):
     p = re.sub(r'([a-z0-9])([A-Z])', r'\1-\2', p)
