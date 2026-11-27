@@ -18,7 +18,8 @@ import {
 } from '@phosphor-icons/react'
 import type { ComponentType } from 'react'
 import { GodIcon } from '../GodIcon'
-import { deviceNoun, primaryModifier } from '@renderer/lib/device'
+import { currentPlatform, deviceNoun, primaryModifier } from '@renderer/lib/device'
+import { quickPasteLabel } from '@offgrid/core/shared/quick-paste-shortcut'
 import { isMac, type DevicePlatform } from '@offgrid/core/shared/device'
 import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
 import { FEATURE_NAMES as NAME } from '@offgrid/features'
@@ -322,10 +323,10 @@ export const PRO_FEATURES: ProFeature[] = [
     tagline: 'Every copy, kept and searchable.',
     card: 'Every copy, kept',
     group: 'remember',
-    description: `A local clipboard history that saves what you copy - text, images, and files - with a global hotkey (${primaryModifier()}+Shift+C) quick-paste popup to drop any past copy into whatever app you are in. Stored on-device; what you copy never leaves your machine.`,
+    description: `A local clipboard history that saves what you copy - text, images, and files - with a global hotkey (${quickPasteLabel(currentPlatform())}) quick-paste popup to drop any past copy into whatever app you are in. Stored on-device; what you copy never leaves your machine.`,
     highlights: [
       'Searchable history of text, images & files',
-      `${primaryModifier()}+Shift+C quick-paste popup anywhere`,
+      `${quickPasteLabel(currentPlatform())} quick-paste popup anywhere`,
       'Stored locally in your encrypted database'
     ],
     // The store, popup, and hotkey use Electron on all three desktop platforms.

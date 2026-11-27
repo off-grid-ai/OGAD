@@ -1,15 +1,7 @@
 import { restoreCanonicalProductName } from './bootstrap/user-data'
 import { createWindowAndScheduleModelStorageCleanup } from './bootstrap/model-storage-cleanup'
-import {
-  app,
-  shell,
-  BrowserWindow,
-  Menu,
-  protocol,
-  session,
-  screen,
-  crashReporter
-} from 'electron'
+import { app, shell, BrowserWindow, Menu, protocol, session, screen, crashReporter } from 'electron'
+import { isBackgroundLaunch } from '../shared/quick-paste-shortcut'
 import { tmpdir } from 'os'
 
 // Electron 39 needs the portal to register global shortcuts on Wayland.
@@ -263,7 +255,8 @@ async function createWindow(): Promise<void> {
       const bracketModifier = (input.control || input.meta) && !input.alt
       const arrowModifier = input.alt && !input.control && !input.meta
       const direction =
-        (bracketModifier && input.code === 'BracketLeft') || (arrowModifier && input.key === 'ArrowLeft')
+        (bracketModifier && input.code === 'BracketLeft') ||
+        (arrowModifier && input.key === 'ArrowLeft')
           ? 'back'
           : (bracketModifier && input.code === 'BracketRight') ||
               (arrowModifier && input.key === 'ArrowRight')
@@ -391,7 +384,11 @@ if (!isolatedEvidenceInstance && !app.requestSingleInstanceLock()) {
     }
   }
   // Windows and Linux deliver an offgrid:// link to the running app as a second instance.
-  app.on('second-instance', focusExistingWindow)
+  // A launch with an --action= argument (a desktop shortcut for quick paste) is handled by its feature
+  // and must not pull the main window over the app the person is in.
+  app.on('second-instance', (_event, argv) => {
+    if (!isBackgroundLaunch(argv)) focusExistingWindow()
+  })
   // offgrid:// opens or focuses the app (the browser extension's "Open Off Grid"). The link is never
   // read: it carries no command, so a web page can do nothing with it beyond bringing the app forward.
   // Only an installed build claims the scheme; a dev run would take it from the installed app.
