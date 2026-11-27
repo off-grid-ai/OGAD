@@ -249,6 +249,53 @@ repeat:
 user can take over at any time → same as takeover
 ```
 
+## Nested planning (harness only, opt-in)
+
+Large jobs (rebook a cancelled flight, claim compensation, move the meeting, tell the team) are too long
+for one flat plan from a small model. With nested planning on (`runAgentLoop` input `nested`, off by
+default; `agentModels.nestedPlanning` in OGAD), the harness plans in two levels. The models see only the
+v0 requests above: no new lines, no new words.
+
+- The planner writes its normal plan for the task.
+- When a step of a plan with more than one step becomes current, it runs once as its own level: the
+  planner plans it from an ordinary request whose `GOAL:` is plain text, and that level's actor and
+  evaluator work it.
+- Default 2 levels (the task and its steps). Every level shares one action budget; the answer is written
+  only at the top.
+
+### The sub-level GOAL
+
+```
+GOAL: <step title> (done when: <step check>). Part of: <task goal>. Known: <step>: <its result>; ...
+```
+
+`Known:` lists what earlier steps found (their evaluator's `success("...")` text, newest 12).
+
+### Loop
+
+```
+continue(n) on a step not yet expanded → run it as its own level (planner, actor, evaluator)
+  success("text") → the parent's PAST/LAST gets "<step> -> done: text"; the fact goes to Known;
+                    the parent's evaluator judges next
+  fail / stopped  → the parent re-plans: REASON "<step> failed: <why>"; new steps may expand again
+```
+
+### Example
+
+```
+GOAL: My flight QRT456 was cancelled. Rebook me, claim compensation, move my Paris meeting and tell Priya.
+```
+```
+1 Rebook QRT456 on the earliest nonstop that day | check: text "Confirmed"
+2 Claim EU261 compensation for QRT456 | check: text "CL-"
+3 Move the Paris client meeting to after landing | check: text "Paris client meeting"
+4 Email Priya the new flight and the claim number | check: text "Message sent"
+```
+Step 2 then runs as its own level with:
+```
+GOAL: Claim EU261 compensation for QRT456 (done when: text "CL-"). Part of: My flight QRT456 was cancelled. Rebook me, claim compensation, move my Paris meeting and tell Priya. Known: Rebook QRT456 on the earliest nonstop that day: rebooked on AA472, departs 12:10.
+```
+
 ## On-screen AX (contract v1, candidate)
 
 Contract v0 cuts AX at 18,000 characters. Contract v1 shows what the screenshot shows, so AX and

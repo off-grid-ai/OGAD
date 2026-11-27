@@ -30,6 +30,15 @@ import type {
   BrowserTaskPointer,
   ManualBrowserHistoryEntry
 } from '../shared/browser-session'
+import type {
+  BrowserBookmark,
+  BrowserChromeCommand,
+  BrowserDownload,
+  BrowserFillOutcome,
+  BrowserFindResult,
+  BrowserVaultState,
+  BrowserVisit
+} from '../shared/browser-library'
 import type { TaskGuideInput } from '../shared/task-guidance'
 import type { RemoteVisionServerUpdate } from '../shared/remote-vision-server'
 import type { StartupSnapshot } from '../shared/startup-contract'
@@ -196,6 +205,61 @@ const offGridApi = {
       ipcRenderer.invoke('browser:list-manual-history'),
     reopenManual: (historyId: string): Promise<{ sessionId: string } | null> =>
       ipcRenderer.invoke('browser:reopen-manual', historyId),
+    reopenClosedTab: (): Promise<{ sessionId: string } | null> =>
+      ipcRenderer.invoke('browser:reopen-closed-tab'),
+    searchHistory: (query: string, before?: number): Promise<BrowserVisit[]> =>
+      ipcRenderer.invoke('browser:history-search', query, before),
+    removeHistory: (visitId: number): Promise<void> =>
+      ipcRenderer.invoke('browser:history-remove', visitId),
+    clearHistory: (since?: number): Promise<void> =>
+      ipcRenderer.invoke('browser:history-clear', since),
+    listBookmarks: (): Promise<BrowserBookmark[]> => ipcRenderer.invoke('browser:bookmarks-list'),
+    toggleBookmark: (sessionId?: string): Promise<boolean> =>
+      ipcRenderer.invoke('browser:bookmark-toggle', sessionId),
+    removeBookmark: (bookmarkId: string): Promise<void> =>
+      ipcRenderer.invoke('browser:bookmark-remove', bookmarkId),
+    renameBookmark: (bookmarkId: string, title: string): Promise<void> =>
+      ipcRenderer.invoke('browser:bookmark-rename', bookmarkId, title),
+    listDownloads: (): Promise<BrowserDownload[]> => ipcRenderer.invoke('browser:downloads-list'),
+    downloadAction: (
+      downloadId: string,
+      action: 'cancel' | 'pause' | 'resume' | 'open' | 'show' | 'clear'
+    ): Promise<boolean> => ipcRenderer.invoke('browser:download-action', downloadId, action),
+    find: (sessionId: string, query: string, forward = true, findNext = false): Promise<void> =>
+      ipcRenderer.invoke('browser:find', sessionId, query, forward, findNext),
+    stopFind: (sessionId: string): Promise<void> =>
+      ipcRenderer.invoke('browser:stop-find', sessionId),
+    vaultState: (sessionId?: string): Promise<BrowserVaultState> =>
+      ipcRenderer.invoke('browser:vault-state', sessionId),
+    fillLogin: (sessionId: string, uuid: string): Promise<BrowserFillOutcome> =>
+      ipcRenderer.invoke('browser:vault-fill', sessionId, uuid),
+    sandboxProfiles: (): Promise<{ id: string; label: string; category: string }[]> =>
+      ipcRenderer.invoke('browser:sandbox-profiles'),
+    openSandboxProfile: (profileId: string): Promise<{ sessionId: string } | null> =>
+      ipcRenderer.invoke('browser:open-sandbox-profile', profileId),
+    onDownloadsState: (cb: (downloads: BrowserDownload[]) => void) => {
+      const sub = (_e: unknown, downloads: BrowserDownload[]): void => cb(downloads)
+      ipcRenderer.on('browser:downloads-state', sub)
+      return unsubscribe('browser:downloads-state', sub)
+    },
+    onBookmarksChanged: (cb: (bookmarks: BrowserBookmark[]) => void) => {
+      const sub = (_e: unknown, bookmarks: BrowserBookmark[]): void => cb(bookmarks)
+      ipcRenderer.on('browser:bookmarks-changed', sub)
+      return unsubscribe('browser:bookmarks-changed', sub)
+    },
+    onFindResult: (cb: (result: BrowserFindResult) => void) => {
+      const sub = (_e: unknown, result: BrowserFindResult): void => cb(result)
+      ipcRenderer.on('browser:find-result', sub)
+      return unsubscribe('browser:find-result', sub)
+    },
+    onCommand: (cb: (event: { sessionId: string; command: BrowserChromeCommand }) => void) => {
+      const sub = (
+        _e: unknown,
+        event: { sessionId: string; command: BrowserChromeCommand }
+      ): void => cb(event)
+      ipcRenderer.on('browser:command', sub)
+      return unsubscribe('browser:command', sub)
+    },
     onSessionsState: (cb: (state: BrowserSessionsSnapshot) => void) => {
       const sub = (_e: unknown, state: BrowserSessionsSnapshot): void => cb(state)
       ipcRenderer.on('browser:sessions-state', sub)
@@ -1166,6 +1230,7 @@ const offGridApi = {
   crmAhead: (nowSec?: number) => ipcRenderer.invoke('crm:ahead', nowSec),
   crmCalendar: (startSec: number, endSec: number) =>
     ipcRenderer.invoke('crm:calendar', startSec, endSec),
+  crmCalendarSources: () => ipcRenderer.invoke('crm:calendar-sources'),
   crmEventPrep: (title: string, attendees: string[], emails: string[] = []) =>
     ipcRenderer.invoke('crm:event-prep', title, attendees, emails),
   crmDayPlan: (nowSec?: number) => ipcRenderer.invoke('crm:day-plan', nowSec),
@@ -1234,6 +1299,12 @@ const offGridApi = {
   idTrail: () => ipcRenderer.invoke('id:trail'),
 
   // Secrets (values never returned to renderer — only key names)
+  webSearchState: () => ipcRenderer.invoke('web-search:state'),
+  webSearchSave: (value: unknown) => ipcRenderer.invoke('web-search:save', value),
+  webSearchSetKey: (provider: string, key: string) =>
+    ipcRenderer.invoke('web-search:set-key', provider, key),
+  webSearchRemoveKey: (provider: string) => ipcRenderer.invoke('web-search:remove-key', provider),
+  webSearchTest: (value: unknown) => ipcRenderer.invoke('web-search:test', value),
   secretsAvailable: () => ipcRenderer.invoke('secrets:available'),
   secretsSet: (key: string, value: string) => ipcRenderer.invoke('secrets:set', key, value),
   secretsDelete: (key: string) => ipcRenderer.invoke('secrets:delete', key),

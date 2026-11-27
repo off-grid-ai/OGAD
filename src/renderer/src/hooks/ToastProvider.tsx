@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { CheckIcon, InfoIcon, WarningCircleIcon, XIcon } from '@phosphor-icons/react'
 import { ToastContext, type ToastContextType } from './useToast'
 import { track } from '../lib/analytics'
@@ -36,6 +36,12 @@ export function ToastProvider({ children }: { children: ReactNode }): React.Reac
       clearTimeout(timer)
       delete timers.current[id]
     }
+  }, [])
+
+  // A toast's timer ends with the provider: none fires on an unmounted tree.
+  useEffect(() => {
+    const pending = timers.current
+    return () => Object.values(pending).forEach(clearTimeout)
   }, [])
 
   const showToast = useCallback<ToastContextType['showToast']>(

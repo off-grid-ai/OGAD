@@ -88,7 +88,7 @@ import {
   openModelSettingsPanel,
   supportsModelSettings
 } from '@renderer/lib/model-settings-panel'
-import { fitTier, type FitTier, fitLabel } from '../../../shared/model-fit'
+import { catalogFitTier, type FitTier, fitLabel } from '../../../shared/model-fit'
 import {
   filterAndSort,
   parseParamCount,
@@ -1100,9 +1100,9 @@ export function ModelsScreen({
     failed: Object.values(progress).filter((p) => p.status === 'failed').length
   }
 
-  const ramTier = (m: { files?: ModelFile[]; params?: number }): FitTier => {
+  const ramTier = (m: { files?: ModelFile[]; params?: number; minRamGb?: number }): FitTier => {
     const gb = estimatedBytes(m) / 1e9
-    return ramGb && gb ? fitTier(gb, ramGb) : 'easy'
+    return ramGb && gb ? catalogFitTier(gb, ramGb, m.minRamGb) : 'easy'
   }
 
   // Fast, Balanced and Best for this device on every model tab (chat, image, voice, transcription),
@@ -1132,7 +1132,8 @@ export function ModelsScreen({
           supersededBy: m.supersededBy,
           nonCommercial: m.nonCommercial,
           org: m.org,
-          sourceModelId: m.sourceModelId
+          sourceModelId: m.sourceModelId,
+          minRamGb: m.minRamGb
         })),
       ramGb
     )
@@ -2399,7 +2400,7 @@ export function ModelsScreen({
               ['Source', m.org || (isLocal ? 'Imported' : '—')],
               ['Parameters', m.params ? formatParams(m.params) : null],
               ['Released', fmtReleaseDate(m.releaseDate) || null],
-              ['Runs', ramGb && bytes > 0 ? fitLabel(fitTier(bytes / 1e9, ramGb)) : null],
+              ['Runs', ramGb && bytes > 0 ? fitLabel(catalogFitTier(bytes / 1e9, ramGb, m.minRamGb)) : null],
               ['Download', sizeLine(m)]
             ]
             return (

@@ -31,6 +31,9 @@ export interface WebUseAgentModels {
   evaluator: WebUseAgentEndpoint
   /** Writes the answer from the final page after a success verdict; the planner when absent. */
   answerer?: WebUseAgentEndpoint
+  /** Nested planning (docs/MODEL_CONTRACT.md): a 'goal:' plan step is planned as its own level.
+   *  Off until the planner is trained on it. */
+  nestedPlanning?: boolean
 }
 
 export type WebUseSettings = ComputerUseSettings & {
@@ -83,7 +86,8 @@ function normalizeAgentModels(value: unknown): WebUseAgentModels {
     evaluator: normalizeAgentEndpoint(input.evaluator, defaults.evaluator),
     ...(input.answerer
       ? { answerer: normalizeAgentEndpoint(input.answerer, defaults.planner) }
-      : {})
+      : {}),
+    ...(input.nestedPlanning === true ? { nestedPlanning: true } : {})
   }
 }
 

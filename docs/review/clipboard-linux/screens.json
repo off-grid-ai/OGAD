@@ -1,0 +1,34 @@
+[
+ {
+  "id": "clipboard-gnome-notice",
+  "name": "Clipboard on GNOME: add the quick paste shortcut",
+  "group": "Clipboard (Linux)",
+  "step": "clipboard-quick-paste",
+  "what": "On GNOME Wayland the app cannot hold a shortcut, so the Clipboard screen offers one step that adds Ctrl+Alt+V to the desktop shortcuts.",
+  "file": "screens/clipboard-gnome-notice.png",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Ctrl+Alt+V, one-step desktop shortcut",
+    "at": "2026-11-27T07:40:00Z",
+    "file": "screens/clipboard-gnome-notice.png"
+   }
+  ]
+ },
+ {
+  "id": "clipboard-ready",
+  "name": "Clipboard with quick paste working",
+  "group": "Clipboard (Linux)",
+  "step": "clipboard-ready",
+  "what": "When the app holds Ctrl+Alt+V, the screen says nothing about it and shows the shortcut beside the pop-out button.",
+  "file": "screens/clipboard-ready.png",
+  "versions": [
+   {
+    "v": 1,
+    "label": "Shortcut shown as Ctrl+Alt+V",
+    "at": "2026-11-27T07:40:00Z",
+    "file": "screens/clipboard-ready.png"
+   }
+  ]
+ }
+]

@@ -21,7 +21,7 @@ import { expect, type Page } from '@playwright/test'
 const ONBOARDING_CTA = /^(Continue|Show me how it works|Set up my models|Start using Off Grid AI)/i
 // The picks steps keep Continue disabled until something is picked. Journeys that test the shell
 // leave picks empty, which the user does with this control.
-const SKIP_PICKS = /^Skip, set it up$/i
+const SKIP_PICKS = /^Skip, I'll set it up$/i
 
 const dismissOptionalSetupNudge = async (page: Page): Promise<void> => {
   const dismiss = page.getByRole('button', { name: 'Dismiss', exact: true })

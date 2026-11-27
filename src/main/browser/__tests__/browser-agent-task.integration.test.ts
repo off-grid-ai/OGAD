@@ -15,6 +15,7 @@ import type { WebUseAgentModels } from '../../../shared/web-use-settings'
 import { VisionGuard } from '../../vision/vision-guard'
 import { playwrightKey, runBrowserAgentTask } from '../browser-agent-task'
 import { benchTrace } from '../web-use-bench-trace'
+import { FOCUSED_SUBMIT_SCRIPT } from '../browser-commit-gate'
 import type { PlaywrightToolResult, SemanticPageSession } from '../playwright-mcp-session'
 
 // ---------- the browser boundary: a small account form with a cookie banner ----------
@@ -31,6 +32,10 @@ class AccountPage implements SemanticPageSession {
   acceptOnly = false
   /** A ticking line: the page never settles, so wait_idle times out. */
   restless = false
+  /** The name of the form's button: a commit name ("Place order") makes the gate ask. */
+  button = 'Save'
+  /** Where focus sits: in the Name field, whose form submits through the button on Enter. */
+  focused = '- textbox "Name"'
   private ticks = 0
   private last = ''
   readonly calls: string[] = []
@@ -53,7 +58,7 @@ class AccountPage implements SemanticPageSession {
       `- checkbox "Agree to terms"${this.agreed ? ' [checked]' : ''} [ref=e4]`,
       '- textbox "Password" [ref=e7]',
       '- link "Help" [ref=e6]',
-      '- button "Save" [ref=e5]',
+      `- button "${this.button}" [ref=e5]`,
       ...(this.saved ? ['- text: Saved REF-9'] : [])
     ]
     return {
@@ -69,6 +74,12 @@ class AccountPage implements SemanticPageSession {
   async call(name: string, args: Record<string, unknown>): Promise<PlaywrightToolResult> {
     const fn = typeof args.function === 'string' ? args.function : ''
     if (name === 'browser_evaluate') {
+      // The commit gate reads focus before Enter (browser-commit-gate.ts).
+      if (fn === FOCUSED_SUBMIT_SCRIPT) {
+        return result(
+          JSON.stringify({ focused: this.focused, submit: `- button "${this.button}"` })
+        )
+      }
       // The reaction recorder and scroll reads (browser-agent-task.ts) run as page functions.
       if (fn.includes('MutationObserver')) return result('armed')
       if (fn.includes('JSON.stringify({ navigated')) {
@@ -196,7 +207,8 @@ function run(
   page: AccountPage,
   agentModels: WebUseAgentModels,
   taskId: string,
-  onObservation?: () => Promise<void>
+  onObservation?: () => Promise<void>,
+  answer?: (guard: VisionGuard, why: string) => void
 ): {
   steps: string[]
   waited: string[]
@@ -213,7 +225,10 @@ function run(
     guard,
     activeDriver: () => null,
     activeUrl: () => page.url,
-    waitForUser: async (why) => void waited.push(why),
+    waitForUser: async (why) => {
+      waited.push(why)
+      answer?.(guard, why)
+    },
     takeGuidance: () => ['signed in'],
     onStep: (note) => void steps.push(note),
     onPhase: () => undefined,
@@ -304,7 +319,8 @@ describe('Web Use with trained planner, actor and evaluator models', () => {
     )
     expect(page.calls.join('\n')).not.toContain('hunter2')
     expect(page.calls.join('\n')).not.toContain('file:///etc/passwd')
-    expect(steps).toContain('type(e7,"hunter2"): blocked sensitive_field')
+    // The loop holds a password before it reaches the page: the Vault or the person types it.
+    expect(steps).toContain('password typing held')
     expect(steps.some((step) => step.startsWith('verified: Saved REF-9'))).toBe(true)
     // The planner is a general model here: it gets its role instructions first. The actor and
     // evaluator get the screenshot between the two halves of their request.
@@ -342,6 +358,115 @@ describe('Web Use with trained planner, actor and evaluator models', () => {
     expect(outcome).toMatchObject({ ok: false, summary: 'The account form is locked' })
     expect(guard.snapshot().status).toBe('failed')
     expect(benchTrace.current).toMatchObject({ end: 'fail', detail: 'The account form is locked' })
+  })
+
+  it('asks before a commit click and notes the question in the task list record', async () => {
+    const page = new AccountPage()
+    page.consent = false
+    page.button = 'Place order'
+    reply = (call) =>
+      call.model === 'planner'
+        ? PLAN
+        : call.model === 'actor'
+          ? 'click(e5)'
+          : page.saved
+            ? 'success("REF-9")'
+            : 'continue(1)'
+    benchTrace.current = {
+      id: 'agent-ask',
+      goal: 'Order',
+      url: page.url,
+      steps: [],
+      timings: { planner: [], actor: [], evaluator: [], answerer: [] }
+    }
+    const { steps, waited, done } = run(page, models(), 'agent-task-ask')
+    await done
+    expect(waited[0]).toBe('Approve "Place order"? Press Continue to let it, or Stop.')
+    expect(steps).toContain('asking before "Place order"')
+    expect(benchTrace.current?.asks?.[0]).toMatchObject({ what: 'Place order', url: page.url })
+  })
+
+  /** The person answers the question in the app: the task waits for them, then Continue. */
+  const pressContinue = (guard: VisionGuard, why: string): void => {
+    expect(guard.requestUser(why)).toBe(true)
+    expect(guard.resume()).toBe(true)
+  }
+
+  it('runs the approved click after Continue, on a fresh read of the page', async () => {
+    const page = new AccountPage()
+    page.consent = false
+    page.button = 'Place order'
+    reply = (call) =>
+      call.model === 'planner'
+        ? PLAN
+        : call.model === 'actor'
+          ? 'click(e5)'
+          : page.saved
+            ? 'success("Saved REF-9")'
+            : 'continue(1)'
+    const { waited, done } = run(page, models(), 'agent-task-approved', undefined, pressContinue)
+    const outcome = await done
+    expect(waited).toEqual(['Approve "Place order"? Press Continue to let it, or Stop.'])
+    expect(page.calls.filter((call) => call.startsWith('browser_click'))).toHaveLength(1)
+    expect(page.saved).toBe(true)
+    expect(outcome.ok).toBe(true)
+  })
+
+  it('drops the approved click when the button changed while the question waited', async () => {
+    const page = new AccountPage()
+    page.consent = false
+    page.button = 'Place order'
+    let actor = 0
+    reply = (call) => {
+      if (call.model === 'planner') return PLAN
+      if (call.model === 'actor') return (actor += 1) === 1 ? 'click(e5)' : 'fail("Order changed")'
+      return 'continue(1)'
+    }
+    const { steps, done } = run(page, models(), 'agent-task-changed', undefined, (guard, why) => {
+      page.button = 'Delete account'
+      pressContinue(guard, why)
+    })
+    await done
+    expect(page.calls.some((call) => call.startsWith('browser_click'))).toBe(false)
+    expect(steps).toContain('did not Place order: the page changed while waiting for approval')
+  })
+
+  it('asks before every action that clicks its target, not only click', async () => {
+    const page = new AccountPage()
+    page.consent = false
+    page.button = 'Pay now'
+    let actor = 0
+    reply = (call) => {
+      if (call.model === 'planner') return PLAN
+      if (call.model === 'actor') return (actor += 1) === 1 ? 'focus(e5)' : 'fail("Stopped")'
+      return 'continue(1)'
+    }
+    const { waited, done } = run(page, models(), 'agent-task-focus-ask')
+    await done
+    expect(waited[0]).toBe('Approve "Pay now"? Press Continue to let it, or Stop.')
+  })
+
+  it('asks before Enter submits a form whose button places the order, and not for a plain save', async () => {
+    const page = new AccountPage()
+    page.consent = false
+    page.button = 'Place order'
+    let actor = 0
+    reply = (call) => {
+      if (call.model === 'planner') return PLAN
+      if (call.model === 'actor') return (actor += 1) === 1 ? 'press("enter")' : 'fail("Stopped")'
+      return 'continue(1)'
+    }
+    const ordered = run(page, models(), 'agent-task-enter-ask')
+    await ordered.done
+    expect(ordered.waited[0]).toBe('Approve "Place order"? Press Continue to let it, or Stop.')
+
+    const saving = new AccountPage()
+    saving.consent = false
+    actor = 0
+    const saved = run(saving, models(), 'agent-task-enter-save')
+    await saved.done
+    expect(saved.waited).toEqual([])
+    expect(saving.calls).toContain('browser_press_key {"key":"Enter"}')
   })
 
   it('stops with the reason when a model endpoint answers with an error', async () => {

@@ -49,7 +49,11 @@ export interface RagMessageContract {
 }
 
 export interface ResponseCutoffContract {
-  reason: 'max_tokens'
+  /**
+   * `max_tokens`: the reply hit the length limit. `tools_left_out`: the conversation filled the
+   * context, so the model answered with no tools offered.
+   */
+  reason: 'max_tokens' | 'tools_left_out'
   /** The limit sent; absent when the server's own limit applied. */
   maxTokens?: number
 }

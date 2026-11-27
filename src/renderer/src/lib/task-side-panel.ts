@@ -62,8 +62,20 @@ export function useTasksSeenAt(): number {
   )
 }
 
-export function openTaskSidePanel(request: OpenTaskPanelRequest = {}): void {
+/** A request made while no task workspace was on screen, kept for the one that mounts next. */
+let pendingRequest: OpenTaskPanelRequest | null = null
+
+/**
+ * Open the task workspace on a task. route: also go to the Tasks screen, for a caller outside any
+ * workspace (the floating task card): its only listeners live inside a workspace, so the click did
+ * nothing on every other screen (25 Nov). The Tasks screen picks the request up as it mounts.
+ */
+export function openTaskSidePanel(request: OpenTaskPanelRequest = {}, options: { route?: boolean } = {}): void {
   setTaskWorkspaceOpen(true)
+  if (options.route) {
+    pendingRequest = request
+    window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'tasks' }))
+  }
   for (const listener of listeners) {
     listener(request)
   }
@@ -90,6 +102,11 @@ export function useTaskWorkspaceOpen(): boolean {
 
 export function onOpenTaskSidePanel(listener: Listener): () => void {
   listeners.add(listener)
+  if (pendingRequest) {
+    const request = pendingRequest
+    pendingRequest = null
+    queueMicrotask(() => listener(request))
+  }
   return () => listeners.delete(listener)
 }
 

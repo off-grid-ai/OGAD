@@ -11,6 +11,12 @@ import { makeOAuthProvider, ensureLoopback, hasOAuthTokens } from './mcp-oauth'
 import { cancelOAuthAuthorization } from './mcp-oauth-cancellation'
 import { callHook, HOOKS } from './bootstrap/hookRegistry'
 import { notifyConnectorsChanged } from './connector-events'
+import { imapConnectorToolSource } from './mail/imap-mailbox'
+import type {
+  ConnectorToolCallResult,
+  ConnectorToolDefinition,
+  ConnectorToolSource
+} from './connector-tool-types'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -24,31 +30,11 @@ const googleProbeTool = (url: string | null): any => callHook('mcp:googleProbeTo
 const googleQuotaProject = (url: string | null): string | undefined =>
   callHook('mcp:googleQuotaProject', url)
 
-export interface ConnectorToolDefinition {
-  name: string
-  description?: string
-  inputSchema?: unknown
-  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }
-}
-
-export interface ConnectorToolCallResult {
-  ok: boolean
-  result?: unknown
-  error?: string
-}
-
-/**
- * A provider-owned connector can verify through its supported protocol while keeping generic MCP
- * discovery disabled. The provider owns execution too, so a published REST-backed tool never falls
- * through to an unavailable preview MCP endpoint.
- */
-export interface ConnectorToolSource {
-  tools: ConnectorToolDefinition[]
-  /** Optional direct authorization owned by the provider, without a remote MCP handshake. */
-  authorize?: () => Promise<void>
-  verify: () => Promise<void>
-  callTool: (tool: string, args: unknown) => Promise<ConnectorToolCallResult>
-}
+export type {
+  ConnectorToolCallResult,
+  ConnectorToolDefinition,
+  ConnectorToolSource
+} from './connector-tool-types'
 
 let ready = false
 function ensure(): void {
@@ -255,7 +241,10 @@ function getConnector(id: number): Connector | undefined {
 }
 
 function connectorToolSource(c: Connector): ConnectorToolSource | undefined {
-  return callHook<ConnectorToolSource>(HOOKS.mcpConnectorToolSource, c.id, c.url)
+  return (
+    imapConnectorToolSource(c.id, c.url) ??
+    callHook<ConnectorToolSource>(HOOKS.mcpConnectorToolSource, c.id, c.url)
+  )
 }
 
 // Build a connected MCP client for a connector. Caller MUST close().

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { benchTrace, startWebUseBench, type BenchBrowser } from '../web-use-bench'
+import { noteBenchAsk } from '../web-use-bench-trace'
 
 const ENV = [
   'OFFGRID_WEBUSE_BENCH',
@@ -35,7 +36,7 @@ describe('Web Use task list runner', () => {
     expect(ran).toBe(false)
   })
 
-  it('records every task it runs, whether it succeeds, gives up, crashes or runs out of time', async () => {
+  it('records every task it runs, whether it succeeds, gives up, crashes, waits at the commit gate or runs out of time', async () => {
     dir = mkdtempSync(join(tmpdir(), 'offgrid-bench-'))
     const tasksPath = join(dir, 'tasks.json')
     const out = join(dir, 'out')
@@ -46,13 +47,14 @@ describe('Web Use task list runner', () => {
         { id: 'login', goal: 'Sign in' },
         { id: 'crash', goal: 'Open the broken page' },
         { id: 'slow', goal: 'Wait forever' },
+        { id: 'order', goal: 'Order the book' },
         { id: 'skipped', goal: 'Not in the list to run' },
         { id: 'clone-mail', goal: 'A local clone task, never run here' }
       ])
     )
     process.env.OFFGRID_WEBUSE_BENCH = tasksPath
     process.env.OFFGRID_WEBUSE_BENCH_OUT = out
-    process.env.OFFGRID_WEBUSE_BENCH_ONLY = 'price,login,crash,slow,clone-mail'
+    process.env.OFFGRID_WEBUSE_BENCH_ONLY = 'price,login,crash,slow,order,clone-mail'
     process.env.OFFGRID_WEBUSE_BENCH_LIMIT_MS = '50'
     process.env.OFFGRID_WEBUSE_BENCH_MODELS = JSON.stringify({
       planner: { baseUrl: 'http://127.0.0.1:8471/v1', model: 'planner' },
@@ -68,6 +70,7 @@ describe('Web Use task list runner', () => {
         if (goal === 'Find the price') return { ok: true, summary: '₹420' }
         if (goal === 'Sign in') return { ok: false, summary: 'Needs a password' }
         if (goal === 'Open the broken page') throw new Error('renderer gone')
+        if (goal === 'Order the book') noteBenchAsk('Place order', 'https://shop.test/cart')
         return new Promise(() => undefined)
       },
       closeJourney: (journeyId) => void closed.push(journeyId)
@@ -85,21 +88,33 @@ describe('Web Use task list runner', () => {
     expect(record('login')).toMatchObject({ end: 'gave_up', detail: 'Needs a password', url: '' })
     expect(record('crash')).toMatchObject({ end: 'crash', detail: 'renderer gone' })
     expect(record('slow')).toMatchObject({ end: 'crash', detail: 'time limit' })
+    expect(record('order')).toMatchObject({
+      end: 'asked',
+      detail: 'asked before "Place order"',
+      asks: [{ what: 'Place order', url: 'https://shop.test/cart' }]
+    })
     const summary = JSON.parse(readFileSync(join(out, 'summary.json'), 'utf8')) as {
       tasks: number
       results: Array<{ id: string; end: string }>
     }
-    expect(summary.tasks).toBe(4)
-    expect(summary.results.map((result) => result.id)).toEqual(['price', 'login', 'crash', 'slow'])
+    expect(summary.tasks).toBe(5)
+    expect(summary.results.map((result) => result.id)).toEqual([
+      'price',
+      'login',
+      'crash',
+      'slow',
+      'order'
+    ])
     // The trace is the running task's while it runs, and cleared after; each task's pages close.
     expect(tracedWhileRunning).toEqual([
       'Find the price',
       'Sign in',
       'Open the broken page',
-      'Wait forever'
+      'Wait forever',
+      'Order the book'
     ])
     expect(benchTrace.current).toBeNull()
-    expect(closed).toHaveLength(4)
+    expect(closed).toHaveLength(5)
     expect(closed.every((journey) => journey.startsWith('bench-'))).toBe(true)
   })
 })

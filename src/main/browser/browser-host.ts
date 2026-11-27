@@ -14,7 +14,9 @@
  * is excluded from in-process coverage like the other rail hosts - exercised
  * on a real display in the e2e tour and the real-machine pass, not here.
  */
-import { BrowserWindow, WebContentsView, ipcMain } from 'electron'
+import { BrowserWindow, WebContentsView, app, ipcMain, shell, type WebContents } from 'electron'
+import { existsSync, mkdirSync } from 'node:fs'
+import path from 'node:path'
 import { createBrowserVisionScreen } from './browser-vision-screen'
 import {
   getActiveRemoteVisionServer,
@@ -44,6 +46,33 @@ import {
 import { getDB } from '../database'
 import { registerTaskGuideHandler, TASK_GUIDANCE_TRACE } from '../tasks/task-guide'
 import { BrowserHistoryStore } from './browser-history-store'
+import { BrowserVisitsStore } from './browser-visits-store'
+import { BrowserBookmarksStore } from './browser-bookmarks-store'
+import { BrowserOpenTabsStore } from './browser-open-tabs-store'
+import { BrowserDownloads } from './browser-downloads'
+import { PERSONAL_BROWSER_PARTITION, prepareBrowserPartition } from './browser-partition'
+import { attachPageMenu } from './browser-page-input'
+import { browserShortcut, type BrowserShortcut } from './browser-shortcuts'
+import { fillVaultLogin, hasLoginForm, vaultStateFor } from './browser-vault-fill'
+import { emailedCodeNote, fillEmailedCode, readCodeField } from './browser-emailed-code'
+import {
+  READ_PASSWORD_VALUES_SCRIPT,
+  scrubSecretValues,
+  TRACK_PASSWORD_FIELDS_SCRIPT
+} from './browser-secret-scrub'
+import {
+  sandboxAllows,
+  sandboxPartition,
+  sandboxProfile,
+  sandboxProfiles,
+  type SandboxProfile
+} from './sandbox-profiles'
+import { benchTrace } from './web-use-bench-trace'
+import type {
+  BrowserChromeCommand,
+  BrowserFillOutcome,
+  BrowserVaultState
+} from '../../shared/browser-library'
 import {
   BrowserSessionStore,
   historyViewSessionId,
@@ -60,6 +89,7 @@ import type {
 import {
   BROWSER_REGION_PRIORITY,
   fitWebUseDesktopRegion,
+  isBrowserControl,
   isBrowserRegionOwner,
   webUseDesktopZoomFactor,
   type BrowserRegionOwner
@@ -69,7 +99,7 @@ import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { retryPlanningGoal, TASK_RETRY_TRACE } from '../tasks/task-retry'
 import { runBrowserVisualTask, withActiveBrowserVision } from './browser-visual-task'
 import { createBrowserSemanticEvidenceRecorder } from './browser-semantic-evidence'
-import { BrowserJourneyRunOwners } from './browser-run-owners'
+import { BrowserJourneyRunOwners, type BrowserJourneyRunOwner } from './browser-run-owners'
 import { ElectronPlaywrightRelay } from './electron-playwright-relay'
 import { PlaywrightMcpSession } from './playwright-mcp-session'
 import { runBrowserPlaywrightTask } from './browser-playwright-task'
@@ -81,6 +111,9 @@ import {
   activeModelProjectionIdentity,
   getWebUseActiveModelProjection
 } from '../vision/vision-task-model-strategy'
+
+/** A code email is sent as the page that asks for it opens, sometimes just before. */
+const EMAILED_CODE_GRACE_MS = 30_000
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -170,6 +203,26 @@ function attachCdp(view: WebContentsView): CdpTransport {
 class BrowserHost implements BrowserRailHost {
   private readonly sessions = new BrowserSessionStore<WebContentsView>()
   private readonly history = new BrowserHistoryStore(getDB())
+  /** Every visit, searchable (the History panel), and each task's own trail. */
+  private readonly visits = new BrowserVisitsStore(getDB())
+  private readonly bookmarks = new BrowserBookmarksStore(getDB())
+  private readonly openTabs = new BrowserOpenTabsStore(getDB())
+  private readonly downloads = new BrowserDownloads(
+    () => app.getPath('downloads'),
+    (list) => broadcast('browser:downloads-state', list)
+  )
+  /** The page each session last recorded, so a repaint is not a second visit. */
+  private readonly lastVisit = new Map<string, { url: string; visitId: number | null }>()
+  /** The person's closed tabs, newest last, for Reopen closed tab. */
+  private readonly closedTabs: string[] = []
+  /** Secrets the Vault filled per journey: masked out of everything the models read. */
+  private readonly filledSecrets = new Map<string, Set<string>>()
+  /** Pages the agent already tried to sign in on, per journey: one autofill per address. */
+  private readonly autofillTried = new Map<string, Set<string>>()
+  private readonly userMuted = new WeakSet<WebContentsView>()
+  private restoringTabs = false
+  /** Disposing closes every page; that must not erase the tabs to reopen next launch. */
+  private quitting = false
   private readonly runOwners = new BrowserJourneyRunOwners()
   private readonly taskPointers = new Map<string, BrowserPointerEvent>()
   private readonly pointerRestorations = new Map<string, Promise<boolean>>()
@@ -187,10 +240,46 @@ class BrowserHost implements BrowserRailHost {
 
   constructor() {
     this.history.migrate()
+    this.visits.migrate()
+    this.bookmarks.migrate()
+    this.openTabs.migrate()
+    const saved = this.openTabs.list()
+    // After construction: restoring creates sessions through this host.
+    if (saved.length) queueMicrotask(() => this.restoreOpenTabs(saved))
   }
 
   private broadcastSessions(): void {
     broadcast('browser:sessions-state', this.sessions.snapshot())
+    this.saveOpenTabs()
+  }
+
+  /** The person's tabs, so the next launch opens them again. Task pages are not kept. */
+  private saveOpenTabs(): void {
+    if (this.restoringTabs || this.quitting) return
+    const snapshot = this.sessions.snapshot()
+    this.openTabs.save(
+      snapshot.sessions
+        .filter((session) => session.kind === 'manual' && session.historyId && !session.profileId)
+        .map((session) => ({
+          historyId: session.historyId!,
+          active: session.sessionId === snapshot.activeSessionId
+        }))
+    )
+  }
+
+  private restoreOpenTabs(saved: ReturnType<BrowserOpenTabsStore['list']>): void {
+    this.restoringTabs = true
+    let active: string | null = null
+    try {
+      for (const tab of saved) {
+        const opened = this.reopenManual(tab.historyId)
+        if (opened && tab.active) active = opened.sessionId
+      }
+      if (active) this.activateSession(active)
+    } finally {
+      this.restoringTabs = false
+      this.saveOpenTabs()
+    }
   }
 
   private broadcastNavigation(record: BrowserSessionRecord<WebContentsView>): void {
@@ -234,13 +323,40 @@ class BrowserHost implements BrowserRailHost {
     const contents = record.resource.webContents
     if (contents.isDestroyed()) return record.chrome
     const navigationHistory = contents.navigationHistory
+    const url = contents.getURL()
     return {
-      url: contents.getURL(),
+      url,
       title: contents.getTitle() || 'New tab',
+      ...(record.chrome.faviconUrl ? { faviconUrl: record.chrome.faviconUrl } : {}),
       canGoBack: navigationHistory.canGoBack(),
       canGoForward: navigationHistory.canGoForward(),
-      isLoading: contents.isLoading()
+      isLoading: contents.isLoading(),
+      audible: contents.isCurrentlyAudible(),
+      muted: this.userMuted.has(record.resource),
+      bookmarked: /^https?:\/\//i.test(url) && this.bookmarks.has(url),
+      ...(record.chrome.profileId ? { profileId: record.chrome.profileId } : {})
     }
+  }
+
+  /** One history row per address a page shows; a later title only renames it. */
+  private noteVisit(
+    record: BrowserSessionRecord<WebContentsView>,
+    chrome: BrowserChromeState
+  ): void {
+    if (isHistoryViewSession(record.sessionId) || !/^https?:\/\//i.test(chrome.url)) return
+    const last = this.lastVisit.get(record.sessionId)
+    if (last?.url === chrome.url) {
+      if (last.visitId !== null && chrome.title && chrome.title !== 'New tab') {
+        this.visits.retitle(last.visitId, chrome.title)
+      }
+      return
+    }
+    const visitId = this.visits.record({
+      url: chrome.url,
+      title: chrome.title === 'New tab' ? '' : chrome.title,
+      ...(record.task ? { taskId: record.task.taskId } : {})
+    })
+    this.lastVisit.set(record.sessionId, { url: chrome.url, visitId })
   }
 
   private refreshSession(sessionId: string): void {
@@ -248,6 +364,7 @@ class BrowserHost implements BrowserRailHost {
     if (!record) return
     const chrome = this.readChrome(record)
     this.sessions.updateChrome(sessionId, chrome)
+    this.noteVisit(record, chrome)
     if (record.task) {
       if (!isHistoryViewSession(record.sessionId)) {
         recordTaskRun({
@@ -261,7 +378,7 @@ class BrowserHost implements BrowserRailHost {
           lastTitle: chrome.title
         })
       }
-    } else if (/^https?:\/\//i.test(chrome.url)) {
+    } else if (/^https?:\/\//i.test(chrome.url) && !record.chrome.profileId) {
       this.history.upsert({
         historyId: record.historyId ?? record.sessionId,
         title: chrome.title,
@@ -287,7 +404,7 @@ class BrowserHost implements BrowserRailHost {
 
   private setViewVisible(view: WebContentsView, visible: boolean): void {
     try {
-      view.webContents.setAudioMuted(!visible)
+      view.webContents.setAudioMuted(!visible || this.userMuted.has(view))
     } catch {
       return
     }
@@ -343,7 +460,9 @@ class BrowserHost implements BrowserRailHost {
       sessionId: rootSessionId,
       kind: 'task',
       journeyId,
-      task
+      task,
+      // A retried sandbox journey stays in its fenced profile.
+      ...(record.chrome.profileId ? { profileId: record.chrome.profileId } : {})
     })
   }
 
@@ -373,6 +492,9 @@ class BrowserHost implements BrowserRailHost {
   }
 
   dispose(): void {
+    // Closing every page on the way out is not the person closing their tabs: keep the list.
+    this.saveOpenTabs()
+    this.quitting = true
     this.region = null
     this.runOwners.haltAll('browser host closed')
     this.taskPointers.clear()
@@ -450,6 +572,43 @@ class BrowserHost implements BrowserRailHost {
     return winner?.rect ?? null
   }
 
+  /** The partition a page lives in: the person's own, or a sandbox profile's fenced one. */
+  private partitionFor(profile: SandboxProfile | undefined): string {
+    const partition = profile ? sandboxPartition(profile) : PERSONAL_BROWSER_PARTITION
+    const session = prepareBrowserPartition(
+      partition,
+      {
+        isTaskPage: (contents) => this.isTaskContents(contents),
+        attachDownloads: (target) => this.downloads.attach(target)
+      },
+      profile?.hosts ?? []
+    )
+    if (profile) this.fenceProfile(session, profile)
+    return partition
+  }
+
+  private readonly fenced = new WeakSet<Electron.Session>()
+
+  /** A sandbox profile opens only its own sites, whoever asks: page, popup, agent or person. */
+  private fenceProfile(session: Electron.Session, profile: SandboxProfile): void {
+    if (this.fenced.has(session)) return
+    this.fenced.add(session)
+    session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+      const blocked =
+        (details.resourceType === 'mainFrame' || details.resourceType === 'subFrame') &&
+        !sandboxAllows(profile, details.url)
+      callback({ cancel: blocked })
+    })
+  }
+
+  private isTaskContents(contents: WebContents): boolean {
+    for (const session of this.sessions.snapshot().sessions) {
+      const live = this.sessions.get(session.sessionId)
+      if (live?.resource.webContents === contents) return live.kind === 'task'
+    }
+    return false
+  }
+
   private createSession(input: {
     sessionId: string
     historyId?: string
@@ -457,18 +616,29 @@ class BrowserHost implements BrowserRailHost {
     journeyId?: string
     parentSessionId?: string
     task?: BrowserTaskPointer
+    /** A sandbox test profile (sandbox-profiles.ts). */
+    profileId?: string
+    /** A popup's own contents, adopted so window.opener (sign-in popups) keeps working. */
+    adopt?: WebContents
   }): BrowserSessionRecord<WebContentsView> {
+    const { profileId, adopt, ...identity } = input
+    const profile = sandboxProfile(profileId)
     const view = new WebContentsView({
+      ...(adopt ? { webContents: adopt } : {}),
       webPreferences: {
         sandbox: true,
         contextIsolation: true,
-        partition: 'persist:agent-browser',
+        partition: this.partitionFor(profile),
         backgroundThrottling: false
       }
     })
     const win = getMainWindow()
     win?.contentView.addChildView(view)
-    const record = this.sessions.create({ ...input, resource: view })
+    const record = this.sessions.create({ ...identity, resource: view })
+    if (profile) {
+      this.sessions.updateChrome(record.sessionId, { ...record.chrome, profileId: profile.id })
+    }
+    this.wirePage(record)
     const refresh = (): void => this.refreshSession(record.sessionId)
     const refreshPointer = (): void => {
       refresh()
@@ -476,7 +646,11 @@ class BrowserHost implements BrowserRailHost {
     }
     view.webContents.on('did-start-loading', refresh)
     view.webContents.on('did-stop-loading', refresh)
-    view.webContents.on('did-navigate', refreshPointer)
+    view.webContents.on('did-navigate', () => {
+      // A reload is one more visit for a task, so the loop hint counts it; history keeps one row.
+      if (this.sessions.get(record.sessionId)?.task) this.lastVisit.delete(record.sessionId)
+      refreshPointer()
+    })
     view.webContents.on('did-navigate-in-page', refresh)
     view.webContents.on('dom-ready', () => void this.restoreTaskPointer(record))
     view.webContents.on('did-finish-load', () => void this.restoreTaskPointer(record))
@@ -492,9 +666,32 @@ class BrowserHost implements BrowserRailHost {
       this.broadcastNavigation(current)
     })
     view.webContents.setWindowOpenHandler(({ url }) => {
-      const target = normalizeBrowserAddress(url)
-      if (target) void this.openManagedPage(record, target)
-      return { action: 'deny' }
+      // A web page or a blank one a script fills in (OAuth sign-in popups do both). It opens as
+      // a tab of this page that keeps window.opener, so the sign-in can report back and close.
+      if (url !== '' && url !== 'about:blank' && !normalizeBrowserAddress(url)) {
+        return { action: 'deny' }
+      }
+      if (!/^(https?:\/\/|about:blank$|$)/i.test(url)) return { action: 'deny' }
+      return {
+        action: 'allow',
+        outlivesOpener: true,
+        createWindow: (options) => {
+          const guest = (options as { webContents?: WebContents }).webContents
+          const child = this.createSession({
+            sessionId: randomUUID(),
+            ...(record.kind === 'manual' ? { historyId: randomUUID() } : {}),
+            kind: record.kind,
+            journeyId: record.journeyId,
+            parentSessionId: record.sessionId,
+            task: record.task,
+            profileId: record.chrome.profileId,
+            ...(guest ? { adopt: guest } : {})
+          })
+          this.activateSession(child.sessionId)
+          if (!guest && /^https?:\/\//i.test(url)) void this.loadNatively(child.resource, url)
+          return child.resource.webContents
+        }
+      }
     })
     if (win && !this.windowLifecycleBound) {
       this.windowLifecycleBound = true
@@ -513,6 +710,126 @@ class BrowserHost implements BrowserRailHost {
     return record
   }
 
+  /** The page's own browser behaviour: shortcuts, right-click menu, find, sound, closing. */
+  private wirePage(record: BrowserSessionRecord<WebContentsView>): void {
+    const contents = record.resource.webContents
+    attachPageMenu(contents, {
+      openInNewTab: (url) => void this.openTabFrom(record, url),
+      download: (url) => contents.downloadURL(url)
+    })
+    contents.on('before-input-event', (event, input) => {
+      // A running task's keys are the agent's (CDP input); its pane belongs to the task.
+      if (record.kind === 'task' && record.task?.status === 'running') return
+      const shortcut = browserShortcut(input, process.platform)
+      if (!shortcut) return
+      event.preventDefault()
+      this.runShortcut(record.sessionId, shortcut)
+    })
+    contents.on('found-in-page', (_event, result) => {
+      broadcast('browser:find-result', {
+        sessionId: record.sessionId,
+        activeMatch: result.activeMatchOrdinal,
+        matches: result.matches
+      })
+    })
+    contents.on('audio-state-changed', () => this.refreshSession(record.sessionId))
+    // A task's pages remember their password fields from the start, so a password the person
+    // types during a take over stays masked after the site shows it as text.
+    const trackPasswordFields = (): void => {
+      if (!record.journeyId || contents.isDestroyed()) return
+      for (const frame of contents.mainFrame.framesInSubtree) {
+        void frame.executeJavaScript(TRACK_PASSWORD_FIELDS_SCRIPT).catch(() => undefined)
+      }
+    }
+    contents.on('dom-ready', trackPasswordFields)
+    contents.on('did-frame-finish-load', trackPasswordFields)
+    // window.close() from the page (a finished sign-in popup) ends its tab.
+    contents.once('destroyed', () => {
+      if (this.sessions.get(record.sessionId)?.resource !== record.resource) return
+      this.sessions.close(record.sessionId)
+      this.lastVisit.delete(record.sessionId)
+      this.taskPointers.delete(record.sessionId)
+      try {
+        getMainWindow()?.contentView.removeChildView(record.resource)
+      } catch {
+        /* window already gone */
+      }
+      this.syncViewVisibility()
+      this.broadcastSessions()
+    })
+  }
+
+  private runShortcut(sessionId: string, shortcut: BrowserShortcut): void {
+    const command = (name: BrowserChromeCommand): void =>
+      broadcast('browser:command', { sessionId, command: name })
+    switch (shortcut.kind) {
+      case 'new-tab': {
+        const opened = this.newTab(this.sessions.get(sessionId)?.journeyId)
+        broadcast('browser:command', { sessionId: opened.sessionId, command: 'focus-address' })
+        return
+      }
+      case 'close-tab':
+        this.closeSession(sessionId)
+        return
+      case 'reopen-closed-tab':
+        this.reopenClosedTab()
+        return
+      case 'back':
+      case 'forward':
+      case 'devtools':
+      case 'print':
+        this.control(shortcut.kind, sessionId)
+        return
+      case 'reload': {
+        const contents = this.sessions.get(sessionId)?.resource.webContents
+        if (shortcut.hard) contents?.reloadIgnoringCache()
+        else contents?.reload()
+        return
+      }
+      case 'bookmark':
+        this.toggleBookmark(sessionId)
+        return
+      case 'next-tab':
+      case 'previous-tab':
+        this.cycleTab(sessionId, shortcut.kind === 'next-tab' ? 1 : -1)
+        return
+      case 'chrome':
+        command(shortcut.command)
+        return
+    }
+  }
+
+  /** The person's open tabs, in order: what next/previous tab moves through. */
+  private cycleTab(sessionId: string, step: number): void {
+    const current = this.sessions.get(sessionId)
+    const tabs = this.sessions
+      .snapshot()
+      .sessions.filter((session) =>
+        current?.kind === 'task'
+          ? session.journeyId === current.journeyId
+          : session.kind === 'manual'
+      )
+    const index = tabs.findIndex((tab) => tab.sessionId === sessionId)
+    if (index < 0 || tabs.length < 2) return
+    const next = tabs[(index + step + tabs.length) % tabs.length]
+    if (next) this.activateSession(next.sessionId)
+  }
+
+  /** "Open Link in New Tab": a tab of its own for the person, a page of the journey for a task. */
+  private async openTabFrom(
+    parent: BrowserSessionRecord<WebContentsView>,
+    url: string
+  ): Promise<void> {
+    const target = normalizeBrowserAddress(url)
+    if (!target) return
+    if (parent.kind === 'task') {
+      await this.openManagedPage(parent, target)
+      return
+    }
+    const opened = this.newTab(parent.journeyId)
+    await this.navigate(target, opened.sessionId)
+  }
+
   /** A site-requested page is a managed child tab. It keeps the parent's chat
    * journey and task trace, while the + button remains the only manual-tab path. */
   private async openManagedPage(
@@ -526,7 +843,8 @@ class BrowserHost implements BrowserRailHost {
       kind: parent.kind,
       journeyId: parent.journeyId,
       parentSessionId: parent.sessionId,
-      task: parent.task
+      task: parent.task,
+      profileId: parent.chrome.profileId
     })
     this.activateSession(child.sessionId)
     try {
@@ -598,6 +916,11 @@ class BrowserHost implements BrowserRailHost {
     }
     const closed = this.sessions.close(sessionId)
     if (!closed) return false
+    if (closed.kind === 'manual' && closed.historyId && !closed.chrome.profileId) {
+      this.closedTabs.push(closed.historyId)
+      if (this.closedTabs.length > 25) this.closedTabs.shift()
+    }
+    this.lastVisit.delete(sessionId)
     this.taskPointers.delete(sessionId)
     this.destroyView(closed.resource)
     this.syncViewVisibility()
@@ -622,11 +945,251 @@ class BrowserHost implements BrowserRailHost {
       contents.reload()
     } else if (action === 'stop') {
       contents.stop()
+    } else if (action === 'devtools') {
+      // Its own window: the page's pane stays the page, at the size the agent sees.
+      if (contents.isDevToolsOpened()) contents.closeDevTools()
+      else contents.openDevTools({ mode: 'detach', activate: true })
+    } else if (action === 'print') {
+      contents.print({}, () => undefined)
+    } else if (action === 'mute') {
+      if (this.userMuted.has(record.resource)) this.userMuted.delete(record.resource)
+      else this.userMuted.add(record.resource)
+      contents.setAudioMuted(this.userMuted.has(record.resource) || !this.isShown(record))
     } else {
       return false
     }
     this.refreshSession(record.sessionId)
     return true
+  }
+
+  private isShown(record: BrowserSessionRecord<WebContentsView>): boolean {
+    return this.sessions.active?.sessionId === record.sessionId && Boolean(this.region)
+  }
+
+  /** Bring back the person's most recently closed tab (Cmd/Ctrl+Shift+T). */
+  reopenClosedTab(): { sessionId: string } | null {
+    const historyId = this.closedTabs.pop()
+    return historyId ? this.reopenManual(historyId) : null
+  }
+
+  // History, bookmarks, downloads, find and the Vault: the browser beyond the page.
+
+  searchHistory(query: string, before?: number): ReturnType<BrowserVisitsStore['search']> {
+    return this.visits.search(query, before)
+  }
+
+  removeHistory(visitId: number): void {
+    this.visits.remove(visitId)
+  }
+
+  clearHistory(since?: number): void {
+    this.visits.clear(since)
+    this.lastVisit.clear()
+  }
+
+  listBookmarks(): ReturnType<BrowserBookmarksStore['list']> {
+    return this.bookmarks.list()
+  }
+
+  /** Bookmark the page, or remove it: the star. Returns whether it is bookmarked now. */
+  toggleBookmark(sessionId?: string): boolean {
+    const record = sessionId ? this.sessions.get(sessionId) : this.sessions.active
+    if (!record) return false
+    const on = this.bookmarks.toggle({ url: record.chrome.url, title: record.chrome.title })
+    this.refreshSession(record.sessionId)
+    broadcast('browser:bookmarks-changed', this.bookmarks.list())
+    return on
+  }
+
+  removeBookmark(bookmarkId: string): void {
+    this.bookmarks.remove(bookmarkId)
+    for (const session of this.sessions.snapshot().sessions) this.refreshSession(session.sessionId)
+    broadcast('browser:bookmarks-changed', this.bookmarks.list())
+  }
+
+  renameBookmark(bookmarkId: string, title: string): void {
+    this.bookmarks.rename(bookmarkId, title)
+    broadcast('browser:bookmarks-changed', this.bookmarks.list())
+  }
+
+  listDownloads(): ReturnType<BrowserDownloads['list']> {
+    return this.downloads.list()
+  }
+
+  downloadAction(
+    downloadId: string,
+    action: 'cancel' | 'pause' | 'resume' | 'open' | 'show' | 'clear'
+  ): boolean {
+    if (action === 'clear') {
+      this.downloads.clearFinished()
+      return true
+    }
+    if (action === 'cancel') this.downloads.cancel(downloadId)
+    else if (action === 'pause') this.downloads.pause(downloadId)
+    else if (action === 'resume') this.downloads.resume(downloadId)
+    else {
+      const file = this.downloads.savedPath(downloadId)
+      if (!file) return false
+      if (action === 'open') void shell.openPath(file)
+      else shell.showItemInFolder(file)
+    }
+    return true
+  }
+
+  /** Find on the page. An empty query clears the highlights. */
+  find(sessionId: string, query: string, forward = true, findNext = false): void {
+    const contents = this.sessions.get(sessionId)?.resource.webContents
+    if (!contents || contents.isDestroyed()) return
+    if (!query) {
+      contents.stopFindInPage('clearSelection')
+      return
+    }
+    // Electron's `findNext` starts a NEW find session; stepping through matches passes false.
+    contents.findInPage(query, { forward, findNext: !findNext })
+  }
+
+  stopFind(sessionId: string): void {
+    const contents = this.sessions.get(sessionId)?.resource.webContents
+    if (contents && !contents.isDestroyed()) contents.stopFindInPage('keepSelection')
+  }
+
+  async vaultState(sessionId?: string): Promise<BrowserVaultState> {
+    const record = sessionId ? this.sessions.get(sessionId) : this.sessions.active
+    if (!record || record.resource.webContents.isDestroyed()) return { state: 'none' }
+    return vaultStateFor(record.resource.webContents.getURL())
+  }
+
+  /** The key button: fill a Vault login into the page. The renderer never sees the password. */
+  async fillLogin(sessionId: string, uuid: string): Promise<BrowserFillOutcome> {
+    const record = this.sessions.get(sessionId)
+    if (!record || record.resource.webContents.isDestroyed()) {
+      return { ok: false, reason: 'no_form' }
+    }
+    return fillVaultLogin(record.resource.webContents, uuid, (secret) =>
+      this.rememberSecret(record.journeyId ?? record.sessionId, secret)
+    )
+  }
+
+  private rememberSecret(scope: string, secret: string): void {
+    const set = this.filledSecrets.get(scope) ?? new Set<string>()
+    set.add(secret)
+    this.filledSecrets.set(scope, set)
+  }
+
+  /** Mask every password the journey's pages hold, and every secret the Vault filled. */
+  private async scrubJourney(journeyId: string, text: string): Promise<string> {
+    const secrets = new Set(this.filledSecrets.get(journeyId) ?? [])
+    for (const page of this.sessions.journeyRecords(journeyId)) {
+      const contents = page.resource.webContents
+      if (contents.isDestroyed()) continue
+      for (const frame of contents.mainFrame.framesInSubtree) {
+        const values = (await frame
+          .executeJavaScript(READ_PASSWORD_VALUES_SCRIPT)
+          .catch(() => [])) as unknown
+        if (Array.isArray(values)) {
+          for (const value of values) if (typeof value === 'string') secrets.add(value)
+        }
+      }
+    }
+    return secrets.size ? scrubSecretValues(text, secrets) : text
+  }
+
+  /**
+   * The agent's sign-in: when the page shows a login form and the Vault holds exactly one login
+   * for the site, fill it. Several logins are the person's choice, so the agent is told to ask.
+   */
+  private async agentAutofill(
+    journeyId: string,
+    onNote?: (note: string) => void,
+    signal?: AbortSignal
+  ): Promise<string | null> {
+    const page = this.sessions.findJourney(journeyId)
+    const contents = page?.resource.webContents
+    if (!page || !contents || contents.isDestroyed()) return null
+    const url = contents.getURL()
+    const tried = this.autofillTried.get(journeyId) ?? new Set<string>()
+    this.autofillTried.set(journeyId, tried)
+    const notes: string[] = []
+    if (!tried.has(url) && (await hasLoginForm(contents))) {
+      tried.add(url)
+      const note = await this.agentVaultLogin(journeyId, contents, url)
+      if (note) notes.push(note)
+    }
+    // After the Vault, which fills an authenticator code itself when the login has one.
+    const code = await this.agentEmailedCode(journeyId, contents, tried, onNote, signal)
+    if (code) notes.push(code)
+    return notes.length ? notes.join('; ') : null
+  }
+
+  private async agentVaultLogin(
+    journeyId: string,
+    contents: WebContents,
+    url: string
+  ): Promise<string | null> {
+    const state = await vaultStateFor(url)
+    const host = new URL(url).host
+    if (state.state === 'locked') return `the Vault is locked, so it could not sign in on ${host}`
+    if (state.state !== 'available') return null
+    if (state.logins.length > 1) {
+      return `the Vault has ${state.logins.length} logins for ${host}; ask which one to use`
+    }
+    const login = state.logins[0]!
+    const outcome = await fillVaultLogin(contents, login.uuid, (secret) =>
+      this.rememberSecret(journeyId, secret)
+    )
+    return outcome.ok ? `the Vault filled the login for ${host} as ${outcome.username}` : null
+  }
+
+  /**
+   * A page asking for a code the site emailed: wait for that email in the person's connected
+   * mailbox and fill the code, masked like a password. Once per address; no code, and the agent
+   * asks the person as before.
+   */
+  private async agentEmailedCode(
+    journeyId: string,
+    contents: WebContents,
+    tried: Set<string>,
+    onNote?: (note: string) => void,
+    signal?: AbortSignal
+  ): Promise<string | null> {
+    const key = `code:${contents.getURL()}`
+    if (tried.has(key)) return null
+    const field = await readCodeField(contents)
+    if (!field || field.filled) return null
+    tried.add(key)
+    const outcome = await fillEmailedCode(contents, field, {
+      // The code was asked for by the step that opened this page, moments ago.
+      requestedAt: Date.now() - EMAILED_CODE_GRACE_MS,
+      onSecret: (secret) => this.rememberSecret(journeyId, secret),
+      onWaiting: (site) => onNote?.(`waiting for the sign-in code from ${site} in your email`),
+      signal
+    })
+    return emailedCodeNote(outcome)
+  }
+
+  /** Files the agent may upload: the task uploads folder only, never the rest of the disk. */
+  private uploadPath(name: string): string | null {
+    const folder = path.join(app.getPath('userData'), 'agent-uploads')
+    mkdirSync(folder, { recursive: true })
+    const file = path.join(folder, path.basename(name.trim()))
+    return name.trim() && existsSync(file) ? file : null
+  }
+
+  listSandboxProfiles(): ReturnType<typeof sandboxProfiles> {
+    return sandboxProfiles()
+  }
+
+  /** Open a sandbox profile's start page in a tab of its own, to sign in to its test account. */
+  async openSandboxProfile(profileId: string): Promise<{ sessionId: string } | null> {
+    const profile = sandboxProfile(profileId)
+    if (!profile) return null
+    const sessionId = randomUUID()
+    this.createSession({ sessionId, historyId: sessionId, kind: 'manual', profileId })
+    this.activateSession(sessionId)
+    const record = this.sessions.get(sessionId)
+    if (record) await this.loadNatively(record.resource, profile.startUrl)
+    this.refreshSession(sessionId)
+    return { sessionId }
   }
 
   async navigate(address: string, sessionId?: string): Promise<{ ok: boolean; detail?: string }> {
@@ -730,6 +1293,16 @@ class BrowserHost implements BrowserRailHost {
 
   async runTask(request: BrowserTaskRequest): Promise<WebTaskResult> {
     const { goal, url, taskId, journeyId, checkpoint } = request
+    const profile = sandboxProfile(request.profileId)
+    if (request.profileId && !profile) {
+      return {
+        ok: false,
+        summary: `No sandbox profile named ${request.profileId}.`,
+        steps: [],
+        takeovers: 0,
+        finalUrl: ''
+      }
+    }
     const taskModelIdentityPromise = getWebUseActiveModelProjection()
       .then(activeModelProjectionIdentity)
       .catch((error: unknown) => {
@@ -753,7 +1326,8 @@ class BrowserHost implements BrowserRailHost {
         sessionId: `journey:${journeyId}`,
         kind: 'task',
         journeyId,
-        task: { taskId, journeyId, goal, status: 'running', steps: [] }
+        task: { taskId, journeyId, goal, status: 'running', steps: [] },
+        ...(profile ? { profileId: profile.id } : {})
       })
     this.activateSession(record.sessionId)
     const view = record.resource
@@ -762,6 +1336,7 @@ class BrowserHost implements BrowserRailHost {
     // so the model always has somewhere to start and can navigate from there.
     const start =
       url ??
+      (profile && !continuingJourney ? profile.startUrl : undefined) ??
       explicitBrowserAddress(goal) ??
       (retryingJourney
         ? continuationUrl || 'https://www.google.com'
@@ -980,7 +1555,10 @@ class BrowserHost implements BrowserRailHost {
           if (page?.parentSessionId) this.closeSession(page.sessionId)
         }
       })
-      const playwright = new PlaywrightMcpSession(relay)
+      // Every snapshot and tool result passes the password scrub before a model reads it.
+      const playwright = new PlaywrightMcpSession(relay, undefined, (text) =>
+        this.scrubJourney(journeyId, text)
+      )
 
       // The model publishes cumulative text for the current step, then starts the
       // next step with an empty live event. Keep one transcript per task so a step
@@ -1024,6 +1602,8 @@ class BrowserHost implements BrowserRailHost {
               handoffs: 0
             }
           }
+          const autofill = (): Promise<string | null> =>
+            this.agentAutofill(journeyId, recordStep, owner.controller.signal)
           const semanticInput: Parameters<typeof runBrowserPlaywrightTask>[0] = {
             goal,
             plan,
@@ -1074,6 +1654,10 @@ class BrowserHost implements BrowserRailHost {
               return llm.hasVision() ? semanticScreen.capture() : undefined
             },
             onObservation: recordSemanticEvidence,
+            autofill,
+            // The page the task drives decides, not the request: a journey whose pages are in
+            // the person's own partition keeps the send, pay and delete gate.
+            sandboxProfile: journeyRunsInSandbox(this.sessions.journeyRecords(journeyId)),
             signal: owner.controller.signal
           }
           const webUse = getWebUseSettings()
@@ -1084,7 +1668,17 @@ class BrowserHost implements BrowserRailHost {
             ? runBrowserAgentTask({
                 ...semanticInput,
                 models: webUse.agentModels,
-                screenshot: () => captureBrowserAgentFrame(activePage().view, activePage().driver)
+                screenshot: () => captureBrowserAgentFrame(activePage().view, activePage().driver),
+                browser: {
+                  autofill,
+                  visits: (address) =>
+                    this.visits.taskTrail(taskId).filter((visit) => visit.url === address).length,
+                  showTab: (index) => {
+                    const page = this.sessions.journeyRecords(journeyId)[index]
+                    if (page) this.activateSession(page.sessionId)
+                  },
+                  uploadPath: (name) => this.uploadPath(name)
+                }
               })
             : runBrowserPlaywrightTask(semanticInput)
         })().finally(() => playwright.close())
@@ -1227,11 +1821,40 @@ class BrowserHost implements BrowserRailHost {
         finalUrl: ''
       }
     } finally {
+      if (benchTrace.current) {
+        benchTrace.current.visits = this.visits
+          .taskTrail(taskId)
+          .map((visit) => ({ url: visit.url, title: visit.title, at: visit.visitedAt }))
+      }
       releaseGuidance()
-      this.runOwners.release(owner)
+      // A replaced run leaves the newer run's filled secrets and sign-in attempts alone.
+      releaseJourneyRun(this.runOwners, owner, () => {
+        this.filledSecrets.delete(journeyId)
+        this.autofillTried.delete(journeyId)
+      })
       releaseSession()
     }
   }
+}
+
+/**
+ * A task skips the send, pay and delete question only when every page it drives lives in a
+ * sandbox test profile, read from the pages themselves (the profile the fence enforces).
+ */
+export function journeyRunsInSandbox(
+  pages: readonly { chrome: { profileId?: string } }[]
+): boolean {
+  return pages.length > 0 && pages.every((page) => Boolean(sandboxProfile(page.chrome.profileId)))
+}
+
+/** Ends a run's hold on its journey; the journey's state is cleared only by its current run. */
+export function releaseJourneyRun(
+  owners: BrowserJourneyRunOwners,
+  owner: BrowserJourneyRunOwner,
+  clearJourneyState: () => void
+): void {
+  if (owners.isCurrent(owner)) clearJourneyState()
+  owners.release(owner)
 }
 
 let host: BrowserHost | null = null
@@ -1295,11 +1918,61 @@ export function registerBrowserViewIpc(): void {
     typeof sessionId === 'string' ? browserHost().closeSession(sessionId) : false
   )
   ipcMain.handle('browser:control', (_e, action: unknown, sessionId: unknown) => {
-    if (action !== 'back' && action !== 'forward' && action !== 'reload' && action !== 'stop') {
-      return false
-    }
+    if (!isBrowserControl(action)) return false
     return browserHost().control(action, typeof sessionId === 'string' ? sessionId : undefined)
   })
+  const str = (value: unknown): string | undefined =>
+    typeof value === 'string' ? value : undefined
+  ipcMain.handle('browser:reopen-closed-tab', () => browserHost().reopenClosedTab())
+  ipcMain.handle('browser:history-search', (_e, query: unknown, before: unknown) =>
+    browserHost().searchHistory(str(query) ?? '', typeof before === 'number' ? before : undefined)
+  )
+  ipcMain.handle('browser:history-remove', (_e, visitId: unknown) => {
+    if (typeof visitId === 'number') browserHost().removeHistory(visitId)
+  })
+  ipcMain.handle('browser:history-clear', (_e, since: unknown) =>
+    browserHost().clearHistory(typeof since === 'number' ? since : undefined)
+  )
+  ipcMain.handle('browser:bookmarks-list', () => browserHost().listBookmarks())
+  ipcMain.handle('browser:bookmark-toggle', (_e, sessionId: unknown) =>
+    browserHost().toggleBookmark(str(sessionId))
+  )
+  ipcMain.handle('browser:bookmark-remove', (_e, bookmarkId: unknown) => {
+    if (typeof bookmarkId === 'string') browserHost().removeBookmark(bookmarkId)
+  })
+  ipcMain.handle('browser:bookmark-rename', (_e, bookmarkId: unknown, title: unknown) => {
+    if (typeof bookmarkId === 'string' && typeof title === 'string') {
+      browserHost().renameBookmark(bookmarkId, title)
+    }
+  })
+  ipcMain.handle('browser:downloads-list', () => browserHost().listDownloads())
+  ipcMain.handle('browser:download-action', (_e, downloadId: unknown, action: unknown) => {
+    const allowed = ['cancel', 'pause', 'resume', 'open', 'show', 'clear'] as const
+    const chosen = allowed.find((candidate) => candidate === action)
+    return chosen ? browserHost().downloadAction(str(downloadId) ?? '', chosen) : false
+  })
+  ipcMain.handle(
+    'browser:find',
+    (_e, sessionId: unknown, query: unknown, forward: unknown, findNext: unknown) => {
+      if (typeof sessionId !== 'string' || typeof query !== 'string') return
+      browserHost().find(sessionId, query, forward !== false, findNext === true)
+    }
+  )
+  ipcMain.handle('browser:stop-find', (_e, sessionId: unknown) => {
+    if (typeof sessionId === 'string') browserHost().stopFind(sessionId)
+  })
+  ipcMain.handle('browser:vault-state', (_e, sessionId: unknown) =>
+    browserHost().vaultState(str(sessionId))
+  )
+  ipcMain.handle('browser:vault-fill', (_e, sessionId: unknown, uuid: unknown) =>
+    typeof sessionId === 'string' && typeof uuid === 'string'
+      ? browserHost().fillLogin(sessionId, uuid)
+      : { ok: false, reason: 'no_login' }
+  )
+  ipcMain.handle('browser:sandbox-profiles', () => browserHost().listSandboxProfiles())
+  ipcMain.handle('browser:open-sandbox-profile', (_e, profileId: unknown) =>
+    typeof profileId === 'string' ? browserHost().openSandboxProfile(profileId) : null
+  )
   ipcMain.handle('browser:navigate', (_e, address: unknown, sessionId: unknown) => {
     if (typeof address !== 'string') {
       return { ok: false, detail: 'Enter a website or search.' }

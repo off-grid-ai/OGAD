@@ -1,3 +1,4 @@
+import { msg } from '@offgrid/i18n'
 import { memo } from 'react'
 import { Check, X } from '@phosphor-icons/react'
 import { AnimatedGroup } from '@offgrid/operator-ui/operator/motion/animated-group'
@@ -6,22 +7,22 @@ import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 
 export const ASK_EXAMPLES = [
-  'Explain how RAG works, simply',
-  'Write a Python function to dedupe a list',
-  'Draft a friendly out-of-office email',
-  'Generate an image of a mountain cabin at dawn'
+  msg('Explain how RAG works, simply'),
+  msg('Write a Python function to dedupe a list'),
+  msg('Draft a friendly out-of-office email'),
+  msg('Generate an image of a mountain cabin at dawn')
 ]
 export const ASK_EXAMPLES_PRO = [
-  'What did I work on today?',
-  'Summarize my last meeting',
-  'What have I spent the most time on this week?',
-  'What open action items do I have?'
+  msg('What did I work on today?'),
+  msg('Summarize my last meeting'),
+  msg('What have I spent the most time on this week?'),
+  msg('What open action items do I have?')
 ]
 export const IMAGE_EXAMPLES = [
-  'A serene mountain lake at dawn, photorealistic',
-  'Minimal logo mark for a coffee brand, flat',
-  'Cyberpunk city street at night, neon, rain',
-  'Studio portrait of a husky, soft lighting'
+  msg('A serene mountain lake at dawn, photorealistic'),
+  msg('Minimal logo mark for a coffee brand, flat'),
+  msg('Cyberpunk city street at night, neon, rain'),
+  msg('Studio portrait of a husky, soft lighting')
 ]
 
 // Visual style presets. The prompt modifier and bundled preview share this key.

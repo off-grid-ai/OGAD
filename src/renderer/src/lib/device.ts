@@ -1,3 +1,4 @@
+import { translate } from '@offgrid/i18n'
 import {
   deviceNoun as nounForPlatform,
   isMac as isMacForPlatform,
@@ -18,9 +19,12 @@ export function currentPlatform(): DevicePlatform {
   return bridge?.platform ?? 'unknown'
 }
 
-/** The user-facing name for this machine, including its platform when known. */
+/**
+ * The user-facing name for this machine, including its platform when known, in the app language. Put it in
+ * a whole sentence with t('… {0} …', deviceNoun()), never between JSX text pieces.
+ */
 export function deviceNoun(opts?: { capitalize?: boolean }): string {
-  return nounForPlatform(currentPlatform(), opts)
+  return translate(nounForPlatform(currentPlatform(), opts))
 }
 
 /** True when running on macOS. The device flag for platform-gating Pro features. */

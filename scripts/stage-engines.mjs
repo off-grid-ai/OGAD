@@ -5,8 +5,9 @@
 //
 // Each engine folder under the bin root (for example `llama/` or `sd-cuda/`) becomes
 // `<out>/<id>/<id>/...` with an engine.json beside it, versioned from resources/engine-pins.json,
-// ready for scripts/publish-engine.mjs. Folders the platform does not have are skipped. The CUDA
-// chat engine is staged separately by scripts/stage-llama-engine.mjs, with its CUDA runtime.
+// ready for scripts/publish-engine.mjs. Folders the platform does not have are skipped. A CUDA
+// engine folder without its own CUDA runtime takes the shared `cuda-runtime/` with it. The upstream CUDA chat engine is
+// staged separately by scripts/stage-llama-engine.mjs, with its CUDA runtime.
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
@@ -77,6 +78,17 @@ for (const [id, [engine, executable, nvidia]] of Object.entries(ENGINES)) {
   fs.mkdirSync(target, { recursive: true })
   // verbatimSymlinks keeps the Linux and macOS library links as links.
   fs.cpSync(source, path.join(target, id), { recursive: true, verbatimSymlinks: true })
+  // A CUDA engine without its own CUDA runtime loads it from `cuda-runtime/` beside its folder
+  // (engineSpawnEnv, sdRuntimeLibraryEnv), so that folder ships with it, or it cannot start.
+  const ownRuntime = fs.readdirSync(source).some((file) => /^(lib)?cudart/i.test(file))
+  if (nvidia && !ownRuntime) {
+    const runtime = path.join(bin, 'cuda-runtime')
+    if (!fs.existsSync(runtime)) throw new Error(`${id} needs ${runtime}, which is missing`)
+    fs.cpSync(runtime, path.join(target, 'cuda-runtime'), {
+      recursive: true,
+      verbatimSymlinks: true
+    })
+  }
   const release = {
     id,
     version: pins[engine].ref,

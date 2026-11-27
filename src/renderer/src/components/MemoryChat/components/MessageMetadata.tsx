@@ -6,6 +6,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger
 } from '@renderer/components/ui/collapsible'
+import { Button } from '@renderer/components/ui/button'
 import { modelDisplayName } from '@offgrid/models'
 import {
   formatGenerationMetrics,
@@ -137,9 +138,35 @@ function ToolsSentDisclosureComponent({
 }
 
 function ResponseCutoffNoticeComponent({
-  cutoff
-}: Readonly<{ cutoff?: ResponseCutoffContract }>): React.JSX.Element | null {
+  cutoff,
+  onStartNewChat
+}: Readonly<{
+  cutoff?: ResponseCutoffContract
+  onStartNewChat?: () => void
+}>): React.JSX.Element | null {
   if (!cutoff) return null
+  if (cutoff.reason === 'tools_left_out') {
+    return (
+      <div
+        role="status"
+        className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-amber-500/20 pt-2 text-[11px] text-amber-400"
+      >
+        <WarningCircle className="h-3 w-3 shrink-0" weight="fill" />
+        <span>This chat is too long for tools, so the model answered without them.</span>
+        {onStartNewChat ? (
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={onStartNewChat}
+            className="active:scale-95"
+          >
+            New chat
+          </Button>
+        ) : null}
+      </div>
+    )
+  }
   return (
     <p
       role="status"

@@ -87,7 +87,9 @@ export function readTimelineDocuments(raw: unknown): TimelineDocument[] {
       {
         name: d.name,
         passages: d.passages,
-        pages: Array.isArray(d.pages) ? d.pages.filter((p): p is number => typeof p === 'number') : [],
+        pages: Array.isArray(d.pages)
+          ? d.pages.filter((p): p is number => typeof p === 'number')
+          : [],
         whole: d.whole === true,
         ...(typeof d.readPages === 'number' ? { readPages: d.readPages } : {}),
         ...(typeof d.unreadablePages === 'number' && d.unreadablePages > 0
@@ -116,7 +118,11 @@ export function readAssistantTimeline(ctx: unknown): AssistantTimelineEntry[] | 
       entry.toolIndex >= 0
     ) {
       entries.push({ kind: 'tool', toolIndex: entry.toolIndex })
-    } else if (entry.kind === 'documents' && typeof entry.label === 'string' && Array.isArray(entry.documents)) {
+    } else if (
+      entry.kind === 'documents' &&
+      typeof entry.label === 'string' &&
+      Array.isArray(entry.documents)
+    ) {
       const documents = readTimelineDocuments(entry.documents)
       if (documents.length) entries.push({ kind: 'documents', label: entry.label, documents })
     }
@@ -143,6 +149,7 @@ export function readResponseCutoff(ctx: unknown): ResponseCutoffContract | undef
   const cutoff = (ctx as { cutoff?: unknown }).cutoff
   if (!cutoff || typeof cutoff !== 'object') return undefined
   const value = cutoff as { reason?: unknown; maxTokens?: unknown }
+  if (value.reason === 'tools_left_out') return { reason: value.reason }
   if (
     value.reason !== 'max_tokens' ||
     typeof value.maxTokens !== 'number' ||

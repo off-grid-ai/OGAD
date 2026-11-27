@@ -1,0 +1,802 @@
+[
+ {
+  "id": "web-search_answer-search.brave.com-01",
+  "goal": "On search.brave.com: Search for 'easy sourdough starter' and report the first result's title.",
+  "url": "https://search.brave.com"
+ },
+ {
+  "id": "web-search_answer-search.brave.com-02",
+  "goal": "On search.brave.com: Find the answer to: how tall Mount Kilimanjaro is.",
+  "url": "https://search.brave.com"
+ },
+ {
+  "id": "web-search_answer-search.brave.com-03",
+  "goal": "On search.brave.com: Search for 'how to descale a kettle' and open the first result that is not an ad.",
+  "url": "https://search.brave.com"
+ },
+ {
+  "id": "web-search_answer-search.brave.com-04",
+  "goal": "On search.brave.com: Search for news about 'remote work' from the past week and report two headlines.",
+  "url": "https://search.brave.com"
+ },
+ {
+  "id": "web-search_answer-search.brave.com-05",
+  "goal": "On search.brave.com: Search for images of 'Japanese gardens' and report how many results the page says there are, if shown.",
+  "url": "https://search.brave.com"
+ },
+ {
+  "id": "web-search_answer-search.brave.com-06",
+  "goal": "On search.brave.com: Search for 'easy sourdough starter' and report the first result's title.",
+  "url": "https://search.brave.com"
+ },
+ {
+  "id": "web-search_answer-search.brave.com-07",
+  "goal": "On search.brave.com: Find the answer to: how tall Mount Kilimanjaro is.",
+  "url": "https://search.brave.com"
+ },
+ {
+  "id": "web-search_answer-search.brave.com-08",
+  "goal": "On search.brave.com: Search for 'how to descale a kettle' and open the first result that is not an ad.",
+  "url": "https://search.brave.com"
+ },
+ {
+  "id": "web-search_answer-search.brave.com-09",
+  "goal": "On search.brave.com: Search for news about 'remote work' from the past week and report two headlines.",
+  "url": "https://search.brave.com"
+ },
+ {
+  "id": "web-search_answer-search.brave.com-10",
+  "goal": "On search.brave.com: Search for images of 'Japanese gardens' and report how many results the page says there are, if shown.",
+  "url": "https://search.brave.com"
+ },
+ {
+  "id": "web-email-tuta.com-01",
+  "goal": "On tuta.com: Find the page that explains how to set up an email forwarding rule and summarise the steps.",
+  "url": "https://tuta.com"
+ },
+ {
+  "id": "web-email-tuta.com-02",
+  "goal": "On tuta.com: Find the free plan's storage limit.",
+  "url": "https://tuta.com"
+ },
+ {
+  "id": "web-email-tuta.com-03",
+  "goal": "On tuta.com: Find how to create a folder or label, and list the steps.",
+  "url": "https://tuta.com"
+ },
+ {
+  "id": "web-email-tuta.com-04",
+  "goal": "On tuta.com: Find the page that explains how to set up an email forwarding rule and summarise the steps.",
+  "url": "https://tuta.com"
+ },
+ {
+  "id": "web-email-tuta.com-05",
+  "goal": "On tuta.com: Find the free plan's storage limit.",
+  "url": "https://tuta.com"
+ },
+ {
+  "id": "web-email-tuta.com-06",
+  "goal": "On tuta.com: Find how to create a folder or label, and list the steps.",
+  "url": "https://tuta.com"
+ },
+ {
+  "id": "web-email-tuta.com-07",
+  "goal": "On tuta.com: Find the page that explains how to set up an email forwarding rule and summarise the steps.",
+  "url": "https://tuta.com"
+ },
+ {
+  "id": "web-email-tuta.com-08",
+  "goal": "On tuta.com: Find the free plan's storage limit.",
+  "url": "https://tuta.com"
+ },
+ {
+  "id": "web-email-tuta.com-09",
+  "goal": "On tuta.com: Find how to create a folder or label, and list the steps.",
+  "url": "https://tuta.com"
+ },
+ {
+  "id": "web-email-tuta.com-10",
+  "goal": "On tuta.com: Find the page that explains how to set up an email forwarding rule and summarise the steps.",
+  "url": "https://tuta.com"
+ },
+ {
+  "id": "web-social-mastodon.social-01",
+  "goal": "On mastodon.social: Find the public profile of 'UNICEF' and report its follower count.",
+  "url": "https://mastodon.social"
+ },
+ {
+  "id": "web-social-mastodon.social-02",
+  "goal": "On mastodon.social: Search for posts about 'space telescopes' and summarise the top one.",
+  "url": "https://mastodon.social"
+ },
+ {
+  "id": "web-social-mastodon.social-03",
+  "goal": "On mastodon.social: Find the page that explains how to make an account private.",
+  "url": "https://mastodon.social"
+ },
+ {
+  "id": "web-social-mastodon.social-04",
+  "goal": "On mastodon.social: Find the public profile of 'NASA' and report its follower count.",
+  "url": "https://mastodon.social"
+ },
+ {
+  "id": "web-social-mastodon.social-05",
+  "goal": "On mastodon.social: Search for posts about 'home composting' and summarise the top one.",
+  "url": "https://mastodon.social"
+ },
+ {
+  "id": "web-social-mastodon.social-06",
+  "goal": "On mastodon.social: Find the page that explains how to make an account private.",
+  "url": "https://mastodon.social"
+ },
+ {
+  "id": "web-social-mastodon.social-07",
+  "goal": "On mastodon.social: Find the public profile of 'the Mozilla Foundation' and report its follower count.",
+  "url": "https://mastodon.social"
+ },
+ {
+  "id": "web-social-mastodon.social-08",
+  "goal": "On mastodon.social: Search for posts about 'chess openings' and summarise the top one.",
+  "url": "https://mastodon.social"
+ },
+ {
+  "id": "web-social-mastodon.social-09",
+  "goal": "On mastodon.social: Find the page that explains how to make an account private.",
+  "url": "https://mastodon.social"
+ },
+ {
+  "id": "web-social-mastodon.social-10",
+  "goal": "On mastodon.social: Find the public profile of 'the World Health Organization' and report its follower count.",
+  "url": "https://mastodon.social"
+ },
+ {
+  "id": "web-shop-bestbuy.com-01",
+  "goal": "On bestbuy.com: Search for '4K monitor' and report the cheapest result's price.",
+  "url": "https://bestbuy.com"
+ },
+ {
+  "id": "web-shop-bestbuy.com-02",
+  "goal": "On bestbuy.com: Search for 'air fryer', filter to 4 stars and up, and report the top result.",
+  "url": "https://bestbuy.com"
+ },
+ {
+  "id": "web-shop-bestbuy.com-03",
+  "goal": "On bestbuy.com: Compare the first two results for 'standing desk' and say which is cheaper.",
+  "url": "https://bestbuy.com"
+ },
+ {
+  "id": "web-shop-bestbuy.com-04",
+  "goal": "On bestbuy.com: Find the return policy and report how many days you have to return an item.",
+  "url": "https://bestbuy.com"
+ },
+ {
+  "id": "web-shop-bestbuy.com-05",
+  "goal": "On bestbuy.com: Search for 'mechanical keyboard', sort by price low to high, and report the first three prices.",
+  "url": "https://bestbuy.com"
+ },
+ {
+  "id": "web-shop-bestbuy.com-06",
+  "goal": "On bestbuy.com: Open the first result for 'wireless earbuds' and list three specifications.",
+  "url": "https://bestbuy.com"
+ },
+ {
+  "id": "web-shop-bestbuy.com-07",
+  "goal": "On bestbuy.com: Search for 'office chair' and report the cheapest result's price.",
+  "url": "https://bestbuy.com"
+ },
+ {
+  "id": "web-shop-bestbuy.com-08",
+  "goal": "On bestbuy.com: Search for '4K monitor', filter to 4 stars and up, and report the top result.",
+  "url": "https://bestbuy.com"
+ },
+ {
+  "id": "web-shop-bestbuy.com-09",
+  "goal": "On bestbuy.com: Compare the first two results for 'air fryer' and say which is cheaper.",
+  "url": "https://bestbuy.com"
+ },
+ {
+  "id": "web-shop-bestbuy.com-10",
+  "goal": "On bestbuy.com: Find the return policy and report how many days you have to return an item.",
+  "url": "https://bestbuy.com"
+ },
+ {
+  "id": "web-news-apnews.com-01",
+  "goal": "On apnews.com: Report the top headline in the health section.",
+  "url": "https://apnews.com"
+ },
+ {
+  "id": "web-news-apnews.com-02",
+  "goal": "On apnews.com: Search for coverage of 'electric bikes' and summarise the latest article in two sentences.",
+  "url": "https://apnews.com"
+ },
+ {
+  "id": "web-news-apnews.com-03",
+  "goal": "On apnews.com: Find the author and publish date of the lead story.",
+  "url": "https://apnews.com"
+ },
+ {
+  "id": "web-news-apnews.com-04",
+  "goal": "On apnews.com: Open the most-read list and report the first three titles.",
+  "url": "https://apnews.com"
+ },
+ {
+  "id": "web-news-apnews.com-05",
+  "goal": "On apnews.com: Report the top headline in the science section.",
+  "url": "https://apnews.com"
+ },
+ {
+  "id": "web-news-apnews.com-06",
+  "goal": "On apnews.com: Search for coverage of 'chess openings' and summarise the latest article in two sentences.",
+  "url": "https://apnews.com"
+ },
+ {
+  "id": "web-news-apnews.com-07",
+  "goal": "On apnews.com: Find the author and publish date of the lead story.",
+  "url": "https://apnews.com"
+ },
+ {
+  "id": "web-news-apnews.com-08",
+  "goal": "On apnews.com: Open the most-read list and report the first three titles.",
+  "url": "https://apnews.com"
+ },
+ {
+  "id": "web-news-apnews.com-09",
+  "goal": "On apnews.com: Report the top headline in the technology section.",
+  "url": "https://apnews.com"
+ },
+ {
+  "id": "web-news-apnews.com-10",
+  "goal": "On apnews.com: Search for coverage of 'space telescopes' and summarise the latest article in two sentences.",
+  "url": "https://apnews.com"
+ },
+ {
+  "id": "web-fact-worldometers.info-01",
+  "goal": "On worldometers.info: Find how tall Mount Kilimanjaro is.",
+  "url": "https://worldometers.info"
+ },
+ {
+  "id": "web-fact-worldometers.info-02",
+  "goal": "On worldometers.info: Look up 'red pandas' and report the first sentence of its description.",
+  "url": "https://worldometers.info"
+ },
+ {
+  "id": "web-fact-worldometers.info-03",
+  "goal": "On worldometers.info: Find the population of Osaka and the year of the figure.",
+  "url": "https://worldometers.info"
+ },
+ {
+  "id": "web-fact-worldometers.info-04",
+  "goal": "On worldometers.info: Look up the definition of 'ubiquitous'.",
+  "url": "https://worldometers.info"
+ },
+ {
+  "id": "web-fact-worldometers.info-05",
+  "goal": "On worldometers.info: Find how many moons Saturn has.",
+  "url": "https://worldometers.info"
+ },
+ {
+  "id": "web-fact-worldometers.info-06",
+  "goal": "On worldometers.info: Look up 'the northern lights' and report the first sentence of its description.",
+  "url": "https://worldometers.info"
+ },
+ {
+  "id": "web-fact-worldometers.info-07",
+  "goal": "On worldometers.info: Find the population of Lisbon and the year of the figure.",
+  "url": "https://worldometers.info"
+ },
+ {
+  "id": "web-fact-worldometers.info-08",
+  "goal": "On worldometers.info: Look up the definition of 'laconic'.",
+  "url": "https://worldometers.info"
+ },
+ {
+  "id": "web-fact-worldometers.info-09",
+  "goal": "On worldometers.info: Find the year the Berlin Wall fell.",
+  "url": "https://worldometers.info"
+ },
+ {
+  "id": "web-fact-worldometers.info-10",
+  "goal": "On worldometers.info: Look up 'vintage typewriters' and report the first sentence of its description.",
+  "url": "https://worldometers.info"
+ },
+ {
+  "id": "web-weather-yr.no-01",
+  "goal": "On yr.no: Report tomorrow's high and low temperature in Cape Town.",
+  "url": "https://yr.no"
+ },
+ {
+  "id": "web-weather-yr.no-02",
+  "goal": "On yr.no: Will it rain in Lisbon this weekend? Report the chance of rain for Saturday.",
+  "url": "https://yr.no"
+ },
+ {
+  "id": "web-weather-yr.no-03",
+  "goal": "On yr.no: Report the wind speed in Toronto right now.",
+  "url": "https://yr.no"
+ },
+ {
+  "id": "web-weather-yr.no-04",
+  "goal": "On yr.no: Find the 10-day forecast for Melbourne and report the warmest day.",
+  "url": "https://yr.no"
+ },
+ {
+  "id": "web-weather-yr.no-05",
+  "goal": "On yr.no: Report tomorrow's high and low temperature in Osaka.",
+  "url": "https://yr.no"
+ },
+ {
+  "id": "web-weather-yr.no-06",
+  "goal": "On yr.no: Will it rain in Denver this weekend? Report the chance of rain for Saturday.",
+  "url": "https://yr.no"
+ },
+ {
+  "id": "web-weather-yr.no-07",
+  "goal": "On yr.no: Report the wind speed in Edinburgh right now.",
+  "url": "https://yr.no"
+ },
+ {
+  "id": "web-weather-yr.no-08",
+  "goal": "On yr.no: Find the 10-day forecast for Cape Town and report the warmest day.",
+  "url": "https://yr.no"
+ },
+ {
+  "id": "web-weather-yr.no-09",
+  "goal": "On yr.no: Report tomorrow's high and low temperature in Lisbon.",
+  "url": "https://yr.no"
+ },
+ {
+  "id": "web-weather-yr.no-10",
+  "goal": "On yr.no: Will it rain in Toronto this weekend? Report the chance of rain for Saturday.",
+  "url": "https://yr.no"
+ },
+ {
+  "id": "web-maps-viamichelin.com-01",
+  "goal": "On viamichelin.com: Find driving directions from Cape Town to Stellenbosch and report the distance.",
+  "url": "https://viamichelin.com"
+ },
+ {
+  "id": "web-maps-viamichelin.com-02",
+  "goal": "On viamichelin.com: Find a pharmacy near Shibuya Crossing and report its address.",
+  "url": "https://viamichelin.com"
+ },
+ {
+  "id": "web-maps-viamichelin.com-03",
+  "goal": "On viamichelin.com: Report how long it takes to travel from Toronto to Montreal by train or transit, if shown.",
+  "url": "https://viamichelin.com"
+ },
+ {
+  "id": "web-maps-viamichelin.com-04",
+  "goal": "On viamichelin.com: Search for 'the Louvre' and report its address.",
+  "url": "https://viamichelin.com"
+ },
+ {
+  "id": "web-maps-viamichelin.com-05",
+  "goal": "On viamichelin.com: Find driving directions from Osaka to Kyoto and report the distance.",
+  "url": "https://viamichelin.com"
+ },
+ {
+  "id": "web-maps-viamichelin.com-06",
+  "goal": "On viamichelin.com: Find a pharmacy near Sydney Opera House and report its address.",
+  "url": "https://viamichelin.com"
+ },
+ {
+  "id": "web-maps-viamichelin.com-07",
+  "goal": "On viamichelin.com: Report how long it takes to travel from Edinburgh to Glasgow by train or transit, if shown.",
+  "url": "https://viamichelin.com"
+ },
+ {
+  "id": "web-maps-viamichelin.com-08",
+  "goal": "On viamichelin.com: Search for 'Big Ben' and report its address.",
+  "url": "https://viamichelin.com"
+ },
+ {
+  "id": "web-maps-viamichelin.com-09",
+  "goal": "On viamichelin.com: Find driving directions from Lisbon to Porto and report the distance.",
+  "url": "https://viamichelin.com"
+ },
+ {
+  "id": "web-maps-viamichelin.com-10",
+  "goal": "On viamichelin.com: Find a pharmacy near Times Square and report its address.",
+  "url": "https://viamichelin.com"
+ },
+ {
+  "id": "web-track_return-auspost.com.au-01",
+  "goal": "On auspost.com.au: Find the page where you track a parcel and report what number it asks for.",
+  "url": "https://auspost.com.au"
+ },
+ {
+  "id": "web-track_return-auspost.com.au-02",
+  "goal": "On auspost.com.au: Find how to schedule a pickup and list the steps.",
+  "url": "https://auspost.com.au"
+ },
+ {
+  "id": "web-track_return-auspost.com.au-03",
+  "goal": "On auspost.com.au: Find the price to send a 1 kg parcel domestically, if the site shows it.",
+  "url": "https://auspost.com.au"
+ },
+ {
+  "id": "web-track_return-auspost.com.au-04",
+  "goal": "On auspost.com.au: Find the customer service hours.",
+  "url": "https://auspost.com.au"
+ },
+ {
+  "id": "web-track_return-auspost.com.au-05",
+  "goal": "On auspost.com.au: Find the page where you track a parcel and report what number it asks for.",
+  "url": "https://auspost.com.au"
+ },
+ {
+  "id": "web-track_return-auspost.com.au-06",
+  "goal": "On auspost.com.au: Find how to schedule a pickup and list the steps.",
+  "url": "https://auspost.com.au"
+ },
+ {
+  "id": "web-track_return-auspost.com.au-07",
+  "goal": "On auspost.com.au: Find the price to send a 1 kg parcel domestically, if the site shows it.",
+  "url": "https://auspost.com.au"
+ },
+ {
+  "id": "web-track_return-auspost.com.au-08",
+  "goal": "On auspost.com.au: Find the customer service hours.",
+  "url": "https://auspost.com.au"
+ },
+ {
+  "id": "web-track_return-auspost.com.au-09",
+  "goal": "On auspost.com.au: Find the page where you track a parcel and report what number it asks for.",
+  "url": "https://auspost.com.au"
+ },
+ {
+  "id": "web-track_return-auspost.com.au-10",
+  "goal": "On auspost.com.au: Find how to schedule a pickup and list the steps.",
+  "url": "https://auspost.com.au"
+ },
+ {
+  "id": "web-flights-momondo.com-01",
+  "goal": "On momondo.com: Search one-way flights from Cape Town to Stellenbosch on the 14th of next month and report the cheapest price.",
+  "url": "https://momondo.com"
+ },
+ {
+  "id": "web-flights-momondo.com-02",
+  "goal": "On momondo.com: Search round-trip flights from Lisbon to Porto, leaving the first Friday of next month for one week; report the shortest nonstop.",
+  "url": "https://momondo.com"
+ },
+ {
+  "id": "web-flights-momondo.com-03",
+  "goal": "On momondo.com: Filter flights from Toronto to Montreal on the 21st of next month to nonstop only and report how many remain.",
+  "url": "https://momondo.com"
+ },
+ {
+  "id": "web-flights-momondo.com-04",
+  "goal": "On momondo.com: Find the baggage fee page and report the first checked bag price.",
+  "url": "https://momondo.com"
+ },
+ {
+  "id": "web-flights-momondo.com-05",
+  "goal": "On momondo.com: Search one-way flights from Osaka to Kyoto on the first Friday of next month and report the cheapest price.",
+  "url": "https://momondo.com"
+ },
+ {
+  "id": "web-flights-momondo.com-06",
+  "goal": "On momondo.com: Search round-trip flights from Denver to Boulder, leaving the 21st of next month for one week; report the shortest nonstop.",
+  "url": "https://momondo.com"
+ },
+ {
+  "id": "web-flights-momondo.com-07",
+  "goal": "On momondo.com: Filter flights from Edinburgh to Glasgow on the 14th of next month to nonstop only and report how many remain.",
+  "url": "https://momondo.com"
+ },
+ {
+  "id": "web-flights-momondo.com-08",
+  "goal": "On momondo.com: Find the baggage fee page and report the first checked bag price.",
+  "url": "https://momondo.com"
+ },
+ {
+  "id": "web-flights-momondo.com-09",
+  "goal": "On momondo.com: Search one-way flights from Lisbon to Porto on the 21st of next month and report the cheapest price.",
+  "url": "https://momondo.com"
+ },
+ {
+  "id": "web-flights-momondo.com-10",
+  "goal": "On momondo.com: Search round-trip flights from Toronto to Montreal, leaving the 14th of next month for one week; report the shortest nonstop.",
+  "url": "https://momondo.com"
+ },
+ {
+  "id": "web-food-grubhub.com-01",
+  "goal": "On grubhub.com: Find a Indian restaurant that delivers to Cape Town and report its delivery fee.",
+  "url": "https://grubhub.com"
+ },
+ {
+  "id": "web-food-grubhub.com-02",
+  "goal": "On grubhub.com: Open a menu and report the price of the first banana bread.",
+  "url": "https://grubhub.com"
+ },
+ {
+  "id": "web-food-grubhub.com-03",
+  "goal": "On grubhub.com: Find the help page for a missing item in an order.",
+  "url": "https://grubhub.com"
+ },
+ {
+  "id": "web-food-grubhub.com-04",
+  "goal": "On grubhub.com: Find a Thai restaurant that delivers to Melbourne and report its delivery fee.",
+  "url": "https://grubhub.com"
+ },
+ {
+  "id": "web-food-grubhub.com-05",
+  "goal": "On grubhub.com: Open a menu and report the price of the first pad thai.",
+  "url": "https://grubhub.com"
+ },
+ {
+  "id": "web-food-grubhub.com-06",
+  "goal": "On grubhub.com: Find the help page for a missing item in an order.",
+  "url": "https://grubhub.com"
+ },
+ {
+  "id": "web-food-grubhub.com-07",
+  "goal": "On grubhub.com: Find a Italian restaurant that delivers to Edinburgh and report its delivery fee.",
+  "url": "https://grubhub.com"
+ },
+ {
+  "id": "web-food-grubhub.com-08",
+  "goal": "On grubhub.com: Open a menu and report the price of the first shakshuka.",
+  "url": "https://grubhub.com"
+ },
+ {
+  "id": "web-food-grubhub.com-09",
+  "goal": "On grubhub.com: Find the help page for a missing item in an order.",
+  "url": "https://grubhub.com"
+ },
+ {
+  "id": "web-food-grubhub.com-10",
+  "goal": "On grubhub.com: Find a Mexican restaurant that delivers to Toronto and report its delivery fee.",
+  "url": "https://grubhub.com"
+ },
+ {
+  "id": "web-bank-citi.com-01",
+  "goal": "On citi.com: Find the fee for an international transfer and report it.",
+  "url": "https://citi.com"
+ },
+ {
+  "id": "web-bank-citi.com-02",
+  "goal": "On citi.com: Find the nearest branch or ATM to Lisbon, if the site has a locator.",
+  "url": "https://citi.com"
+ },
+ {
+  "id": "web-bank-citi.com-03",
+  "goal": "On citi.com: Find the current savings account interest rate.",
+  "url": "https://citi.com"
+ },
+ {
+  "id": "web-bank-citi.com-04",
+  "goal": "On citi.com: Find how to report a lost card and list the steps.",
+  "url": "https://citi.com"
+ },
+ {
+  "id": "web-bank-citi.com-05",
+  "goal": "On citi.com: Find the fee for an international transfer and report it.",
+  "url": "https://citi.com"
+ },
+ {
+  "id": "web-bank-citi.com-06",
+  "goal": "On citi.com: Find the nearest branch or ATM to Denver, if the site has a locator.",
+  "url": "https://citi.com"
+ },
+ {
+  "id": "web-bank-citi.com-07",
+  "goal": "On citi.com: Find the current savings account interest rate.",
+  "url": "https://citi.com"
+ },
+ {
+  "id": "web-bank-citi.com-08",
+  "goal": "On citi.com: Find how to report a lost card and list the steps.",
+  "url": "https://citi.com"
+ },
+ {
+  "id": "web-bank-citi.com-09",
+  "goal": "On citi.com: Find the fee for an international transfer and report it.",
+  "url": "https://citi.com"
+ },
+ {
+  "id": "web-bank-citi.com-10",
+  "goal": "On citi.com: Find the nearest branch or ATM to Toronto, if the site has a locator.",
+  "url": "https://citi.com"
+ },
+ {
+  "id": "web-community-askubuntu.com-01",
+  "goal": "On askubuntu.com: Search for 'how to fix a slow laptop' and report the top answer's first sentence.",
+  "url": "https://askubuntu.com"
+ },
+ {
+  "id": "web-community-askubuntu.com-02",
+  "goal": "On askubuntu.com: Find the most upvoted post this week about 'space telescopes' and report its title.",
+  "url": "https://askubuntu.com"
+ },
+ {
+  "id": "web-community-askubuntu.com-03",
+  "goal": "On askubuntu.com: Find the community rules page and list the first three rules.",
+  "url": "https://askubuntu.com"
+ },
+ {
+  "id": "web-community-askubuntu.com-04",
+  "goal": "On askubuntu.com: Search for 'why does my wifi drop at night' and report the top answer's first sentence.",
+  "url": "https://askubuntu.com"
+ },
+ {
+  "id": "web-community-askubuntu.com-05",
+  "goal": "On askubuntu.com: Find the most upvoted post this week about 'home composting' and report its title.",
+  "url": "https://askubuntu.com"
+ },
+ {
+  "id": "web-community-askubuntu.com-06",
+  "goal": "On askubuntu.com: Find the community rules page and list the first three rules.",
+  "url": "https://askubuntu.com"
+ },
+ {
+  "id": "web-community-askubuntu.com-07",
+  "goal": "On askubuntu.com: Search for 'how to keep basil alive' and report the top answer's first sentence.",
+  "url": "https://askubuntu.com"
+ },
+ {
+  "id": "web-community-askubuntu.com-08",
+  "goal": "On askubuntu.com: Find the most upvoted post this week about 'chess openings' and report its title.",
+  "url": "https://askubuntu.com"
+ },
+ {
+  "id": "web-community-askubuntu.com-09",
+  "goal": "On askubuntu.com: Find the community rules page and list the first three rules.",
+  "url": "https://askubuntu.com"
+ },
+ {
+  "id": "web-community-askubuntu.com-10",
+  "goal": "On askubuntu.com: Search for 'what is a good first programming language' and report the top answer's first sentence.",
+  "url": "https://askubuntu.com"
+ },
+ {
+  "id": "web-learn-futurelearn.com-01",
+  "goal": "On futurelearn.com: Find a beginner course on 'Spanish' and report its length.",
+  "url": "https://futurelearn.com"
+ },
+ {
+  "id": "web-learn-futurelearn.com-02",
+  "goal": "On futurelearn.com: Search for 'photography' and report the first three course titles.",
+  "url": "https://futurelearn.com"
+ },
+ {
+  "id": "web-learn-futurelearn.com-03",
+  "goal": "On futurelearn.com: Find a free course on 'personal finance' and report who teaches it.",
+  "url": "https://futurelearn.com"
+ },
+ {
+  "id": "web-learn-futurelearn.com-04",
+  "goal": "On futurelearn.com: Find a beginner course on 'statistics' and report its length.",
+  "url": "https://futurelearn.com"
+ },
+ {
+  "id": "web-learn-futurelearn.com-05",
+  "goal": "On futurelearn.com: Search for 'Python' and report the first three course titles.",
+  "url": "https://futurelearn.com"
+ },
+ {
+  "id": "web-learn-futurelearn.com-06",
+  "goal": "On futurelearn.com: Find a free course on 'Spanish' and report who teaches it.",
+  "url": "https://futurelearn.com"
+ },
+ {
+  "id": "web-learn-futurelearn.com-07",
+  "goal": "On futurelearn.com: Find a beginner course on 'photography' and report its length.",
+  "url": "https://futurelearn.com"
+ },
+ {
+  "id": "web-learn-futurelearn.com-08",
+  "goal": "On futurelearn.com: Search for 'personal finance' and report the first three course titles.",
+  "url": "https://futurelearn.com"
+ },
+ {
+  "id": "web-learn-futurelearn.com-09",
+  "goal": "On futurelearn.com: Find a free course on 'statistics' and report who teaches it.",
+  "url": "https://futurelearn.com"
+ },
+ {
+  "id": "web-learn-futurelearn.com-10",
+  "goal": "On futurelearn.com: Find a beginner course on 'Python' and report its length.",
+  "url": "https://futurelearn.com"
+ },
+ {
+  "id": "web-recipes-budgetbytes.com-01",
+  "goal": "On budgetbytes.com: Find a recipe for chickpea curry and report the total time.",
+  "url": "https://budgetbytes.com"
+ },
+ {
+  "id": "web-recipes-budgetbytes.com-02",
+  "goal": "On budgetbytes.com: Find a vegetarian banana bread recipe with at least 4 stars and list its ingredients.",
+  "url": "https://budgetbytes.com"
+ },
+ {
+  "id": "web-recipes-budgetbytes.com-03",
+  "goal": "On budgetbytes.com: Find a shakshuka recipe that serves 4 or more and report the first step.",
+  "url": "https://budgetbytes.com"
+ },
+ {
+  "id": "web-recipes-budgetbytes.com-04",
+  "goal": "On budgetbytes.com: Find a recipe for lasagne and report the total time.",
+  "url": "https://budgetbytes.com"
+ },
+ {
+  "id": "web-recipes-budgetbytes.com-05",
+  "goal": "On budgetbytes.com: Find a vegetarian pad thai recipe with at least 4 stars and list its ingredients.",
+  "url": "https://budgetbytes.com"
+ },
+ {
+  "id": "web-recipes-budgetbytes.com-06",
+  "goal": "On budgetbytes.com: Find a chickpea curry recipe that serves 4 or more and report the first step.",
+  "url": "https://budgetbytes.com"
+ },
+ {
+  "id": "web-recipes-budgetbytes.com-07",
+  "goal": "On budgetbytes.com: Find a recipe for banana bread and report the total time.",
+  "url": "https://budgetbytes.com"
+ },
+ {
+  "id": "web-recipes-budgetbytes.com-08",
+  "goal": "On budgetbytes.com: Find a vegetarian shakshuka recipe with at least 4 stars and list its ingredients.",
+  "url": "https://budgetbytes.com"
+ },
+ {
+  "id": "web-recipes-budgetbytes.com-09",
+  "goal": "On budgetbytes.com: Find a lasagne recipe that serves 4 or more and report the first step.",
+  "url": "https://budgetbytes.com"
+ },
+ {
+  "id": "web-recipes-budgetbytes.com-10",
+  "goal": "On budgetbytes.com: Find a recipe for pad thai and report the total time.",
+  "url": "https://budgetbytes.com"
+ },
+ {
+  "id": "web-scores_stocks-marketwatch.com-01",
+  "goal": "On marketwatch.com: Report the current price of TSLA.",
+  "url": "https://marketwatch.com"
+ },
+ {
+  "id": "web-scores_stocks-marketwatch.com-02",
+  "goal": "On marketwatch.com: Report the result of the most recent baseball match shown on the home page.",
+  "url": "https://marketwatch.com"
+ },
+ {
+  "id": "web-scores_stocks-marketwatch.com-03",
+  "goal": "On marketwatch.com: Find AAPL's 52-week high.",
+  "url": "https://marketwatch.com"
+ },
+ {
+  "id": "web-scores_stocks-marketwatch.com-04",
+  "goal": "On marketwatch.com: Report the top story in the basketball section.",
+  "url": "https://marketwatch.com"
+ },
+ {
+  "id": "web-scores_stocks-marketwatch.com-05",
+  "goal": "On marketwatch.com: Report the current price of NVDA.",
+  "url": "https://marketwatch.com"
+ },
+ {
+  "id": "web-scores_stocks-marketwatch.com-06",
+  "goal": "On marketwatch.com: Report the result of the most recent tennis match shown on the home page.",
+  "url": "https://marketwatch.com"
+ },
+ {
+  "id": "web-scores_stocks-marketwatch.com-07",
+  "goal": "On marketwatch.com: Find SAP's 52-week high.",
+  "url": "https://marketwatch.com"
+ },
+ {
+  "id": "web-scores_stocks-marketwatch.com-08",
+  "goal": "On marketwatch.com: Report the top story in the football section.",
+  "url": "https://marketwatch.com"
+ },
+ {
+  "id": "web-scores_stocks-marketwatch.com-09",
+  "goal": "On marketwatch.com: Report the current price of MSFT.",
+  "url": "https://marketwatch.com"
+ },
+ {
+  "id": "web-scores_stocks-marketwatch.com-10",
+  "goal": "On marketwatch.com: Report the result of the most recent cricket match shown on the home page.",
+  "url": "https://marketwatch.com"
+ }
+]

@@ -17,7 +17,7 @@ function decision(action: string, ref: string | null): Record<string, unknown> {
   return {
     action,
     phase_id: null,
-    element: ref ? 'Place order' : null,
+    element: ref ? 'Show details' : null,
     ref,
     text: null,
     key: null,
@@ -33,7 +33,7 @@ function decision(action: string, ref: string | null): Record<string, unknown> {
     summary: `${action} ${ref ?? ''}`.trim()
   }
 }
-const done = { ...decision('done', null), phase_id: 'read', evidence_text: 'Order placed' }
+const done = { ...decision('done', null), phase_id: 'read', evidence_text: 'Details shown' }
 
 async function until(check: () => boolean): Promise<void> {
   for (let i = 0; i < 200 && !check(); i += 1) {
@@ -109,12 +109,20 @@ void app.whenReady().then(async () => {
       if (op === 'browser.caps') return { cdp: false }
       if (op === 'tab.adopt')
         return { tabId: args.tabId, url: 'https://synthetic.test/', title: 'Synthetic page' }
+      // The send, pay and delete gate reads the focused form before Enter: a read, not an input.
+      // Nothing is focused on this page, as a page script answers through Playwright MCP.
+      if (op === 'page.call' && args.tool === 'browser_evaluate') {
+        return {
+          text: `### Result\n${JSON.stringify(JSON.stringify({ focused: null, submit: null }))}`,
+          isError: false
+        }
+      }
       if (op === 'page.call' && actionResult && args.tool !== 'browser_snapshot') {
         actions.push(String(args.tool))
         return actionResult
       }
       if (op === 'page.call' && actionResult) {
-        return { text: '- button "Place order" [ref=e1]\n- text "Order placed"', isError: false }
+        return { text: '- button "Show details" [ref=e1]\n- text "Details shown"', isError: false }
       }
       if (op === 'page.call') return { text: '- button "Notifications" [ref=e1]', isError: false }
       if (op === 'cdp.detach') return {}

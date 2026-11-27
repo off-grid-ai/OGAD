@@ -84,6 +84,12 @@ app.whenReady().then(async () => {
       const binary = require('electron') as string
       const env = { ...process.env }
       delete env.ELECTRON_RUN_AS_NODE
+      // Chromium's fake devices, not the desktop's own audio server: with a live PipeWire session in
+      // reach, Linux Chromium records the microphone from it, and a headless run has none to give.
+      if (process.platform === 'linux') {
+        env.XDG_RUNTIME_DIR = root
+        delete env.PULSE_SERVER
+      }
       const command = process.platform === 'linux' ? 'xvfb-run' : binary
       const args = process.platform === 'linux' ? ['-a', binary, '--no-sandbox', entry] : [entry]
       // The worker's own 18s timer is the deadline for the recording, counted once Electron runs it.

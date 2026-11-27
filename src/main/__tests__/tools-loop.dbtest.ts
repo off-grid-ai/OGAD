@@ -38,6 +38,7 @@ import {
 } from '../tools'
 import { llm } from '../llm'
 import { toolPromptChars, toolPromptTokens } from '../tools/prompt-budget'
+import { setWebSearchSettings } from '../web-search-settings'
 import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
 import { NativeActionToolExtension, type ActionsPort } from '../tools/nativeActionToolExtension'
 
@@ -711,6 +712,33 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     }
   })
 
+  it('says the tools were left out when the conversation leaves no room for them', async () => {
+    const service = llm as unknown as { ctxSize: number }
+    const previousContext = service.ctxSize
+    service.ctxSize = 2_048
+    try {
+      enqueueReactiveAfterEmptyPlan({ content: 'Short.' })
+      const ask = 'search the web for the latest news'
+      const short = await toolChat(ask, [])
+      expect(short.cutoff).toBeUndefined()
+      expect(fake.requests[0]).toHaveProperty('tools')
+      const sent = fake.requests[0] as { messages: { role: string; content: string }[] }
+      // Fill the window to just under the prompt limit (2048 minus the 256-token reply reserve),
+      // so the message fits but no tool schema fits beside it.
+      const room = (2_048 - 256) * 4 - toolPromptChars(sent.messages)
+      fake.reset()
+      enqueueReactiveAfterEmptyPlan({ content: 'I cannot look that up.' })
+
+      const result = await toolChat(`${ask} ${'note '.repeat(Math.floor((room - 64) / 5))}`, [])
+
+      expect(fake.requests[0]).not.toHaveProperty('tools')
+      expect(result.answer).toBe('I cannot look that up.')
+      expect(result.cutoff).toEqual({ reason: 'tools_left_out' })
+    } finally {
+      service.ctxSize = previousContext
+    }
+  })
+
   it('rejects a non-arithmetic calculator expression (real guard branch)', async () => {
     enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'calculator', args: { expression: 'process.exit(1)' } }] },
@@ -930,48 +958,92 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
     await expect(readUrlText('https://example.com')).rejects.toThrow(/HTTP 500/)
   })
 
-  it('web_search parses DuckDuckGo result links + snippets through the real loop', async () => {
-    const html = `
-      <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fen.wikipedia.org%2FAchilles">Achilles - Wikipedia</a>
-      <a class="result__snippet">A hero of the Trojan War.</a>`
+  /** The network for web search: each origin answers what the test says; every request is recorded. */
+  function searchNetwork(byOrigin: Record<string, { status: number; body: string }>): string[] {
+    const asked: string[] = []
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({ ok: true, text: async () => html }))
+      vi.fn(async (url: string) => {
+        asked.push(url)
+        const reply = byOrigin[new URL(url).origin] ?? { status: 503, body: '' }
+        return { ok: reply.status < 400, status: reply.status, text: async () => reply.body }
+      })
     )
+    return asked
+  }
+  // The shapes DuckDuckGo Lite and Bing's RSS feed answer with (recorded 27 Nov 2026,
+  // shared/packages/models/test/fixtures/web-search).
+  const DDG_LITE = `<table><tr><td><a rel="nofollow" href="https://en.wikipedia.org/wiki/Achilles" class='result-link'>Achilles - Wikipedia</a></td></tr>
+    <tr><td class='result-snippet'>A hero of the <b>Trojan War</b>.</td></tr></table>`
+  const DDG_CHALLENGE =
+    '<html><div class="anomaly-modal__title">Unfortunately, bots use DuckDuckGo too.</div></html>'
+  const BING_RSS = `<?xml version="1.0"?><rss><channel><item>
+    <title>Wednesday Solutions</title><link>https://www.wednesday.is/</link>
+    <description>Product engineering and design.</description></item></channel></rss>`
+
+  it('web_search reads DuckDuckGo Lite results through the real loop', async () => {
+    const asked = searchNetwork({ 'https://lite.duckduckgo.com': { status: 200, body: DDG_LITE } })
     enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'web_search', args: { query: 'achilles' } }] },
       { content: 'Here is what I found.' }
     )
     const r = await toolChat('search achilles', [])
-    expect(r.toolCalls[0]!.result).toContain('en.wikipedia.org/Achilles')
-    expect(r.toolCalls[0]!.result).toContain('Achilles - Wikipedia')
-    expect(r.toolCalls[0]!.result).toContain('Trojan War')
+    expect(r.toolCalls[0]!.result).toContain(
+      '[Achilles - Wikipedia](https://en.wikipedia.org/wiki/Achilles)'
+    )
+    expect(r.toolCalls[0]!.result).toContain('A hero of the Trojan War.')
+    expect(asked.map((u) => new URL(u).origin)).toEqual(['https://lite.duckduckgo.com'])
   })
 
-  it('web_search falls back when DuckDuckGo returns an anti-bot page', async () => {
-    const fetchResponses = [
-      {
-        ok: true,
-        status: 202,
-        text: async () =>
-          '<html><div class="anomaly-modal__title">Unfortunately, bots.</div></html>'
-      },
-      {
-        ok: true,
-        status: 200,
-        text: async () => `<?xml version="1.0"?><rss><channel><item>
-          <title>Wednesday Solutions</title>
-          <link>https://www.wednesday.is/</link>
-          <description>Product engineering and design.</description>
-        </item></channel></rss>`
-      }
-    ]
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => fetchResponses.shift()!)
-    )
+  it('web_search asks Bing when DuckDuckGo answers with a bot check', async () => {
+    searchNetwork({
+      'https://lite.duckduckgo.com': { status: 202, body: DDG_CHALLENGE },
+      'https://www.bing.com': { status: 200, body: BING_RSS }
+    })
     enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'web_search', args: { query: 'Wednesday Solutions' } }] },
+      { content: 'Here is what I found.' }
+    )
+
+    const r = await toolChat('search Wednesday Solutions', [])
+
+    expect(r.toolCalls[0]!.result).toContain('https://www.wednesday.is/')
+    expect(r.toolCalls[0]!.result).toContain('Product engineering and design.')
+  })
+
+  it('web_search asks the SearXNG server chosen in Settings first', async () => {
+    setWebSearchSettings({ provider: 'searxng', searxngUrl: 'search.home.lan' })
+    try {
+      const asked = searchNetwork({
+        'https://search.home.lan': {
+          status: 200,
+          body: JSON.stringify({
+            results: [
+              { title: 'Achilles', url: 'https://example.org/achilles', content: 'Greek hero.' }
+            ]
+          })
+        }
+      })
+      enqueueReactiveAfterEmptyPlan(
+        { toolCalls: [{ name: 'web_search', args: { query: 'achilles' } }] },
+        { content: 'Here is what I found.' }
+      )
+      const r = await toolChat('search achilles', [])
+      expect(asked[0]).toBe('https://search.home.lan/search?q=achilles&format=json')
+      expect(r.toolCalls[0]!.result).toContain('Greek hero.')
+    } finally {
+      setWebSearchSettings({ provider: 'builtin' })
+    }
+  })
+
+  it('brave_search searches the web_search way when Brave answers with a captcha', async () => {
+    searchNetwork({
+      'https://search.brave.com': { status: 429, body: '<html>Please solve the captcha</html>' },
+      'https://lite.duckduckgo.com': { status: 202, body: DDG_CHALLENGE },
+      'https://www.bing.com': { status: 200, body: BING_RSS }
+    })
+    enqueueReactiveAfterEmptyPlan(
+      { toolCalls: [{ name: 'brave_search', args: { query: 'Wednesday Solutions' } }] },
       { content: 'Here is what I found.' }
     )
 
@@ -1007,15 +1079,16 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
   it('backfills the user query when the model calls web_search with an empty query', async () => {
     // A small model calls web_search with no query. The loop must backfill the
     // user's message so a real search runs instead of erroring on an empty query.
-    let searchedUrl = ''
+    let searchedFor = ''
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) => {
-        searchedUrl = url
+      vi.fn(async (_url: string, init?: { body?: string }) => {
+        searchedFor = String(init?.body ?? '')
         return {
           ok: true,
+          status: 200,
           text: async () =>
-            '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com">Ex</a>'
+            `<a rel="nofollow" href="https://example.com/" class='result-link'>Achilles, the hero</a>`
         }
       })
     )
@@ -1030,7 +1103,7 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
 
     // The user's message was backfilled as the query — surfaced in onStep AND sent to the network.
     expect(steps[0]!.args.query).toBe('tell me about achilles the hero')
-    expect(decodeURIComponent(searchedUrl)).toContain('achilles the hero')
+    expect(decodeURIComponent(searchedFor)).toContain('achilles the hero')
     expect(r.toolCalls[0]!.result).toContain('example.com')
   })
   // --- harness recovery: errors, misnamed tools, repeats, stale results -------------
@@ -1043,7 +1116,9 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
 
     expect(r.answer).toBe('I cannot teleport, but here is the answer.')
     expect(r.toolCalls[0]).toMatchObject({ name: 'teleport', status: 'failed' })
-    expect(r.toolCalls[0]!.result).toMatch(/no tool named "teleport"\. Available tools: .*calculator/)
+    expect(r.toolCalls[0]!.result).toMatch(
+      /no tool named "teleport"\. Available tools: .*calculator/
+    )
     expect(JSON.stringify(fake.requests[1])).toContain('no tool named')
   })
 
@@ -1113,7 +1188,9 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
     expect(JSON.stringify(fake.requests[2])).toContain('already called calculator')
     const finalRequest = fake.requests[3] as { tools?: unknown[]; messages?: unknown[] }
     expect(finalRequest.tools ?? []).toHaveLength(0)
-    expect(JSON.stringify(finalRequest.messages)).toContain('kept repeating the same calculator call')
+    expect(JSON.stringify(finalRequest.messages)).toContain(
+      'kept repeating the same calculator call'
+    )
   })
 
   it('elides older bulky tool results once the window fills, keeping the latest two whole', async () => {
@@ -1175,7 +1252,10 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
     const previousContext = service.ctxSize
     service.ctxSize = 4_096
     try {
-      enqueueReactiveAfterEmptyPlan({ content: summary }, { content: 'Added a day trip to Sintra.' })
+      enqueueReactiveAfterEmptyPlan(
+        { content: summary },
+        { content: 'Added a day trip to Sintra.' }
+      )
       const activities: unknown[] = []
       const deltas: string[] = []
       const r = await toolChat('Add a day trip', history, {

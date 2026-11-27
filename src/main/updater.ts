@@ -98,8 +98,11 @@ export function registerUpdateIpc(): void {
   // it, so a fully-downloaded update can sit unapplied forever. quitAndInstall
   // forces the clean quit + relaunch + swap, so the renderer's "Restart to
   // update" button always lands the update regardless of how the app is closed.
+  // isSilent + forceRunAfter: on Windows the assisted NSIS installer would
+  // otherwise show its full wizard on every update; this installs quietly and
+  // reopens the app. macOS and Linux ignore both flags.
   ipcMain.handle('update:install', () => {
-    autoUpdater.quitAndInstall()
+    autoUpdater.quitAndInstall(true, true)
   })
 
   // Lets a freshly-created window ask whether an update is already staged.

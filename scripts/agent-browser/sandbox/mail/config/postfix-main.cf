@@ -1,0 +1,3 @@
+# Sandbox: mail stays inside offgrid-mail.test. Anything else bounces, nothing leaves the box.
+default_transport = error:the sandbox delivers only to offgrid-mail.test
+relay_transport = error:the sandbox delivers only to offgrid-mail.test

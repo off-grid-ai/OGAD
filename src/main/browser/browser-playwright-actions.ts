@@ -63,7 +63,7 @@ export async function projectPlaywrightPointer(
   if (!driver) return
   const refs = decision.action === 'drag' ? [decision.start_ref, decision.end_ref] : [decision.ref]
   for (const ref of refs) {
-    if (ref) await driver.projectSemanticTarget(ref, snapshot)
+    if (ref) await driver.projectSemanticTarget(ref, snapshot, decision.action !== 'hover' && decision.action !== 'drag')
   }
 }
 

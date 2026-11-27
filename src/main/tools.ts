@@ -8,6 +8,7 @@
 import { track } from './analytics'
 import { offgridGuideTool } from './tools/offgrid-guide-tool'
 import { llm } from './llm'
+import { replyLanguageLine } from '@offgrid/i18n'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import type { ResponseCutoffContract } from '../shared/ipc-contracts'
 import { SEARCH_KB_TOOL } from '@offgrid/rag'
@@ -23,7 +24,7 @@ import {
 import { projectDocumentsMode, type ProjectDocumentsMode } from './documents/project-knowledge-mode'
 import { buildContentParts } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
-import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
+import { stripTags, htmlToText } from './tools-parsers'
 import { evaluateArithmetic } from './calculator'
 import type { SearchKind, SearchResult } from '../shared/search-contract'
 import { selectToolExtensions } from './tools/extension-select'
@@ -50,9 +51,11 @@ import {
   toolLimitFinalAnswerInstruction,
   toolResultCharBudget,
   unknownToolMessage,
+  formatWebSearchResults,
   type PromptBreakdown,
   type ToolCallRecord
 } from '@offgrid/models'
+import { searchTheWeb } from './web-search-settings'
 import { toolPromptChars, toolPromptTokens } from './tools/prompt-budget'
 import { withAIRequestMetrics } from './ai-request-log'
 import { checkCitations } from '@offgrid/rag/documents'
@@ -282,72 +285,66 @@ export async function readUrlText(url: string): Promise<string> {
   const scheme = u.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]
   if (scheme && !/^https?$/i.test(scheme))
     throw new Error(`Invalid URL: unsupported scheme ${scheme}`)
-  if (!/^https?:\/\//i.test(u)) u = 'https://' + u
+  if (!/^https?:\/\//i.test(u)) u = `https://${u}`
   const res = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' } })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return htmlToText(await res.text())
 }
 
 // --- Built-in tools --------------------------------------------------------
+/**
+ * Challenge markup: an element or form whose id, class, name or action names a captcha (Brave's
+ * own, h-captcha, g-recaptcha) or a Turnstile widget. Result titles, snippets and links never
+ * match, since they are text and href values.
+ */
+const CHALLENGE_MARKUP =
+  /<[a-z][^>]*\s(?:id|class|name|action)\s*=\s*["'][^"']*(?:captcha|turnstile)/i
+
+/**
+ * Brave refused the search with a challenge instead of results: an error status, a redirect to
+ * its captcha page, or captcha markup in the page. A results page that merely mentions
+ * "CAPTCHA" (a result titled "How to solve a CAPTCHA") is not a challenge.
+ */
+export function isBraveChallenge(status: number, url: string, html: string): boolean {
+  if (status >= 400) return true
+  try {
+    if (/captcha/i.test(new URL(url).pathname)) return true
+  } catch {
+    // No final URL (a mocked or opaque response): judge by the page alone.
+  }
+  return CHALLENGE_MARKUP.test(html)
+}
+
+/** web_search's answer, for a provider-specific search tool whose provider refused. */
+function searchInstead(
+  args: Record<string, unknown>,
+  ctx: ToolContext
+): ReturnType<ToolDef['run']> {
+  const webSearch = TOOLS.find((tool) => tool.name === 'web_search')
+  return webSearch ? webSearch.run(args, ctx) : 'Error: search failed.'
+}
+
 const TOOLS: ToolDef[] = [
   offgridGuideTool,
   {
     name: 'web_search',
     description:
-      "Search the web via DuckDuckGo and return the top results (title, URL, snippet). Use for current events or facts not in the user's memory. Requires network.",
+      "Search the web and return the top results (title, URL, snippet). Use for current events or facts not in the user's memory. Requires network.",
     parameters: {
       type: 'object',
       properties: { query: { type: 'string', description: 'the search query' } },
       required: ['query']
     },
+    // Providers, order and parsing are @offgrid/models' (the same on the phone); the person's choice
+    // and key come from Settings → Tools → Web search.
     run: async (a) => {
       const q = String(a.query ?? '').trim()
       if (!q) return 'Error: empty query.'
       try {
-        const res = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), {
-          headers: { 'User-Agent': 'Mozilla/5.0' }
-        })
-        const html = await res.text()
-        const titles: { title: string; url: string }[] = []
-        const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
-        let m: RegExpExecArray | null
-        while ((m = re.exec(html)) && titles.length < 6)
-          titles.push({ url: decodeDdgHref(m[1]!), title: stripTags(m[2]!) })
-        const snippets: string[] = []
-        const sre = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g
-        let s: RegExpExecArray | null
-        while ((s = sre.exec(html)) && snippets.length < 6) snippets.push(stripTags(s[1]!))
-        if (!titles.length) {
-          const fallback = await fetch(
-            'https://www.bing.com/search?format=rss&q=' + encodeURIComponent(q),
-            { headers: { 'User-Agent': 'Mozilla/5.0' } }
-          )
-          if (!fallback.ok) throw new Error(`search providers returned HTTP ${fallback.status}`)
-          const xml = await fallback.text()
-          const items: { title: string; url: string; snippet: string }[] = []
-          const ire = /<item>([\s\S]*?)<\/item>/gi
-          let item: RegExpExecArray | null
-          while ((item = ire.exec(xml)) && items.length < 6) {
-            const title = /<title>([\s\S]*?)<\/title>/i.exec(item[1]!)
-            const link = /<link>([\s\S]*?)<\/link>/i.exec(item[1]!)
-            const description = /<description>([\s\S]*?)<\/description>/i.exec(item[1]!)
-            if (!title || !link) continue
-            items.push({
-              title: stripTags(title[1]!),
-              url: stripTags(link[1]!),
-              snippet: description ? stripTags(description[1]!) : ''
-            })
-          }
-          if (!items.length) throw new Error('search providers returned no usable results')
-          return items
-            .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
-            .join('\n')
-        }
-        return titles
-          .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${snippets[i] || ''}`)
-          .join('\n')
+        const { results } = await searchTheWeb(q)
+        return formatWebSearchResults(q, results)
       } catch (e) {
-        return 'Error: search failed — ' + (e as Error).message
+        return `Error: search failed — ${(e as Error).message}`
       }
     }
   },
@@ -360,12 +357,12 @@ const TOOLS: ToolDef[] = [
       properties: { query: { type: 'string', description: 'the search query' } },
       required: ['query']
     },
-    run: async (a) => {
+    run: async (a, ctx) => {
       const q = String(a.query ?? '').trim()
       if (!q) return 'Error: empty query.'
       try {
         const res = await fetch(
-          'https://search.brave.com/search?q=' + encodeURIComponent(q) + '&source=web',
+          `https://search.brave.com/search?q=${encodeURIComponent(q)}&source=web`,
           {
             headers: {
               'User-Agent':
@@ -375,6 +372,9 @@ const TOOLS: ToolDef[] = [
           }
         )
         const html = await res.text()
+        // Brave answers scripted searches with HTTP 429 and a captcha. Search the way web_search does
+        // instead of telling the model the web had nothing.
+        if (isBraveChallenge(res.status, res.url, html)) return searchInstead(a, ctx)
         const out: { title: string; url: string }[] = []
         const seen = new Set<string>()
         const re = /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
@@ -387,10 +387,10 @@ const TOOLS: ToolDef[] = [
           seen.add(url)
           out.push({ title, url })
         }
-        if (!out.length) return 'No results found (Brave markup may have changed — try web_search).'
+        if (!out.length) return searchInstead(a, ctx)
         return out.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}`).join('\n')
       } catch (e) {
-        return 'Error: brave search failed — ' + (e as Error).message
+        return `Error: brave search failed — ${(e as Error).message}`
       }
     }
   },
@@ -410,7 +410,7 @@ const TOOLS: ToolDef[] = [
         const text = await readUrlText(url)
         return text ? text.slice(0, 6000) : 'No readable text on the page.'
       } catch (e) {
-        return 'Error: could not fetch — ' + (e as Error).message
+        return `Error: could not fetch — ${(e as Error).message}`
       }
     }
   },
@@ -461,7 +461,7 @@ const TOOLS: ToolDef[] = [
           .map((r) => `(${r.surface || r.surface_app || 'screen'} · ${r.ts}) ${r.summary}`)
           .join('\n')
       } catch (e) {
-        return 'Error reading screen: ' + (e as Error).message
+        return `Error reading screen: ${(e as Error).message}`
       }
     }
   },
@@ -547,7 +547,7 @@ const TOOLS: ToolDef[] = [
             : {})
         }
       } catch (e) {
-        return { text: 'Error searching the knowledge base: ' + (e as Error).message }
+        return { text: `Error searching the knowledge base: ${(e as Error).message}` }
       }
     }
   },
@@ -901,6 +901,15 @@ function earlyImageRequest(
   }
 }
 
+/** "Reply in my language", when the person turned it on for a non-English app (opt-in, never forced). */
+function replyLanguagePart(): string {
+  const line = replyLanguageLine(
+    getSetting<string>('appLanguage', 'en'),
+    getSetting<boolean>('replyInAppLanguage', false) === true
+  )
+  return line ? `\n\n${line}` : ''
+}
+
 export async function toolChat(
   query: string,
   history: { role: string; content: string }[] = [],
@@ -1059,7 +1068,7 @@ export async function toolChat(
         ? ' web_use and computer_use are available when the user asks you to do something on a website or in a desktop app.'
         : ''
     ],
-    ...hints.map((hint, index): [string, string] => [hintSources[index] ?? 'tools', ' ' + hint]),
+    ...hints.map((hint, index): [string, string] => [hintSources[index] ?? 'tools', ` ${hint}`]),
     [
       'userContext',
       typeof opts.context === 'string' && opts.context.trim()
@@ -1072,7 +1081,8 @@ export async function toolChat(
         ? '\nThis request comes from a paired browser tab. Use web_use for requested work on that website, including opening notifications. It will use that tab and its current login. Prefer visible page controls; do not invent URL paths or supply a guessed starting URL.'
         : ''
     ],
-    ['standingRules', standingRules(opts.rules)]
+    ['standingRules', standingRules(opts.rules)],
+    ['replyLanguage', replyLanguagePart()]
   ]
   const sys = systemParts.map(([, text]) => text).join('')
   // Estimated tokens of each system-prompt addition, by source (the base is what remains).
@@ -1269,6 +1279,8 @@ export async function toolChat(
   let videoStoryId: string | undefined
   let finishAfterDeferredImages = false
   const toolRoundAnswers: string[] = []
+  // The last round offered no tools because the conversation left no room for their schemas.
+  let toolsLeftOut = false
   const resultWithImages = (result: {
     answer: string
     toolCalls: ToolCall[]
@@ -1289,6 +1301,8 @@ export async function toolChat(
   } => {
     const finalImageRequest = imageRequests.at(-1)
     noteDocumentPrefill(result.metrics)
+    const cutoff =
+      result.cutoff ?? (toolsLeftOut ? { reason: 'tools_left_out' as const } : undefined)
     const answer = [...toolRoundAnswers, result.answer].filter((text) => text.trim()).join('\n\n')
     return {
       ...result,
@@ -1306,7 +1320,8 @@ export async function toolChat(
       videoRequests,
       ...(videoStoryId ? { videoStoryId } : {}),
       ...(offeredTools.size ? { toolsOffered: [...offeredTools] } : {}),
-      ...(finalImageRequest ? { imageRequest: finalImageRequest } : {})
+      ...(finalImageRequest ? { imageRequest: finalImageRequest } : {}),
+      ...(cutoff ? { cutoff } : {})
     }
   }
 
@@ -1388,9 +1403,8 @@ export async function toolChat(
       typeof settings.maxTokens === 'number' && settings.maxTokens > 0
         ? Math.min(settings.maxTokens, remainingOutputTokens)
         : remainingOutputTokens
-    if (tools.length && !roundTools.length) {
-      console.warn('[tools] no tool schemas fit beside the retained conversation')
-    }
+    toolsLeftOut = !!tools.length && !roundTools.length && !finishAfterDeferredImages
+    if (toolsLeftOut) console.warn('[tools] no tool schemas fit beside the retained conversation')
     for (const tool of roundTools) {
       const name = (tool as { function?: { name?: unknown } }).function?.name
       if (typeof name === 'string' && name) offeredTools.add(name)

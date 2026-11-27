@@ -1,3 +1,4 @@
+import { translate } from '@offgrid/i18n'
 import {
   Select,
   SelectItem,
@@ -129,8 +130,9 @@ export function SettingsSelect<T extends string>({
     >
       <SelectTrigger id={id} size="sm" aria-label={label}>
         <SelectValue>
+          {/* A function child is out of the i18n runtime's reach: translate the chosen label here. */}
           {() =>
-            selected?.label ??
+            (selected ? translate(selected.label) : undefined) ??
             (options.length === 0 || value === '' ? placeholder : undefined) ??
             value
           }

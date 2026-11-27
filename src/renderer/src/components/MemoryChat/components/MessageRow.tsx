@@ -538,10 +538,13 @@ function MessageBubble({
           onCancel={actions.cancelEdit}
           onSave={actions.saveEdit}
         />
-      ) : isVideoEcho(message) ? null : (
+      ) : isVideoEcho(message) ? null : isFailureLineOnly(message) ? (
+        // The app wrote this line, not the model: shown as plain text so it reads in the app language.
+        <p>{message.content.trim()}</p>
+      ) : (
         <MessageMarkdown message={message} navigation={navigation} withoutArtifact={!!artifact} />
       )}
-      <ResponseCutoffNotice cutoff={message.cutoff} />
+      <ResponseCutoffNotice cutoff={message.cutoff} onStartNewChat={actions.startNewChat} />
       <FailedReplyStep message={message} />
       {message.imageMemoryRetry ? (
         <ImageMemoryRetryAction
@@ -953,6 +956,15 @@ function VideoCardSlot({
 function FilmCardSlot({ storyId }: { storyId: string }): React.JSX.Element | null {
   const [FilmCard] = useState(() => getSlot(SLOTS.chatFilmCard))
   return FilmCard ? <FilmCard storyId={storyId} /> : null
+}
+
+/** A reply that is only a known failure line ("No chat model yet."), which the app wrote in English. */
+function isFailureLineOnly(message: ChatMessage): boolean {
+  if (message.role !== 'assistant' || message.streaming) return false
+  const text = message.content.trim()
+  if (!text || text.length > 220 || text.includes('\n')) return false
+  const failure = explainFailure(text)
+  return failure.code !== 'unknown' && failure.line === text
 }
 
 /**

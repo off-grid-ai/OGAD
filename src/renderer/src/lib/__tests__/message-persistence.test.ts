@@ -68,6 +68,9 @@ describe('message-persistence carrier', () => {
 
   it('ignores malformed persisted cutoff values', () => {
     expect(readResponseCutoff({ cutoff: { reason: 'stop', maxTokens: 4096 } })).toBeUndefined()
+    expect(readResponseCutoff({ cutoff: { reason: 'tools_left_out' } })).toEqual({
+      reason: 'tools_left_out'
+    })
     expect(readResponseCutoff({ cutoff: { reason: 'max_tokens', maxTokens: 1.5 } })).toBeUndefined()
     expect(
       readResponseCutoff({ cutoff: { reason: 'max_tokens', maxTokens: '4096' } })

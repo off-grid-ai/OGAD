@@ -1,3 +1,4 @@
+import { t } from '@offgrid/i18n'
 import { openModelSettingsPanel } from '@renderer/lib/model-settings-panel'
 import { replaceAppLocation } from '@renderer/lib/app-location'
 import { modelDisplayName } from '@offgrid/models'
@@ -479,7 +480,7 @@ function SetupNudge({
         : issue === 'remote-screen-images'
           ? 'Allow screen images'
           : missingModel && progress
-            ? `Getting ${modelName ?? 'your chat model'} ready`
+            ? t('Getting {0} ready', modelName ?? t('your chat model'))
             : missingModel
               ? 'Set up your local AI'
               : missingLocalNetwork
@@ -497,9 +498,12 @@ function SetupNudge({
             : missingModel && progress
               ? 'Chat works the moment it finishes. Bigger models are under Configure.'
               : missingModel
-                ? `Pick a model yourself, or let Off Grid AI configure one for your ${deviceNoun()}.`
+                ? t(
+                    'Pick a model yourself, or let Off Grid AI configure one for your {0}.',
+                    deviceNoun()
+                  )
                 : missingLocalNetwork
-                  ? `Allow this ${deviceNoun()} to find and sync directly with your devices.`
+                  ? t('Allow this {0} to find and sync directly with your devices.', deviceNoun())
                   : 'Grant screen and accessibility access so Off Grid AI can see and remember.'
   const presentedProgress = progress ? projectProgress(progress) : null
   const cta =

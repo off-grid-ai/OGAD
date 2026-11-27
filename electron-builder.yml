@@ -58,6 +58,14 @@ win:
   # mac block sets its own icon below). The 512x512 PNG is auto-converted to a
   # multi-size Windows ICO for the exe + NSIS installer.
   icon: resources/icon.png
+  # Signing itself is switched on in CI by scripts/windows-signing.sh (Azure Trusted Signing or
+  # a PFX), which also passes the publisher name. Like the Mac build, every nested binary is
+  # signed, not just the app exe: the engines in resources/bin and the native addons.
+  signExts:
+    - .dll
+    - .node
+  # Installed apps refuse an update not signed by the same publisher (from app-update.yml).
+  verifyUpdateCodeSignature: true
   extraResources:
     - from: resources/bin
       to: bin
@@ -72,6 +80,11 @@ win:
         - '!kev-runtime/**'
 nsisWeb:
   artifactName: ${name}-${version}-setup.${ext}
+  # People asked to put the app on another drive. The assisted installer asks for the folder; updates
+  # still run silently into the folder already chosen.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always

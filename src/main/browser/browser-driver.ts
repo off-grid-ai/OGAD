@@ -289,6 +289,10 @@ export class BrowserDriver {
         cursor.setAttribute('aria-hidden', 'true');
         cursor.style.cssText = 'position:fixed;left:0;top:0;width:${BROWSER_POINTER_VISUAL.width * counterScale}px;height:${BROWSER_POINTER_VISUAL.height * counterScale}px;pointer-events:none;z-index:2147483647;will-change:transform;background-repeat:no-repeat;background-size:100% 100%;background-image:${pointerImage};filter:drop-shadow(0 0 ${5 * counterScale}px ${BROWSER_POINTER_VISUAL.glow}) drop-shadow(0 ${counterScale}px ${counterScale}px rgba(0,0,0,.5));';
       }
+      // Size follows the zoom on every call: set once, a pointer made in the small floating view
+      // (zoom 0.25) stayed four times too big when the task opened full size (25 Nov).
+      cursor.style.width = '${BROWSER_POINTER_VISUAL.width * counterScale}px';
+      cursor.style.height = '${BROWSER_POINTER_VISUAL.height * counterScale}px';
       const lastClick = ${JSON.stringify(this.lastClick)};
       let marker = document.getElementById(markerId);
       if (lastClick && !marker) {
@@ -314,7 +318,7 @@ export class BrowserDriver {
         ? 'none'
         : 'transform ${transitionMs}ms cubic-bezier(.45,0,.55,1)';
       if (!${JSON.stringify(onlyIfMissing)} || !cursor.dataset.positioned) {
-        cursor.style.transform = 'translate3d(${Math.round(event.x - BROWSER_POINTER_VISUAL.hotspotX)}px,${Math.round(event.y - BROWSER_POINTER_VISUAL.hotspotY)}px,0)';
+        cursor.style.transform = 'translate3d(${Math.round(event.x - BROWSER_POINTER_VISUAL.hotspotX * counterScale)}px,${Math.round(event.y - BROWSER_POINTER_VISUAL.hotspotY * counterScale)}px,0)';
         cursor.dataset.positioned = 'true';
       }
       if (marker && lastClick) {
@@ -479,7 +483,9 @@ export class BrowserDriver {
   /** Move the watched-page pointer to a Playwright accessibility reference.
    * Playwright boxes and CDP input share viewport CSS coordinates, so this is
    * presentation only: Playwright remains the single semantic actuator. */
-  async projectSemanticTarget(ref: string, snapshot: string): Promise<boolean> {
+  /** Move the pointer to a ref's center before Playwright acts on it. marks: the action presses
+   * there, so the click ring moves too (it stayed on the last coordinate click, looking off-target). */
+  async projectSemanticTarget(ref: string, snapshot: string, marks = false): Promise<boolean> {
     const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const line = snapshot
       .split('\n')
@@ -495,6 +501,10 @@ export class BrowserDriver {
     if (![x, y, width, height].every(Number.isFinite)) return false
     await this.ensurePointer(true)
     await this.movePointerTo(x + width / 2, y + height / 2)
+    if (marks) {
+      this.lastClick = { x: x + width / 2, y: y + height / 2 }
+      await this.showPointer(this.pointer)
+    }
     return true
   }
 

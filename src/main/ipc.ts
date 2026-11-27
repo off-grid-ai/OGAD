@@ -38,6 +38,7 @@ import { deleteEntityById } from './entity-domain'
 import { setComputerUseSettings } from './computer-use-settings'
 import { COMPUTER_USE_SETTINGS_KEY } from '../shared/computer-use-settings'
 import { setWebUseSettings } from './web-use-settings'
+import { registerWebSearchIpc } from './web-search-settings'
 import { WEB_USE_SETTINGS_KEY } from '../shared/web-use-settings'
 import {
   getResidency,
@@ -638,6 +639,9 @@ export function setupIPC(): void {
   ipcMain.handle('settings:get', () => {
     return getSettings()
   })
+
+  // Settings → Tools → Web search. The key goes in, never back out.
+  registerWebSearchIpc()
 
   // Browsers paired through the extension bridge, and which are connected (Tasks > Web Use).
   ipcMain.handle('extension-bridge:browsers', () => listBridgeBrowsers())

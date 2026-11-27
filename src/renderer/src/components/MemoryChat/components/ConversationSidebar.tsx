@@ -180,10 +180,12 @@ function ConversationSidebarComponent({
                             onSwitchConversation(row.conversation.id, true)
                           }
                         }}
-                        className={`group flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors ${activeConversationId === row.conversation.id
-                          ? 'border-neutral-800 bg-neutral-900'
-                          : 'border-transparent hover:bg-neutral-900/50'
-                          }`}
+                        data-active={activeConversationId === row.conversation.id}
+                        className={`group flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors ${
+                          activeConversationId === row.conversation.id
+                            ? 'border-neutral-800 bg-neutral-900'
+                            : 'border-transparent hover:bg-neutral-900/50'
+                        }`}
                       >
                         <div className="min-w-0 flex-1">
                           <ConversationTitleActions

@@ -1,7 +1,22 @@
 import type { AutomationTaskReadStatus } from '@offgrid/automation'
 
 export type BrowserSessionKind = 'manual' | 'task'
-export type BrowserControl = 'back' | 'forward' | 'reload' | 'stop'
+export type BrowserControl = 'back' | 'forward' | 'reload' | 'stop' | 'devtools' | 'print' | 'mute'
+
+export const BROWSER_CONTROLS: readonly BrowserControl[] = [
+  'back',
+  'forward',
+  'reload',
+  'stop',
+  'devtools',
+  'print',
+  'mute'
+]
+
+export function isBrowserControl(value: unknown): value is BrowserControl {
+  return BROWSER_CONTROLS.includes(value as BrowserControl)
+}
+
 export type BrowserTaskStatus = AutomationTaskReadStatus
 
 export interface BrowserChromeState {
@@ -11,6 +26,12 @@ export interface BrowserChromeState {
   canGoBack: boolean
   canGoForward: boolean
   isLoading: boolean
+  /** The page is playing sound. */
+  audible?: boolean
+  muted?: boolean
+  bookmarked?: boolean
+  /** The test-account profile this page signs in with, if any (sandbox-profiles.ts). */
+  profileId?: string
 }
 
 export interface BrowserTaskPointer {

@@ -46,7 +46,14 @@ export type RagContext = {
   image?: string
   imageMetadata?: ImageGenerationMetadata
   videoRef?: { id?: string; path: string }
-  videoMetadata?: { width: number; height: number; durationSeconds: number; fps: number; frames: number; model?: string }
+  videoMetadata?: {
+    width: number
+    height: number
+    durationSeconds: number
+    fps: number
+    frames: number
+    model?: string
+  }
   sources?: { name: string; position: number; score: number }[]
   attachments?: {
     name: string
@@ -98,7 +105,14 @@ export type ChatMessage = {
   image?: string
   imagePath?: string
   videoPath?: string
-  videoMetadata?: { width: number; height: number; durationSeconds: number; fps: number; frames: number; model?: string }
+  videoMetadata?: {
+    width: number
+    height: number
+    durationSeconds: number
+    fps: number
+    frames: number
+    model?: string
+  }
   imageMetadata?: ImageGenerationMetadata
   toolCalls?: ProjectedSyncedTool[]
   /** Tool schemas sent to the model for this reply, including tools it did not call. */
@@ -271,6 +285,7 @@ export type MessageRowActions = Readonly<{
   saveEdit: (messageId: string, text: string) => void
   updateVoiceTranscript: (message: ChatMessage, text: string) => Promise<void>
   retryImageMemory: (retry: NonNullable<ChatMessage['imageMemoryRetry']>) => void
+  startNewChat: () => void
   /** `messageId`: the canvas follows that message, so a streaming artifact renders as it arrives. */
   openArtifact: (artifact: Artifact, messageId?: string) => void
   selectAskOption: (selection: AskOptionSelection) => void

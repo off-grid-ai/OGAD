@@ -1,0 +1,116 @@
+# Off Grid web-agent sandbox sites. Everything binds to 127.0.0.1; CPUs 0-7 only, small limits,
+# so other work on this box keeps its headroom. Start/stop with ./sandbox.sh.
+x-limits: &limits
+  cpuset: "0-7"
+  restart: unless-stopped
+x-mini: &mini
+  <<: *limits
+  image: offgrid-sandbox-mini:1
+  pull_policy: never
+  cpus: 0.5
+  mem_limit: 256m
+
+services:
+  caddy:
+    <<: *limits
+    image: caddy:2.10-alpine
+    cpus: 0.5
+    mem_limit: 256m
+    ports: ["127.0.0.1:443:443"]
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks:
+      default:
+        aliases: [offgrid-mail.test, offgrid-cloud.test, offgrid-shop.test, offgrid-air.test, offgrid-bank.test, offgrid-forms.test]
+
+  mailserver:
+    <<: *limits
+    image: ghcr.io/docker-mailserver/docker-mailserver:15
+    hostname: mail.offgrid-mail.test
+    cpus: 1
+    mem_limit: 768m
+    # IMAP for OGAD's email connection (emailed sign-in codes). This computer only.
+    ports: ["127.0.0.1:1143:143"]
+    environment:
+      PERMIT_DOCKER: network
+      SSL_TYPE: ""
+      ENABLE_SPAMASSASSIN: "0"
+      ENABLE_CLAMAV: "0"
+      ENABLE_FAIL2BAN: "0"
+      ENABLE_POSTGREY: "0"
+      ENABLE_AMAVIS: "0"
+      ENABLE_RSPAMD: "0"
+      ENABLE_OPENDKIM: "0"
+      ENABLE_OPENDMARC: "0"
+      ENABLE_POLICYD_SPF: "0"
+      ENABLE_UPDATE_CHECK: "0"
+      LOG_LEVEL: warn
+    volumes:
+      - ./mail/config:/tmp/docker-mailserver
+      - mail-data:/var/mail
+      - mail-state:/var/mail-state
+
+  roundcube:
+    <<: *limits
+    image: roundcube/roundcubemail:1.6.x-apache
+    cpus: 0.5
+    mem_limit: 384m
+    depends_on: [mailserver]
+    ports: ["127.0.0.1:8081:80"]
+    environment:
+      ROUNDCUBEMAIL_DEFAULT_HOST: mailserver
+      ROUNDCUBEMAIL_DEFAULT_PORT: "143"
+      ROUNDCUBEMAIL_SMTP_SERVER: mailserver
+      ROUNDCUBEMAIL_SMTP_PORT: "25"
+      ROUNDCUBEMAIL_DB_TYPE: sqlite
+      ROUNDCUBEMAIL_PLUGINS: archive,zipdownload,managesieve,markasjunk
+    volumes:
+      - ./mail/roundcube.php:/var/roundcube/config/sandbox.php:ro
+      - roundcube-db:/var/roundcube/db
+
+  nextcloud:
+    <<: *limits
+    image: nextcloud:31-apache
+    cpus: 1.5
+    mem_limit: 1g
+    ports: ["127.0.0.1:8082:80"]
+    environment:
+      SQLITE_DATABASE: nextcloud
+      NEXTCLOUD_ADMIN_USER: ncadmin
+      NEXTCLOUD_ADMIN_PASSWORD: ${NEXTCLOUD_ADMIN_PASSWORD}
+      NEXTCLOUD_TRUSTED_DOMAINS: offgrid-cloud.test localhost
+      OVERWRITEPROTOCOL: https
+      OVERWRITEHOST: offgrid-cloud.test
+      TRUSTED_PROXIES: 172.16.0.0/12 192.168.0.0/16 10.0.0.0/8
+      PHP_MEMORY_LIMIT: 512M
+    volumes:
+      - nextcloud:/var/www/html
+
+  shop:
+    <<: *mini
+    build: ./mini
+    ports: ["127.0.0.1:8083:8000"]
+    environment: {SITE: shop, SANDBOX_USER: alex, SANDBOX_PASSWORD: "${SHOP_PASSWORD}"}
+  air:
+    <<: *mini
+    depends_on: [shop]
+    ports: ["127.0.0.1:8084:8000"]
+    environment: {SITE: air, SANDBOX_USER: alex, SANDBOX_PASSWORD: "${AIR_PASSWORD}", OTP_LOGIN: "${OTP_LOGIN:-0}"}
+  bank:
+    <<: *mini
+    depends_on: [shop]
+    ports: ["127.0.0.1:8085:8000"]
+    environment: {SITE: bank, SANDBOX_USER: alex, SANDBOX_PASSWORD: "${BANK_PASSWORD}", OTP_LOGIN: "${OTP_LOGIN:-0}"}
+  forms:
+    <<: *mini
+    depends_on: [shop]
+    ports: ["127.0.0.1:8086:8000"]
+    environment: {SITE: forms, SANDBOX_USER: alex, SANDBOX_PASSWORD: "${FORMS_PASSWORD}"}
+
+volumes:
+  caddy-data: {}
+  mail-data: {}
+  mail-state: {}
+  roundcube-db: {}
+  nextcloud: {}

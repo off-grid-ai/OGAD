@@ -1,0 +1,28 @@
+{
+	auto_https disable_redirects
+	admin off
+}
+offgrid-mail.test {
+	tls internal
+	reverse_proxy roundcube:80
+}
+offgrid-cloud.test {
+	tls internal
+	reverse_proxy nextcloud:80
+}
+offgrid-shop.test {
+	tls internal
+	reverse_proxy shop:8000
+}
+offgrid-air.test {
+	tls internal
+	reverse_proxy air:8000
+}
+offgrid-bank.test {
+	tls internal
+	reverse_proxy bank:8000
+}
+offgrid-forms.test {
+	tls internal
+	reverse_proxy forms:8000
+}

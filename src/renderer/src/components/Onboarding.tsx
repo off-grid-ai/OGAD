@@ -68,6 +68,18 @@ const fade = {
   exit: { opacity: 0 }
 }
 
+/** A translated sentence with the device name in place of {0}, highlighted. */
+function DeviceSentence({ text }: Readonly<{ text: string }>): JSX.Element {
+  const [before, after = ''] = text.split('{0}')
+  return (
+    <>
+      {before}
+      <span className="text-emerald-600 dark:text-emerald-400">{deviceNoun()}</span>
+      {after}
+    </>
+  )
+}
+
 export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
   const [currentStep, setCurrentStep] = useState(restoredStep)
   // The furthest step reached: Forward (Cmd+]) goes back up to it, never past it.
@@ -130,20 +142,16 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
   }
 
   // Every step is a route: Cmd+[ goes back, Cmd+] goes forward to a step already reached.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (!(e.metaKey || e.ctrlKey)) return
-      if (e.key === '[' && currentStep > 0) {
-        e.preventDefault()
-        goTo(currentStep - 1)
-      } else if (e.key === ']' && currentStep < reached) {
-        e.preventDefault()
-        goTo(currentStep + 1)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [currentStep, reached, goTo])
+  // The keys reach the app as Back and Forward from the main process (the menu accelerator on the
+  // Mac, the input hook on Linux and Windows), which never hands them to the page as a keydown.
+  useEffect(
+    () =>
+      window.api.onHistoryNavigate((direction) => {
+        if (direction === 'back' && currentStep > 0) goTo(currentStep - 1)
+        else if (direction === 'forward' && currentStep < reached) goTo(currentStep + 1)
+      }),
+    [currentStep, reached, goTo]
+  )
 
   const nextLabel =
     stepId === 'features'
@@ -178,9 +186,8 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                   Off Grid AI
                 </h1>
                 <p className="mx-auto mt-4 max-w-xl text-lg text-neutral-400">
-                  Your AI workspace starts on{' '}
-                  <span className="text-emerald-600 dark:text-emerald-400">your</span>{' '}
-                  {deviceNoun()}. Local models and your data need no Off Grid AI cloud or account.
+                  <DeviceSentence text={t('Your AI workspace starts on your {0}.')} />{' '}
+                  {t('Local models and your data need no Off Grid AI cloud or account.')}
                 </p>
               </motion.div>
             </LampContainer>
@@ -228,7 +235,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
         <div className="flex w-full items-center justify-between gap-6">
           <p className="hidden items-center gap-2 text-xs text-muted-foreground md:flex">
             <LockSimpleIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            Local models run on your {deviceNoun()}.
+            {t('Local models run on your {0}.', deviceNoun())}
           </p>
           {/* A quiet progress line: thin segments, one gliding emerald pill, the step's name below. */}
           <div
@@ -290,7 +297,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
             )}
             {(stepId === 'groups' || stepId === 'features') && (
               <Button variant="ghost" onClick={skip}>
-                Skip, set it up
+                Skip, I&apos;ll set it up
               </Button>
             )}
             <Button onClick={next} disabled={connectionBusy || nothingPicked} className="group">

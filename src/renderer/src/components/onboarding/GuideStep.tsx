@@ -3,6 +3,7 @@
  * the pictures, steps and Ask box are the ones the app shows later. Under a Pro feature: the
  * price, Get Pro and Enter license key. Under Integrations: the connections, inline.
  */
+import { t } from '@offgrid/i18n'
 import { useState, type JSX } from 'react'
 import { guideTopicsFor } from '@offgrid/features'
 import { CpuIcon, GlobeIcon } from '@phosphor-icons/react'
@@ -89,8 +90,10 @@ export function GuideStep({
     return (
       <div className="grid gap-3">
         <p className="text-sm text-muted-foreground" data-testid="onboarding-not-here">
-          Coming to this {deviceNoun()} soon. Your license also works on the other computers Off
-          Grid AI runs on.
+          {t(
+            'Coming to this {0} soon. Your license also works on the other computers Off Grid AI runs on.',
+            deviceNoun()
+          )}
         </p>
         {offer}
       </div>
@@ -101,7 +104,7 @@ export function GuideStep({
       <div className="grid gap-1.5 text-xs text-muted-foreground" data-testid="onboarding-where">
         <p className="flex items-start gap-2 text-foreground">
           <CpuIcon aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Models run in your {deviceNoun()}&apos;s memory.
+          {t("Models run in your {0}'s memory.", deviceNoun())}
         </p>
         <p className="flex items-start gap-2">
           <GlobeIcon aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />A model server you
@@ -123,7 +126,7 @@ export function GuideStep({
             Share anonymous stats and crash reports
           </label>
           <p className="mt-1 text-xs text-muted-foreground">
-            Helps us fix what breaks. Your chats never leave this {deviceNoun()}.{' '}
+            {t('Helps us fix what breaks. Your chats never leave this {0}.', deviceNoun())}{' '}
             <button
               type="button"
               onClick={() => setSharingOpen(true)}
