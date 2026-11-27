@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "llama": {
     "repo": "ggml-org/llama.cpp",
-    "ref": "b12774",
+    "ref": "b12810",
     "sha256": {
-      "linux-cuda": "0b21de91989e04e7cca05a320b1c075046ce427b59256ba51038df61e52bd5fe",
-      "linux-cudart": "b8fd3ce0bf1a3f437bcd2b2df81e635828d58f3c9f0606faddbe813d56589590",
-      "linux-vulkan": "75b7044df1232bd5bc78ffc753f14a5a44d9f3b5c67228b6103705c57084d02d",
-      "linux-cpu": "ab5837cca2317cfb7ecb5f85b550934e7355cd9df74cdde6e106581457034dbb",
-      "win-cuda": "7c2f8e99f7ffe244e5cba92e6c2b65f1d04fbabe8d4eb304d3fa200778ccf8f3",
+      "linux-cuda": "896094e79fac3bbb820cda906f0fbd0819ee3abb98fcf707b90d66e043efdc55",
+      "linux-cudart": "ec312336301f6ecd3e15e9aee8e1c81003c573705aad83a3a067a2cd077f0818",
+      "linux-vulkan": "c583739e85d158c93ee0b9fc8d1140736a1d8acdbe52d647bc5eb7cf0a73e214",
+      "linux-cpu": "63b94be37dcc34cb4933554d4f998e9649841b23da7ffc71d1f66d63762464d7",
+      "win-cuda": "681f8e58bded61b1a9cba7e4f1c2ee9c3c91edc38c8e6aeb993c45691b97a465",
       "win-cudart": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
-      "win-vulkan": "d29a16265d26ef7598209caaf1a544cbfa6abe2858c24b0ce4ae6bff87a76f22",
-      "win-cpu": "44b70b20f3374eec3d16a002beceefef33cc3565678caeb3eea5f6cacba61836"
+      "win-vulkan": "134e518ee19a7c9d27b478a0d0817ce4e5f11b4f0d4f721dee8cbde2fc8017ee",
+      "win-cpu": "845e25154ae4051659cf7363908a663cf15f99c57f8d5157d0f38f468acf660d"
     }
   },
   "prism": {
@@ -28,12 +28,12 @@
   },
   "sd": {
     "repo": "leejet/stable-diffusion.cpp",
-    "ref": "master-1127-79dc7ca",
-    "commit": "79dc7ca9074d79419a46380cdb95a4524db9b74c",
+    "ref": "master-1141-e637c7b",
+    "commit": "e637c7bccd35aa8841d67fb942ba72918176826c",
     "sha256": {
-      "win-cuda": "984b6e22803df7cf8ddff968c6e7abbb026b06f326e1d00471b484e59f891f2b",
-      "win-vulkan": "cc504eabda2001367ab21d752b27da60a884e7c5c61f84d79e006b5ea4e5dc9f",
-      "win-cpu": "345d3ab72eec70c23f29cd3414a4403f8ee4d706811cd04b92e3b3ac9c75edbb"
+      "win-cuda": "47e70997b28054176c81cf5a6cfec883133674677828c1b0c0f48af701fb0a3b",
+      "win-vulkan": "85759479401535711cf8c43e60de9e64ff67a30fbbb76828eb20dcca432155fa",
+      "win-cpu": "dae8a190227736d987486ab7d7697616ad1dea872f758e5ca550ad7e6692311c"
     }
   },
   "whisper": {
@@ -72,17 +72,17 @@
     }
   },
   "mlx": {
-    "version": "0.32.4",
+    "version": "0.32.5",
     "wheels": {
       "mlx": {
-        "name": "mlx-0.32.4-cp312-cp312-macosx_14_0_arm64.whl",
-        "url": "https://files.pythonhosted.org/packages/69/b0/e726ce51e1b445e4ed08c2d0e036a01c7532f4d1a856328da546a6f883bd/mlx-0.32.4-cp312-cp312-macosx_14_0_arm64.whl",
-        "sha256": "ff1d7be54758ea3a875b8fe54eff13bed17ad9566505e301f5d7851bf869680f"
+        "name": "mlx-0.32.5-cp312-cp312-macosx_14_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/e1/54/f82a1fe2a82f105ab97233963a2070b40210cc6e7ffad840fcb70befa1b5/mlx-0.32.5-cp312-cp312-macosx_14_0_arm64.whl",
+        "sha256": "d3564cd8286642ce93d74f7a303899c15a45705278766a09c34fa155da4489c4"
       },
       "mlx-metal": {
-        "name": "mlx_metal-0.32.4-py3-none-macosx_14_0_arm64.whl",
-        "url": "https://files.pythonhosted.org/packages/77/24/7e5b7ed5d28abacab4577c7a8dd1fca6e9058504f5f95ae4333c09420e2e/mlx_metal-0.32.4-py3-none-macosx_14_0_arm64.whl",
-        "sha256": "8019b2db622599267d66cc168b2f0dbf5af929790a6c3b3913e00eabc42a7947"
+        "name": "mlx_metal-0.32.5-py3-none-macosx_14_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/82/9f/de0f97f5f59cef6335c5a22ce9f262da0f1743f70e7ab080286f5fb3bdee/mlx_metal-0.32.5-py3-none-macosx_14_0_arm64.whl",
+        "sha256": "c662c3543b9c5da2cbe121269cdf099d14447a48dac2d4d3e96965df3629c787"
       }
     }
   },
