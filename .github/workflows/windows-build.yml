@@ -189,35 +189,27 @@ jobs:
         run: npm run build
 
       - name: Package Windows web installer and payload
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional Windows code signing (no-op if absent → unsigned; SmartScreen
-          # will warn until you add a cert via these secrets).
-          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          # Azure Trusted Signing. Windows (Smart App Control, Defender) refuses unsigned programs that run
-          # from the temp folder, which is where an update starts the old uninstaller: "Error launching
-          # installer". With these secrets set, the installer, uninstaller and app are signed.
+          # Windows code signing, the same as the release (scripts/windows-signing.sh).
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
-        shell: bash
+          WIN_SIGNING_ENDPOINT: ${{ vars.WIN_SIGNING_ENDPOINT }}
+          WIN_SIGNING_ACCOUNT: ${{ vars.WIN_SIGNING_ACCOUNT }}
+          WIN_SIGNING_PROFILE: ${{ vars.WIN_SIGNING_PROFILE }}
+          WIN_PUBLISHER_NAME: ${{ vars.WIN_PUBLISHER_NAME }}
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: |
-          sign=()
-          if [ -n "$AZURE_SIGNING_ACCOUNT" ]; then
-            sign=(
-              -c.win.azureSignOptions.publisherName="Wednesday Solutions Inc"
-              -c.win.azureSignOptions.endpoint="$AZURE_SIGNING_ENDPOINT"
-              -c.win.azureSignOptions.codeSigningAccountName="$AZURE_SIGNING_ACCOUNT"
-              -c.win.azureSignOptions.certificateProfileName="$AZURE_SIGNING_PROFILE"
-            )
-          else
-            echo "::warning::Windows build is unsigned: set the AZURE_* signing secrets."
-          fi
-          npx electron-builder --win --publish never "${sign[@]}"
+          source scripts/windows-signing.sh
+          npx electron-builder --win --publish never "${WIN_SIGN_ARGS[@]}"
+
+      - name: Verify every Windows binary is signed
+        if: ${{ env.WIN_SIGNED == 'true' }}
+        shell: pwsh
+        run: ./scripts/verify-windows-signatures.ps1
 
       - name: Verify every Windows binary finds its DLLs on a clean install
         shell: bash
@@ -535,17 +527,28 @@ jobs:
           if [ "$CHANNEL" = stable ]; then
             msstore publish store-upload/off-grid-ai.msix -id "$MS_STORE_PRODUCT_ID" -v
           else
+            api="https://manage.devcenter.microsoft.com/v1.0/my/applications/$MS_STORE_PRODUCT_ID"
+            token=$(curl -sf "https://login.microsoftonline.com/$MS_STORE_TENANT_ID/oauth2/token" \
+              --data-urlencode grant_type=client_credentials --data-urlencode "client_id=$MS_STORE_CLIENT_ID" \
+              --data-urlencode "client_secret=$MS_STORE_CLIENT_SECRET" --data-urlencode resource=https://manage.devcenter.microsoft.com \
+              | jq -r .access_token)
+            auth=(-H "Authorization: Bearer $token")
             flight="$MS_STORE_BETA_FLIGHT_ID"
             if [ -z "$flight" ]; then
               # Partner Center does not show flight ids, so find the package flight named "Beta".
-              token=$(curl -sf "https://login.microsoftonline.com/$MS_STORE_TENANT_ID/oauth2/token" \
-                --data-urlencode grant_type=client_credentials --data-urlencode "client_id=$MS_STORE_CLIENT_ID" \
-                --data-urlencode "client_secret=$MS_STORE_CLIENT_SECRET" --data-urlencode resource=https://manage.devcenter.microsoft.com \
-                | jq -r .access_token)
-              flight=$(curl -sf -H "Authorization: Bearer $token" \
-                "https://manage.devcenter.microsoft.com/v1.0/my/applications/$MS_STORE_PRODUCT_ID/listflights" \
+              flight=$(curl -sf "${auth[@]}" "$api/listflights" \
                 | jq -r '.value[] | select(.friendlyName == "Beta") | .flightId' | head -1)
             fi
             [ -n "$flight" ] || { echo "::warning::No package flight named Beta: the beta MSIX stays an artifact."; exit 0; }
+            # msstore cannot upload into a flight draft that was started in Partner Center. A flight
+            # submission holds only packages, so a draft that was never committed is replaced by this one.
+            pending=$(curl -sf "${auth[@]}" "$api/flights/$flight" | jq -r '.pendingFlightSubmission.id // empty')
+            if [ -n "$pending" ]; then
+              status=$(curl -sf "${auth[@]}" "$api/flights/$flight/submissions/$pending" | jq -r .status)
+              if [ "$status" = PendingCommit ]; then
+                echo "Replacing the uncommitted Beta flight draft $pending."
+                curl -sf -X DELETE "${auth[@]}" "$api/flights/$flight/submissions/$pending"
+              fi
+            fi
             msstore publish store-upload/off-grid-ai.msix -id "$MS_STORE_PRODUCT_ID" -f "$flight" -v
           fi

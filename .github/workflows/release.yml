@@ -544,30 +544,24 @@ jobs:
       - name: Package Windows web installer, payload, and update metadata
         shell: bash
         env:
-          # Optional Windows code signing — a no-op if the secrets are absent (the
-          # build still publishes, unsigned; SmartScreen warns until a cert is added).
-          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          # Azure Trusted Signing, on as soon as its secrets exist (see windows-build.yml for why).
+          # Windows code signing (scripts/windows-signing.sh): Azure Trusted Signing, else a PFX.
+          # Once configured, a signing failure fails the release; unconfigured, it warns.
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          WIN_SIGNING_ENDPOINT: ${{ vars.WIN_SIGNING_ENDPOINT }}
+          WIN_SIGNING_ACCOUNT: ${{ vars.WIN_SIGNING_ACCOUNT }}
+          WIN_SIGNING_PROFILE: ${{ vars.WIN_SIGNING_PROFILE }}
+          WIN_PUBLISHER_NAME: ${{ vars.WIN_PUBLISHER_NAME }}
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: |
-          sign=()
-          if [ -n "$AZURE_SIGNING_ACCOUNT" ]; then
-            sign=(
-              -c.win.azureSignOptions.publisherName="Wednesday Solutions Inc"
-              -c.win.azureSignOptions.endpoint="$AZURE_SIGNING_ENDPOINT"
-              -c.win.azureSignOptions.codeSigningAccountName="$AZURE_SIGNING_ACCOUNT"
-              -c.win.azureSignOptions.certificateProfileName="$AZURE_SIGNING_PROFILE"
-            )
-          else
-            echo "::warning::Windows build is unsigned: set the AZURE_* signing secrets."
-          fi
-          npx electron-builder --win --publish never "${sign[@]}"
+          source scripts/windows-signing.sh
+          npx electron-builder --win --publish never "${WIN_SIGN_ARGS[@]}"
+      - name: Verify every Windows binary is signed
+        if: ${{ env.WIN_SIGNED == 'true' }}
+        shell: pwsh
+        run: ./scripts/verify-windows-signatures.ps1
       - name: Verify Windows base runtimes
         shell: bash
         run: |
