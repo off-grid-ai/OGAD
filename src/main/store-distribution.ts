@@ -4,6 +4,9 @@
 //
 // Electron marks the Mac App Store build (process.mas) and the Windows MSIX
 // package (process.windowsStore). snapd sets SNAP for every process in a snap.
+// A Microsoft Store app always runs from Windows' WindowsApps folder, so that path counts too: a Store
+// copy that ran its own updater saved our installer into the Store sandbox, and Windows refused to open
+// it ("Error launching installer").
 
 export type StoreDistribution = 'mac-app-store' | 'microsoft-store' | 'snap-store'
 
@@ -11,13 +14,18 @@ export interface StoreDistributionSignals {
   mas?: boolean
   windowsStore?: boolean
   snap?: string
+  /** The running executable's path. */
+  execPath?: string
 }
+
+const WINDOWS_APPS_FOLDER = /[\\/]WindowsApps[\\/]/i
 
 export function resolveStoreDistribution(
   signals: StoreDistributionSignals
 ): StoreDistribution | null {
   if (signals.mas) return 'mac-app-store'
-  if (signals.windowsStore) return 'microsoft-store'
+  if (signals.windowsStore || (signals.execPath && WINDOWS_APPS_FOLDER.test(signals.execPath)))
+    return 'microsoft-store'
   if (signals.snap) return 'snap-store'
   return null
 }
@@ -26,7 +34,8 @@ export function storeDistribution(): StoreDistribution | null {
   return resolveStoreDistribution({
     mas: process.mas,
     windowsStore: process.windowsStore,
-    snap: process.env.SNAP
+    snap: process.env.SNAP,
+    execPath: process.platform === 'win32' ? process.execPath : undefined
   })
 }
 
