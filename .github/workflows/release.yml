@@ -474,6 +474,10 @@ jobs:
   # (the repo's LFS binaries are macOS-only).
   build-win:
     needs: version
+    environment: windows-signing # its OIDC subject is what Azure trusts for code signing
+    permissions:
+      contents: write
+      id-token: write
     # Skipped for an artifact-only demo build (macOS DMG is all the lead needs).
     if: ${{ !inputs.artifact_only }}
     # windows-2022 = VS 2022 toolchain. windows-latest ships VS 2026, which node-gyp 11
@@ -541,14 +545,19 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
         run: node scripts/stage-native.mjs && npx electron-vite build
+      - name: Sign in to Azure for Windows code signing
+        # GitHub's OIDC token, trusted by the signing app's federated credential: no client secret.
+        if: ${{ vars.WIN_SIGNING_PROFILE != '' }}
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
       - name: Package Windows web installer, payload, and update metadata
         shell: bash
         env:
-          # Windows code signing (scripts/windows-signing.sh): Azure Trusted Signing, else a PFX.
+          # Windows code signing (scripts/windows-signing.sh): Azure Artifact Signing, else a PFX.
           # Once configured, a signing failure fails the release; unconfigured, it warns.
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           WIN_SIGNING_ENDPOINT: ${{ vars.WIN_SIGNING_ENDPOINT }}
           WIN_SIGNING_ACCOUNT: ${{ vars.WIN_SIGNING_ACCOUNT }}
           WIN_SIGNING_PROFILE: ${{ vars.WIN_SIGNING_PROFILE }}

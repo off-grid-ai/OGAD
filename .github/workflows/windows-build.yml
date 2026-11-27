@@ -82,6 +82,10 @@ permissions:
 jobs:
   build-win:
     if: ${{ github.event_name == 'push' || inputs.platform == 'both' || inputs.platform == 'windows' }}
+    environment: windows-signing # its OIDC subject is what Azure trusts for code signing
+    permissions:
+      contents: read
+      id-token: write
     # windows-2022 = VS 2022 toolchain. windows-latest ships VS 2026 (VS 18),
     # which node-gyp 11 can't parse — breaking native-module (better-sqlite3,
     # node-llama-cpp) compiles. Pin until node-gyp catches up.
@@ -188,14 +192,19 @@ jobs:
       - name: Build (typecheck + bundle)
         run: npm run build
 
+      - name: Sign in to Azure for Windows code signing
+        # GitHub's OIDC token, trusted by the signing app's federated credential: no client secret.
+        if: ${{ vars.WIN_SIGNING_PROFILE != '' }}
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
       - name: Package Windows web installer and payload
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Windows code signing, the same as the release (scripts/windows-signing.sh).
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           WIN_SIGNING_ENDPOINT: ${{ vars.WIN_SIGNING_ENDPOINT }}
           WIN_SIGNING_ACCOUNT: ${{ vars.WIN_SIGNING_ACCOUNT }}
           WIN_SIGNING_PROFILE: ${{ vars.WIN_SIGNING_PROFILE }}
