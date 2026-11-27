@@ -156,7 +156,7 @@ export function ConversationTitleActions({
               size="icon-xs"
               aria-label={`Conversation actions for ${displayTitle}`}
               onClick={(event) => event.stopPropagation()}
-              className="opacity-0 transition-all group-hover:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
+              className="opacity-50 transition-all group-hover:opacity-100 group-data-[active=true]:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
             />
           }
         >
