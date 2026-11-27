@@ -1,6 +1,12 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { commitClick, commitKey } from '../browser-commit-gate'
+import {
+  commitClick,
+  commitKey,
+  commitKeyPress,
+  FOCUSED_SUBMIT_SCRIPT,
+  type CommitKeySession
+} from '../browser-commit-gate'
 import { SECRET_MASK, scrubSecretValues } from '../browser-secret-scrub'
 import { browserShortcut } from '../browser-shortcuts'
 import { chromeUserAgent } from '../browser-user-agent'
@@ -19,7 +25,14 @@ describe('send, pay and delete ask first', () => {
     '- button "Confirm booking" [ref=e7]',
     '- button "Submit application" [ref=f2e9]',
     '- button "Reply all" [ref=e8]',
-    '- button "Cancel subscription" [ref=e9]'
+    '- button "Cancel subscription" [ref=e9]',
+    '- button "Delete file" [ref=e10]',
+    '- button "Send message" [ref=e11]',
+    '- button "Pay $20" [ref=e12]',
+    '- button "Place order" [ref=e13]',
+    '- button "Place an order" [ref=e14]',
+    '- menuitem "Delete selected files" [ref=e15]',
+    '- button "Send a message to our support team about your order" [ref=e16]'
   ])('gates %s', (line) => {
     expect(commitClick(line)).not.toBeNull()
   })
@@ -33,7 +46,9 @@ describe('send, pay and delete ask first', () => {
     '- textbox "Send to" [ref=e6]',
     '- checkbox "Delete after reading" [ref=e7]',
     '- button "Next" [ref=e8]',
-    '- button "Send a message to our support team about your order" [ref=e9]'
+    '- link "Postcode lookup" [ref=e9]',
+    '- link "Pay-as-you-go plans" [ref=e10]',
+    '- link "Send money abroad with the lowest fees this year" [ref=e11]'
   ])('lets %s through', (line) => {
     expect(commitClick(line)).toBeNull()
   })
@@ -47,6 +62,67 @@ describe('send, pay and delete ask first', () => {
     expect(commitKey('Control+Enter')).toBe(true)
     expect(commitKey('Meta+Enter')).toBe(true)
     expect(commitKey('Enter')).toBe(false)
+  })
+})
+
+describe('a key press that would commit asks first', () => {
+  /** A page whose focus the key check reads in the page, as Playwright MCP prints the result. */
+  function page(focus: { focused: string | null; submit: string | null } | null): {
+    session: CommitKeySession
+    reads: string[]
+  } {
+    const reads: string[] = []
+    return {
+      reads,
+      session: {
+        call: async (name, args) => {
+          reads.push(name)
+          if (name !== 'browser_evaluate' || args.function !== FOCUSED_SUBMIT_SCRIPT || !focus) {
+            return { text: 'Error: page scripts are not available', isError: true }
+          }
+          return { text: `### Result\n${JSON.stringify(JSON.stringify(focus))}`, isError: false }
+        }
+      }
+    }
+  }
+
+  it('asks before Enter submits a form whose default button places the order', async () => {
+    const { session } = page({
+      focused: '- textbox "Card number"',
+      submit: '- button "Place order"'
+    })
+    expect(await commitKeyPress(session, 'Enter', '')).toBe('Place order')
+    expect(await commitKeyPress(session, 'Shift+Enter', '')).toBe('Place order')
+  })
+
+  it('asks before Enter or Space activates a focused commit button', async () => {
+    const { session } = page({ focused: '- button "Send"', submit: null })
+    expect(await commitKeyPress(session, 'Enter', '')).toBe('Send')
+    expect(await commitKeyPress(session, 'Space', '')).toBe('Send')
+  })
+
+  it('lets Enter run an ordinary search', async () => {
+    const { session } = page({ focused: '- searchbox "Search"', submit: '- button "Search"' })
+    expect(await commitKeyPress(session, 'Enter', '')).toBeNull()
+    const bare = page({ focused: '- textbox "Search"', submit: null })
+    expect(await commitKeyPress(bare.session, 'Enter', '')).toBeNull()
+  })
+
+  it('does not read the page for keys that cannot commit', async () => {
+    const { session, reads } = page({ focused: '- button "Send"', submit: null })
+    expect(await commitKeyPress(session, 'Tab', '')).toBeNull()
+    expect(await commitKeyPress(session, 'Control+a', '')).toBeNull()
+    expect(await commitKeyPress(session, 'Control+Enter', '')).toBe('Send')
+    expect(reads).toEqual([])
+  })
+
+  it('falls back to the focused element in the snapshot when the page cannot run scripts', async () => {
+    const { session } = page(null)
+    const snapshot = '- textbox "To" [ref=e1]\n- button "Send" [active] [ref=e2]'
+    expect(await commitKeyPress(session, 'Enter', snapshot)).toBe('Send')
+    expect(
+      await commitKeyPress(session, 'Enter', '- textbox "Search" [active] [ref=e1]')
+    ).toBeNull()
   })
 })
 
