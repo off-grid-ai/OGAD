@@ -55,6 +55,14 @@ export const ANSWER_IN_CHAT = [
   'how do i make sourdough bread',
   'compare these two laptops for me',
   'give me ideas for a birthday party',
+  // Reading what is attached, and requests that rule the web out
+  'extract the text from the attached image',
+  'read the handwriting in this photo',
+  'transcribe the text in this picture',
+  'what does this screenshot say',
+  'do not use the web',
+  'do not attempt to access the internet',
+  'answer without searching online',
   'hi',
   'hello, how are you',
   'thanks, that helps',
@@ -90,6 +98,16 @@ export const TOOL_INTENT_EXAMPLES: Readonly<Record<string, readonly string[]>> =
     'make a thumbnail image for my youtube video',
     'turn this into a picture: a castle on a cliff at night',
     'make a meme image of a surprised cat'
+  ],
+  read_url: [
+    'read https://example.com/post and summarise it',
+    'what does this article say https://news.example.com/story',
+    'summarise this link',
+    'open this url and tell me the main points',
+    'fetch the page at example.org/pricing',
+    'fetch the text of https://example.org',
+    'open this link and tell me what it says',
+    'read the supplied web addresses and compare them'
   ],
   web_use: [
     'book a table on opentable for tonight',
