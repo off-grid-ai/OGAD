@@ -12,7 +12,8 @@
       "win-cudart": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
       "win-vulkan": "4a0732dd3b68ea1d7346fde885253a315c0c5eb7279da897d936892e0f709108",
       "win-cpu": "fdf78a3924fe92ccfb24af58544a6dccbc1feeb0587e77fca9ec3bef6737086c"
-    }
+    },
+    "minApp": "0.0.60"
   },
   "prism": {
     "repo": "PrismML-Eng/llama.cpp",
@@ -24,7 +25,8 @@
       "win-cuda": "14969ae6831abfc836295e8f4b8e09e686a063b559a8c974412001d9f5ce4f7f",
       "win-vulkan": "ec1479514a34272c815b3d194046d27003867aa9c95069d9cd3031b5c31e01ff",
       "win-cpu": "a6e41db401ce93a28f4a2ed20fb7809455302231dd37037c9f1b4505d33fe00b"
-    }
+    },
+    "minApp": "0.0.60"
   },
   "sd": {
     "repo": "leejet/stable-diffusion.cpp",
