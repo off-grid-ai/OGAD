@@ -88,7 +88,15 @@ def login_required(view):
 
 
 def safe_next(nxt):
-    return nxt if nxt and nxt.startswith("/") and not nxt.startswith("//") else "/"
+    """A page of this site to go to after signing in, rebuilt from its route; "/" for anything else."""
+    if not nxt or not nxt.startswith("/") or nxt.startswith("//"):
+        return "/"
+    path, _, query = nxt.partition("?")
+    try:
+        endpoint, args = app.url_map.bind("localhost").match(path, method="GET")
+    except Exception:
+        return "/"
+    return url_for(endpoint, **args) + ("?" + query if query else "")
 
 
 # Pending sign-ins waiting for their emailed code, kept on the server (never in the cookie).
@@ -324,7 +332,7 @@ def shop_routes():
             elif action == "save" and pid not in S["saved"]:
                 S["saved"].append(pid)
                 flash(f"Saved {p['name']} for later.")
-            return redirect(request.path)
+            return redirect(url_for(request.endpoint, **(request.view_args or {})))
         return page(p["name"], """
 <div class="card"><p><b>{{ money(p.price) }}</b> · ★ {{ p.rating }} from {{ p.reviews }} reviews · {{ p.category }}</p>
 <p>{% if p.stock %}In stock ({{ p.stock }} left){% else %}<b>Out of stock</b>{% endif %}</p>
@@ -591,7 +599,7 @@ def air_routes():
             elif action == "cancel":
                 b["status"] = "Cancelled"
                 flash(f"Booking {ref} cancelled. Refund of {money(b['paid'])} to Sandbox Visa ending 4242 within 7 days.")
-            return redirect(request.path)
+            return redirect(url_for(request.endpoint, **(request.view_args or {})))
         same_day = flights_for(f["from"], f["to"], f["date"])
         rows = "ABCDEF"
         return page(f"Booking {ref}", """

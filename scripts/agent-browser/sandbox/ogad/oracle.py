@@ -61,10 +61,21 @@ SCRIPTS = {
         ("button", r"^Submit order$", "click", None, None),
     ], r'"custname": "Alex Rivera"'),
 }
-SIGN_IN = re.compile(r'^\s*- button "(Sign in|Log in|Login|Log In)" .*\[ref=([^\]]+)\]', re.M)
+SIGN_IN = re.compile(r'^[ \t]*- button "(Sign in|Log in|Login|Log In)" (?:[^\[\n]|\[(?!ref=))*\[ref=([^\]\n]+)\]', re.M)
 # The harness filled the emailed code (masked like a password): submit it.
-CODE_FILLED = re.compile(r'textbox "[^"]*(?:[Cc]ode|OTP)[^"]*".*: "?••••••••')
-VERIFY = re.compile(r'^\s*- button "(Verify|Continue|Submit)" .*\[ref=([^\]]+)\]', re.M)
+TEXTBOX = re.compile(r'textbox "([^"\n]*)"([^\n]*)')
+CODE_WORD = re.compile(r"[Cc]ode|OTP")
+MASKED = re.compile(r': "?••••••••')
+MASKED = re.compile(r': "?••••••••')
+
+
+def code_filled(ax):
+    """A code box (its name says code or OTP) the harness filled: its value is masked."""
+    return any(
+        CODE_WORD.search(m.group(1)) and MASKED.search(m.group(2))
+        for m in TEXTBOX.finditer(ax)
+    )
+VERIFY = re.compile(r'^[ \t]*- button "(Verify|Continue|Submit)" (?:[^\[\n]|\[(?!ref=))*\[ref=([^\]\n]+)\]', re.M)
 cursor: dict[str, int] = {}
 
 
@@ -84,14 +95,14 @@ def find(ax, role, name, after):
         start = m.start()
     lines = ax[start:].splitlines()
     for i, line in enumerate(lines):
-        m = re.match(r'^\s*- (\w+) "((?:[^"\\]|\\.)*)".*\[ref=([^\]]+)\]', line)
+        m = re.match(r'^[ \t]*- (\w+) "((?:[^"\\]|\\.)*)"(?:[^\[\n]|\[(?!ref=))*\[ref=([^\]]+)\]', line)
         if m and re.fullmatch(role, m.group(1)) and re.search(name, m.group(2)):
             return m.group(3)
         # Unnamed clickable box around a text child (Nextcloud's calendar events): click the box.
         t = re.match(r'^(\s*)- \w+: (.*)$', line)
         if t and "generic" in role and re.search(name, t.group(2)):
             for up in reversed(lines[:i]):
-                u = re.match(r'^(\s*)- .*\[ref=([^\]]+)\] \[cursor=pointer\]', up)
+                u = re.match(r'^([ \t]*)- (?:[^\[\n]|\[(?!ref=))*\[ref=([^\]]+)\] \[cursor=pointer\]', up)
                 if u and len(u.group(1)) < len(t.group(1)):
                     return u.group(2)
     return None
@@ -118,7 +129,7 @@ def reply(role, text):
     if m and re.search(r'textbox "[^"]*[Pp]assword', ax):
         return f"click({m.group(2)})"
     v = VERIFY.search(ax)
-    if v and CODE_FILLED.search(ax):
+    if v and code_filled(ax):
         return f"click({v.group(2)})"
     i = cursor.get(key, 0)
     for j in range(i, len(steps)):
