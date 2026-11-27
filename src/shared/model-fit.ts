@@ -5,6 +5,7 @@ export {
   FIT_SOFT_FRAC,
   FIT_CEIL_FRAC,
   fitTier,
+  catalogFitTier,
   fitLevel,
   fitLabel,
   isLoadableOnDevice,

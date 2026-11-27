@@ -288,7 +288,7 @@ export async function estimateModelFit(modelId: string): Promise<FitEstimate> {
       (entry?.files.reduce((s: number, f: { sizeBytes?: number }) => s + (f.sizeBytes ?? 0), 0) ??
         0) / 1e9
     if (!weightsGb) return { level: 'ok', ramGb: gb, weightsGb: 0, message: '' }
-    const level: FitEstimate['level'] = fitLevel(weightsGb, gb)
+    const level: FitEstimate['level'] = fitLevel(weightsGb, gb, undefined, entry?.minRamGb)
     return { level, ramGb: gb, weightsGb, message: fitMessage(level, weightsGb, gb) }
   } catch {
     return { level: 'ok', ramGb: gb, weightsGb: 0, message: '' }
