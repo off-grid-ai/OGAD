@@ -1230,6 +1230,7 @@ const offGridApi = {
   crmAhead: (nowSec?: number) => ipcRenderer.invoke('crm:ahead', nowSec),
   crmCalendar: (startSec: number, endSec: number) =>
     ipcRenderer.invoke('crm:calendar', startSec, endSec),
+  crmCalendarSources: () => ipcRenderer.invoke('crm:calendar-sources'),
   crmEventPrep: (title: string, attendees: string[], emails: string[] = []) =>
     ipcRenderer.invoke('crm:event-prep', title, attendees, emails),
   crmDayPlan: (nowSec?: number) => ipcRenderer.invoke('crm:day-plan', nowSec),
