@@ -525,6 +525,7 @@ jobs:
           MS_STORE_SELLER_ID: ${{ secrets.MS_STORE_SELLER_ID }}
           MS_STORE_PRODUCT_ID: ${{ secrets.MS_STORE_PRODUCT_ID }}
           MS_STORE_BETA_FLIGHT_ID: ${{ secrets.MS_STORE_BETA_FLIGHT_ID }}
+          MS_STORE_BETA_GROUP_ID: ${{ vars.MS_STORE_BETA_GROUP_ID }}
         run: |
           msstore reconfigure --tenantId "$MS_STORE_TENANT_ID" --sellerId "$MS_STORE_SELLER_ID" \
             --clientId "$MS_STORE_CLIENT_ID" --clientSecret "$MS_STORE_CLIENT_SECRET"
@@ -548,15 +549,25 @@ jobs:
               flight=$(curl -sf "${auth[@]}" "$api/listflights" \
                 | jq -r '.value[] | select(.friendlyName == "Beta") | .flightId' | head -1)
             fi
-            [ -n "$flight" ] || { echo "::warning::No package flight named Beta: the beta MSIX stays an artifact."; exit 0; }
-            # msstore cannot upload into a flight draft that was started in Partner Center. A flight
-            # submission holds only packages, so a draft that was never committed is replaced by this one.
-            pending=$(curl -sf "${auth[@]}" "$api/flights/$flight" | jq -r '.pendingFlightSubmission.id // empty')
+            if [ -z "$flight" ]; then
+              # Created through the API, the flight and its drafts stay ones msstore can upload into.
+              # A flight made in Partner Center starts with a Partner Center draft, which the API can
+              # neither upload into nor delete.
+              [ -n "$MS_STORE_BETA_GROUP_ID" ] || { echo "::error::No Beta package flight, and MS_STORE_BETA_GROUP_ID is not set to create one."; exit 1; }
+              flight=$(curl -sS --fail-with-body "${auth[@]}" -H "Content-Type: application/json" -X POST "$api/flights" \
+                -d "$(jq -n --arg g "$MS_STORE_BETA_GROUP_ID" '{friendlyName: "Beta", groupIds: [$g], rankHigherThan: "Non-flighted submission"}')" \
+                | jq -r .flightId)
+              echo "Created the Beta package flight $flight."
+            fi
+            # A draft left uncommitted (a failed earlier upload) is replaced by this one: a flight
+            # submission holds only packages.
+            pending=$(curl -sS --fail-with-body "${auth[@]}" "$api/flights/$flight" | jq -r '.pendingFlightSubmission.id // empty')
             if [ -n "$pending" ]; then
-              status=$(curl -sf "${auth[@]}" "$api/flights/$flight/submissions/$pending" | jq -r .status)
+              status=$(curl -sS --fail-with-body "${auth[@]}" "$api/flights/$flight/submissions/$pending" | jq -r .status)
               if [ "$status" = PendingCommit ]; then
                 echo "Replacing the uncommitted Beta flight draft $pending."
-                curl -sf -X DELETE "${auth[@]}" "$api/flights/$flight/submissions/$pending"
+                curl -sS --fail-with-body -X DELETE "${auth[@]}" "$api/flights/$flight/submissions/$pending" || {
+                  echo "::error::The Store API would not delete Beta draft $pending. A draft started in Partner Center must be deleted there."; exit 1; }
               fi
             fi
             msstore publish store-upload/off-grid-ai.msix -id "$MS_STORE_PRODUCT_ID" -f "$flight" -v
