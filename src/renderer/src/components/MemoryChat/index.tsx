@@ -1086,16 +1086,18 @@ export function MemoryChat({
   const generatingRef = useRef<Set<string>>(new Set())
   const [generatingConvs, setGeneratingConvs] = useState<Set<string>>(new Set())
   const restTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closedRef = useRef(false)
   // Closing the chat mid-rest settles the assistant now, rather than from a timer that outlives it.
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    closedRef.current = false
+    return () => {
+      closedRef.current = true
       if (!restTimerRef.current) return
       clearTimeout(restTimerRef.current)
       restTimerRef.current = null
       announceAssistantActivity('idle')
-    },
-    []
-  )
+    }
+  }, [])
   const [replySound] = useReplySound()
   const replySoundRef = useRef(replySound)
   replySoundRef.current = replySound
@@ -1107,7 +1109,9 @@ export function MemoryChat({
       const arrived = generatingRef.current.has(cid) && !cancelledRef.current.has(cid)
       if (arrived && replySoundRef.current) playChime()
       announceAssistantActivity('done')
-      restTimerRef.current = setTimeout(() => announceAssistantActivity('idle'), 900)
+      // A reply that lands after the chat closed settles now: nothing is left to clear a timer.
+      if (closedRef.current) announceAssistantActivity('idle')
+      else restTimerRef.current = setTimeout(() => announceAssistantActivity('idle'), 900)
     }
     if (on) generatingRef.current.add(cid)
     else generatingRef.current.delete(cid)
