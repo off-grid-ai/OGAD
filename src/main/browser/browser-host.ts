@@ -55,7 +55,11 @@ import { attachPageMenu } from './browser-page-input'
 import { browserShortcut, type BrowserShortcut } from './browser-shortcuts'
 import { fillVaultLogin, hasLoginForm, vaultStateFor } from './browser-vault-fill'
 import { emailedCodeNote, fillEmailedCode, readCodeField } from './browser-emailed-code'
-import { READ_PASSWORD_VALUES_SCRIPT, scrubSecretValues } from './browser-secret-scrub'
+import {
+  READ_PASSWORD_VALUES_SCRIPT,
+  scrubSecretValues,
+  TRACK_PASSWORD_FIELDS_SCRIPT
+} from './browser-secret-scrub'
 import {
   sandboxAllows,
   sandboxPartition,
@@ -95,7 +99,7 @@ import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { retryPlanningGoal, TASK_RETRY_TRACE } from '../tasks/task-retry'
 import { runBrowserVisualTask, withActiveBrowserVision } from './browser-visual-task'
 import { createBrowserSemanticEvidenceRecorder } from './browser-semantic-evidence'
-import { BrowserJourneyRunOwners } from './browser-run-owners'
+import { BrowserJourneyRunOwners, type BrowserJourneyRunOwner } from './browser-run-owners'
 import { ElectronPlaywrightRelay } from './electron-playwright-relay'
 import { PlaywrightMcpSession } from './playwright-mcp-session'
 import { runBrowserPlaywrightTask } from './browser-playwright-task'
@@ -456,7 +460,9 @@ class BrowserHost implements BrowserRailHost {
       sessionId: rootSessionId,
       kind: 'task',
       journeyId,
-      task
+      task,
+      // A retried sandbox journey stays in its fenced profile.
+      ...(record.chrome.profileId ? { profileId: record.chrome.profileId } : {})
     })
   }
 
@@ -727,6 +733,16 @@ class BrowserHost implements BrowserRailHost {
       })
     })
     contents.on('audio-state-changed', () => this.refreshSession(record.sessionId))
+    // A task's pages remember their password fields from the start, so a password the person
+    // types during a take over stays masked after the site shows it as text.
+    const trackPasswordFields = (): void => {
+      if (!record.journeyId || contents.isDestroyed()) return
+      for (const frame of contents.mainFrame.framesInSubtree) {
+        void frame.executeJavaScript(TRACK_PASSWORD_FIELDS_SCRIPT).catch(() => undefined)
+      }
+    }
+    contents.on('dom-ready', trackPasswordFields)
+    contents.on('did-frame-finish-load', trackPasswordFields)
     // window.close() from the page (a finished sign-in popup) ends its tab.
     contents.once('destroyed', () => {
       if (this.sessions.get(record.sessionId)?.resource !== record.resource) return
@@ -1639,7 +1655,9 @@ class BrowserHost implements BrowserRailHost {
             },
             onObservation: recordSemanticEvidence,
             autofill,
-            sandboxProfile: Boolean(profile),
+            // The page the task drives decides, not the request: a journey whose pages are in
+            // the person's own partition keeps the send, pay and delete gate.
+            sandboxProfile: journeyRunsInSandbox(this.sessions.journeyRecords(journeyId)),
             signal: owner.controller.signal
           }
           const webUse = getWebUseSettings()
@@ -1808,13 +1826,35 @@ class BrowserHost implements BrowserRailHost {
           .taskTrail(taskId)
           .map((visit) => ({ url: visit.url, title: visit.title, at: visit.visitedAt }))
       }
-      this.filledSecrets.delete(journeyId)
-      this.autofillTried.delete(journeyId)
       releaseGuidance()
-      this.runOwners.release(owner)
+      // A replaced run leaves the newer run's filled secrets and sign-in attempts alone.
+      releaseJourneyRun(this.runOwners, owner, () => {
+        this.filledSecrets.delete(journeyId)
+        this.autofillTried.delete(journeyId)
+      })
       releaseSession()
     }
   }
+}
+
+/**
+ * A task skips the send, pay and delete question only when every page it drives lives in a
+ * sandbox test profile, read from the pages themselves (the profile the fence enforces).
+ */
+export function journeyRunsInSandbox(
+  pages: readonly { chrome: { profileId?: string } }[]
+): boolean {
+  return pages.length > 0 && pages.every((page) => Boolean(sandboxProfile(page.chrome.profileId)))
+}
+
+/** Ends a run's hold on its journey; the journey's state is cleared only by its current run. */
+export function releaseJourneyRun(
+  owners: BrowserJourneyRunOwners,
+  owner: BrowserJourneyRunOwner,
+  clearJourneyState: () => void
+): void {
+  if (owners.isCurrent(owner)) clearJourneyState()
+  owners.release(owner)
 }
 
 let host: BrowserHost | null = null
